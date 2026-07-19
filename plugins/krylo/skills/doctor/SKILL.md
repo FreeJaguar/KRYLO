@@ -9,21 +9,24 @@ model: haiku
 
 # KRYLO Doctor
 
-Run a read-only diagnostic.
+Run the deterministic diagnostic and present its findings — do not improvise your own checks first:
 
-Report:
+```text
+node "${CLAUDE_PLUGIN_ROOT}/scripts/setup/doctor.mjs" --json
+```
 
-- KRYLO and Claude Code versions.
-- Plugin source and scope.
-- Skill, agent, hook, and status-line discovery.
-- User configuration.
-- Supported and configured models.
-- Runtime storage and retention.
-- Alias ownership.
-- Optional adapters and authentication state.
-- Tool trust and reviewed-version status.
-- Conflicting orchestration frameworks or hooks.
-- Missing prerequisites.
-- Exact remediation steps.
+Present, from the returned JSON:
+
+- KRYLO, Node, Git, and Claude Code versions.
+- Skill, agent, and hook discovery (hooksHealthy and any missing scripts).
+- Runtime storage health, run count, pointer validity.
+- User configuration keys (values only for non-sensitive enums, exactly as the report provides).
+- Optional adapters detected (git, gh, supabase, vercel) and their versions.
+- Tool trust summary: records, tiers, pending reviews, blocked entries.
+- Alias ownership state (absent, krylo-owned, foreign).
+- Conflicting orchestration frameworks (report-only).
+- Every problem with its severity and exact remediation step.
+
+With `--verbose` in `$ARGUMENTS`, also show the raw JSON. Exit status 1 from the script means a critical problem exists — highlight it first.
 
 Do not install, update, delete, authenticate, or modify settings during doctor mode.
