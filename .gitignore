@@ -1,0 +1,13 @@
+# Local Claude Code state
+.claude/agent-memory/
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local test artifacts
+.tmp/
+*.log
