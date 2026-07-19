@@ -1,0 +1,144 @@
+# KRYLO Architecture
+
+## Architectural style
+
+KRYLO is a thin orchestration plugin with a Markdown control plane and a small deterministic Node.js runtime. Language models perform interpretation, planning, implementation, and review. Scripts perform state management, policy enforcement, validation, redaction, status rendering, and bounded-loop decisions.
+
+## High-level flow
+
+```mermaid
+flowchart TD
+    U[User invokes /krylo:run] --> G[Goal compiler]
+    G --> L[Lane and risk classifier]
+    L --> C[Focused context pack]
+    C --> P[Internal plan]
+    P --> A[Minimal agent team]
+    A --> I[Implementation]
+    I --> V[Deterministic verification]
+    V --> R[Independent review]
+    R --> O{All criteria proven?}
+    O -- No --> D[KRYLO Orbit delta]
+    D --> A
+    O -- Yes --> E[Evidence bundle]
+    E --> F[Final report]
+```
+
+## Component boundaries
+
+### Plugin interface
+
+Owns:
+
+- Skills and command behavior.
+- Agent definitions.
+- Hooks and monitors.
+- User configuration schema.
+- Optional status-line integration.
+- Marketplace metadata.
+
+Does not own:
+
+- The user's source repository.
+- Production credentials.
+- External service accounts.
+- Third-party plugin lifecycle.
+
+### Runtime core
+
+Owns:
+
+- Run state.
+- Checkpoints.
+- Orbit counters.
+- Failure fingerprints.
+- Risk and question tokens.
+- Evidence metadata.
+- Local telemetry aggregation.
+- Redaction and retention.
+
+Runtime state must be written under `${CLAUDE_PLUGIN_DATA}` or an equivalent persistent plugin data directory, never inside `${CLAUDE_PLUGIN_ROOT}` and never in the application repository by default.
+
+### Repository instruction boundary
+
+The root `CLAUDE.md` is a compact repository operating index capped at 130 lines. It points to authoritative product, architecture, security, workflow, and release documents through progressive references. It governs contributors and Claude Code while modifying the KRYLO source repository, is not installed into user projects, and is not an end-user runtime policy file.
+
+### Markdown control plane
+
+Owns:
+
+- Operating principles.
+- Lane policy.
+- Risk policy.
+- Agent prompts.
+- Completion contract.
+- Tool-governance policy.
+- Final-report format.
+
+It must remain concise enough to avoid unnecessary context cost. Detailed policies are split into references loaded only when needed.
+
+### External adapters
+
+Adapters are detection and policy modules, not required dependencies. They describe how KRYLO may use a tool when it is already installed, authenticated, relevant, and allowed by the active security profile.
+
+## Public repository layout
+
+```text
+krylo/
+|-- .claude-plugin/
+|   `-- marketplace.json
+|-- CLAUDE.md
+|-- plugins/
+|   `-- krylo/
+|       |-- .claude-plugin/plugin.json
+|       |-- skills/
+|       |-- agents/
+|       |-- hooks/hooks.json
+|       |-- monitors/monitors.json          # optional and experimental
+|       |-- scripts/
+|       |-- references/
+|       |-- schemas/
+|       |-- adapters/
+|       |-- catalog/
+|       |-- policies/
+|       |-- tests/
+|       |-- evals/
+|       |-- settings.json                   # subagentStatusLine only if used
+|       |-- README.md
+|       `-- LICENSE
+|-- docs/
+|-- .github/workflows/
+|-- README.md
+|-- SECURITY.md
+|-- THREAT_MODEL.md
+|-- CONTRIBUTING.md
+|-- CHANGELOG.md
+`-- LICENSE
+```
+
+## Data flow
+
+```mermaid
+flowchart LR
+    P[User prompt] --> M[Main Claude session]
+    M --> S[Local run-state metadata]
+    M --> AG[Subagents]
+    AG --> M
+    M --> T[Project tools]
+    T --> M
+    S --> ST[Status renderer]
+    S --> FR[Final report]
+    EXT[Optional external adapters] -. policy-gated .-> M
+```
+
+The raw user prompt remains in the Claude conversation and is not copied into KRYLO telemetry. Persisted metadata contains only a short normalized goal, identifiers, statuses, counts, hashes, and evidence references.
+
+## Trust boundaries
+
+1. Claude conversation context.
+2. Application repository.
+3. Local plugin runtime data.
+4. External tools and MCP servers.
+5. Production systems.
+6. Public marketplace and supply chain.
+
+Each boundary has separate controls described in `SECURITY.md`, `THREAT_MODEL.md`, and `docs/09-tool-governance.md`.
