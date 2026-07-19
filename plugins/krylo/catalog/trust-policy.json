@@ -1,0 +1,45 @@
+{
+  "$comment": "Trust-tier semantics and default behavior. Machine-readable form of docs/09-tool-governance.md.",
+  "tiers": {
+    "A": {
+      "meaning": "Official source and relatively narrow attack surface",
+      "defaultBehavior": "use-when-relevant"
+    },
+    "A-": {
+      "meaning": "Recommended with minimal scopes, read-only mode, or network restrictions",
+      "defaultBehavior": "use-under-policy"
+    },
+    "B+": {
+      "meaning": "Useful but requires exact reviewed version and isolation",
+      "defaultBehavior": "explicit-approval-or-reviewed-allowlist"
+    },
+    "B": {
+      "meaning": "Development-only or narrow use",
+      "defaultBehavior": "no-automatic-use"
+    },
+    "C": {
+      "meaning": "Research or selected ideas only",
+      "defaultBehavior": "disabled"
+    },
+    "Blocked": {
+      "meaning": "Vulnerable, unverified, or too broad",
+      "defaultBehavior": "refuse"
+    }
+  },
+  "rules": {
+    "unlistedTool": "treat-as-unreviewed",
+    "unreviewedTool": "no-automatic-use",
+    "unreviewedVersion": "no-automatic-use",
+    "blockedVersion": "refuse",
+    "reReviewTriggers": [
+      "version-or-commit-change",
+      "publisher-change",
+      "hooks-added",
+      "mcp-tools-changed",
+      "install-scripts-changed",
+      "postinstall-added",
+      "new-network-destinations",
+      "scope-or-credential-expansion"
+    ]
+  }
+}

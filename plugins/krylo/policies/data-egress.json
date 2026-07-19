@@ -1,0 +1,30 @@
+{
+  "$comment": "KRYLO data-egress policy. Machine-readable form of docs/10-data-egress.md. An undeclared data flow is denied.",
+  "dataClasses": ["public", "internal", "confidential", "restricted", "secret"],
+  "egressCategories": [
+    "sourceCode",
+    "prompts",
+    "logs",
+    "repositoryMetadata",
+    "testOutput",
+    "personalData",
+    "productionData"
+  ],
+  "rules": {
+    "defaultDecision": "deny",
+    "undeclaredFlow": "deny",
+    "secretEgress": "never",
+    "promptEgress": "never-by-krylo",
+    "personalDataEgress": "requires-explicit-approval",
+    "productionDataEgress": "requires-explicit-approval"
+  },
+  "secretsMustNotBeStoredIn": [
+    "krylo-prompts",
+    "krylo-telemetry",
+    "repository-markdown",
+    "tool-catalog-records",
+    "screenshots",
+    "github-issues",
+    "plugin-manifests"
+  ]
+}
