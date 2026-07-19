@@ -1,0 +1,108 @@
+// Redaction helpers used before anything is persisted or printed.
+//
+// KRYLO must never persist or display raw secrets, credentials, or the
+// user's home directory path. These functions apply a fixed set of masking
+// rules and are intentionally conservative (they may over-mask benign long
+// tokens rather than risk under-masking a secret).
+
+const MASK = '[REDACTED]';
+
+function maskPem(s) {
+  return s.replace(/-----BEGIN [^-]+-----[\s\S]*?-----END [^-]+-----/g, MASK);
+}
+
+function maskGithubTokens(s) {
+  return s.replace(/\b(?:ghp|gho|github_pat)_[A-Za-z0-9_]{20,}\b/g, MASK);
+}
+
+function maskSlackTokens(s) {
+  return s.replace(/\bxox[a-z]-[A-Za-z0-9-]+\b/g, MASK);
+}
+
+function maskJwt(s) {
+  return s.replace(/\b[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, MASK);
+}
+
+function maskBearer(s) {
+  return s.replace(/\bBearer\s+[A-Za-z0-9\-._~+/]+=*/gi, `Bearer ${MASK}`);
+}
+
+function maskUrlCredentials(s) {
+  return s.replace(
+    /([a-zA-Z][a-zA-Z0-9+.-]*):\/\/[^/\s:@]+:[^/\s@]+@/g,
+    (_m, scheme) => `${scheme}://${MASK}@`,
+  );
+}
+
+function maskKeyValueSecrets(s) {
+  return s.replace(
+    /\b(password|passwd|secret|token|api[_-]?key)\s*=\s*("[^"]*"|'[^']*'|[^\s&"']+)/gi,
+    (_m, key) => `${key}=${MASK}`,
+  );
+}
+
+function maskAwsAccessKey(s) {
+  return s.replace(/\bAKIA[0-9A-Z]{16}\b/g, MASK);
+}
+
+function maskSkKeys(s) {
+  return s.replace(/\bsk-[A-Za-z0-9_-]{16,}\b/g, MASK);
+}
+
+function maskHomeDir(s) {
+  let out = s.replace(/[A-Za-z]:\\Users\\[^\\/\s"']+/g, '~');
+  out = out.replace(/\/(?:home|Users)\/[^/\s"']+/g, '~');
+  return out;
+}
+
+// Long hex/base64 runs are the last, most generic pass so that anything
+// already replaced by a more specific rule (and now reading "[REDACTED]")
+// is not re-matched, and so specific token shapes get their dedicated marker.
+function maskLongOpaqueRuns(s) {
+  return s
+    .replace(/\b[A-Fa-f0-9]{32,}\b/g, MASK)
+    .replace(/\b[A-Za-z0-9+/]{32,}={0,2}\b/g, MASK);
+}
+
+/**
+ * Redact secrets, tokens, credentials, and home-directory paths from a string.
+ * Non-string input is returned unchanged.
+ */
+export function redactText(input) {
+  if (typeof input !== 'string') return input;
+  let out = input;
+  out = maskPem(out);
+  out = maskGithubTokens(out);
+  out = maskSlackTokens(out);
+  out = maskJwt(out);
+  out = maskBearer(out);
+  out = maskUrlCredentials(out);
+  out = maskKeyValueSecrets(out);
+  out = maskAwsAccessKey(out);
+  out = maskSkKeys(out);
+  out = maskHomeDir(out);
+  out = maskLongOpaqueRuns(out);
+  return out;
+}
+
+/** Redact then truncate a string to at most `max` characters. */
+export function redactAndTruncate(input, max) {
+  const redacted = redactText(input);
+  if (typeof redacted !== 'string') return redacted;
+  if (typeof max !== 'number' || !Number.isFinite(max) || max < 0) return redacted;
+  return redacted.length > max ? redacted.slice(0, max) : redacted;
+}
+
+/** Recursively redact every string value in an object/array, preserving shape. */
+export function deepRedact(value) {
+  if (typeof value === 'string') return redactText(value);
+  if (Array.isArray(value)) return value.map(deepRedact);
+  if (value && typeof value === 'object') {
+    const result = {};
+    for (const [key, v] of Object.entries(value)) {
+      result[key] = deepRedact(v);
+    }
+    return result;
+  }
+  return value;
+}

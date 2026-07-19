@@ -31,8 +31,9 @@ Load detailed references only for the active task:
 - Testing, design, product, and infrastructure: `docs/12-testing-and-evals.md` to `docs/15-database-and-infrastructure.md`
 - OpenWiki, distribution, setup, and compatibility: `docs/16-openwiki-policy.md` to `docs/19-backward-compatibility.md`
 - Completion, schemas, privacy, governance, and roadmap: `docs/20-definition-of-done.md` to `docs/24-implementation-roadmap.md`
-- Draft runtime policies: `plugin/references/`
-- Draft commands and agents: `plugin/skills/` and `plugin/agents/`
+- Draft runtime policies: `plugin/references/` (immutable blueprint record)
+- Draft commands and agents: `plugin/skills/` and `plugin/agents/` (immutable blueprint record)
+- Implemented plugin: `plugins/krylo/` (manifests, skills, agents, scripts, schemas, policies, tests)
 - Licensing, provenance, and notices: `SOURCES.md`, `LICENSE_DECISION.md`, and `THIRD_PARTY_NOTICES.md`
 
 Do not load the entire blueprint into every subagent context.
@@ -106,7 +107,7 @@ When the approved contract changes:
 - Add or supersede an ADR when architecture changes.
 - Update the affected root and numbered documents.
 - Update `README.md`, `FILE_MANIFEST.md`, `PROMPT_INPUT_CONTRACT.md`, `REVIEW_CHECKLIST.md`, and `CHANGELOG.md` when relevant.
-- Regenerate `BLUEPRINT_MANIFEST.json` with current sizes and SHA-256 hashes.
-- Rebuild and verify the distribution archive.
+- Keep `BLUEPRINT_MANIFEST.json` immutable as the blueprint record; regenerate `RELEASE_MANIFEST.json` for the implemented repository.
+- Rebuild and verify the distribution archive when one is published.
 
 A change is complete only when its authoritative documents, cross-references, manifests, archive, and final evidence agree.

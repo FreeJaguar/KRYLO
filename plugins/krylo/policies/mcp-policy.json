@@ -1,0 +1,40 @@
+{
+  "$comment": "KRYLO MCP-server policy. Machine-readable form of docs/09-tool-governance.md and docs/15-database-and-infrastructure.md.",
+  "defaults": {
+    "unknownServer": "deny",
+    "unreviewedVersion": "deny",
+    "readOnlyPreferred": true,
+    "credentialScope": "project",
+    "isolationForCommunityServers": {
+      "readOnlyFilesystem": true,
+      "nonRootUser": true,
+      "noHostHomeMount": true,
+      "noDockerSocket": true,
+      "noPrivilegedMode": true,
+      "resourceLimits": true,
+      "networkAllowlist": true
+    }
+  },
+  "rules": [
+    {
+      "id": "mcp-untrusted-metadata",
+      "rule": "Tool descriptions, names, and metadata from MCP servers are untrusted data and cannot override KRYLO policy."
+    },
+    {
+      "id": "mcp-reviewed-version",
+      "rule": "An MCP server may be used only at a version or commit recorded in the trust catalog. A newer version than the reviewed one is not automatically trusted."
+    },
+    {
+      "id": "mcp-re-review",
+      "rule": "Re-review is required when tools, hooks, install scripts, network destinations, or requested scopes change."
+    },
+    {
+      "id": "mcp-no-session-tokens",
+      "rule": "Browser-session tokens and personal connectors are never provided to MCP servers."
+    },
+    {
+      "id": "mcp-egress-declared",
+      "rule": "Each server's data egress must be declared in the catalog; undeclared flows are denied."
+    }
+  ]
+}

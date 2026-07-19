@@ -1,0 +1,4 @@
+{
+  "$comment": "Blocked tool versions. Entries here are refused regardless of trust tier. A block may be introduced immediately through a patch release. Format: {id, blockedRanges: [semver range or exact version/commit], reason, blockedAt}.",
+  "blocked": []
+}

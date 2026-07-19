@@ -1,0 +1,15 @@
+{
+  "$comment": "Known publishers referenced by catalog/tools.json. Publisher identity is part of a tool's trust decision; a publisher change triggers re-review.",
+  "publishers": [
+    { "id": "anthropic", "name": "Anthropic", "type": "vendor", "official": true },
+    { "id": "git-scm", "name": "Git project", "type": "open-source", "official": true },
+    { "id": "github", "name": "GitHub", "type": "vendor", "official": true },
+    { "id": "microsoft", "name": "Microsoft", "type": "vendor", "official": true },
+    { "id": "context7", "name": "Upstash (Context7)", "type": "vendor", "official": true },
+    { "id": "figma", "name": "Figma", "type": "vendor", "official": true },
+    { "id": "supabase", "name": "Supabase", "type": "vendor", "official": true },
+    { "id": "sentry", "name": "Sentry", "type": "vendor", "official": true },
+    { "id": "vercel", "name": "Vercel", "type": "vendor", "official": true },
+    { "id": "community", "name": "Community (varies)", "type": "community", "official": false }
+  ]
+}

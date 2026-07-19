@@ -1,0 +1,39 @@
+name: actions-security
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/**", ".github/dependabot.yml"]
+  pull_request:
+    paths: [".github/workflows/**", ".github/dependabot.yml"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: actsec-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Audit workflows with zizmor (pinned, offline)
+        run: pipx run zizmor==1.27.0 --offline --min-severity medium .github/workflows/
+
+  pin-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Fail on any non-SHA action reference
+        run: |
+          bad=$(grep -RhoE '^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*[^@ ]+@[^ ]+' .github/workflows | grep -vE '@[0-9a-f]{40}( |$|#)' || true)
+          if [ -n "$bad" ]; then
+            echo "Unpinned action references found:"; echo "$bad"; exit 1
+          fi
+          echo "All action references are pinned to full commit SHAs."

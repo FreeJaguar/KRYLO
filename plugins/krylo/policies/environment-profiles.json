@@ -1,0 +1,38 @@
+{
+  "$comment": "KRYLO environment (security) profiles. The active profile is selected through plugin userConfig key security_profile. Markdown intent: docs/10-data-egress.md.",
+  "defaultProfile": "local-only",
+  "profiles": {
+    "local-only": {
+      "description": "No external code context, no external MCP servers, no production access, local-only telemetry.",
+      "externalCodeContext": false,
+      "externalMcpServers": false,
+      "productionAccess": "none",
+      "externalWrites": false,
+      "allowedEgress": []
+    },
+    "private-approved": {
+      "description": "External access limited to approved providers; official or reviewed integrations only; production read-only when explicitly configured.",
+      "externalCodeContext": true,
+      "externalMcpServers": true,
+      "productionAccess": "read-only-when-configured",
+      "externalWrites": false,
+      "allowedEgress": ["repositoryMetadata", "testOutput"]
+    },
+    "public-repository": {
+      "description": "External code context allowed when relevant; official and reviewed integrations allowed; no automatic production access.",
+      "externalCodeContext": true,
+      "externalMcpServers": true,
+      "productionAccess": "none",
+      "externalWrites": false,
+      "allowedEgress": ["sourceCode", "repositoryMetadata", "testOutput", "logs"]
+    },
+    "production-read-only": {
+      "description": "Allowlisted integrations only, read-only credentials, no external writes, no secret retrieval.",
+      "externalCodeContext": false,
+      "externalMcpServers": true,
+      "productionAccess": "read-only",
+      "externalWrites": false,
+      "allowedEgress": ["repositoryMetadata"]
+    }
+  }
+}

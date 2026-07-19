@@ -1,0 +1,35 @@
+name: validate-plugin
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Install pinned Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code@2.1.197
+      - name: Validate plugin manifest (strict)
+        run: claude plugin validate --strict plugins/krylo
+      - name: Validate marketplace manifest (strict)
+        run: claude plugin validate --strict .
+      - name: Enforce CLAUDE.md line budget
+        run: |
+          lines=$(wc -l < CLAUDE.md)
+          echo "CLAUDE.md lines: $lines"
+          test "$lines" -le 130

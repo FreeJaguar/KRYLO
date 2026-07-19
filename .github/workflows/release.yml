@@ -1,0 +1,70 @@
+name: release
+
+# Releases are approval-gated: this workflow runs only on manual dispatch
+# by a maintainer, never automatically (SECURITY.md, docs/17).
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag (for example v0.1.0). Must match plugin.json version."
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Install pinned Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code@2.1.197
+      - name: Validate plugin and marketplace (strict)
+        run: |
+          claude plugin validate --strict plugins/krylo
+          claude plugin validate --strict .
+      - name: Run tests
+        run: npm test
+      - name: Check tag matches plugin version
+        env:
+          TAG: ${{ github.event.inputs.tag }}
+        run: |
+          v=$(node -p "JSON.parse(require('fs').readFileSync('plugins/krylo/.claude-plugin/plugin.json','utf8')).version")
+          test "v$v" = "$TAG"
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Build release archive and checksums
+        env:
+          TAG: ${{ github.event.inputs.tag }}
+        run: |
+          git archive --format=zip --output "krylo-$TAG.zip" HEAD
+          sha256sum "krylo-$TAG.zip" > "krylo-$TAG.zip.sha256"
+      - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: krylo-${{ github.event.inputs.tag }}.zip
+      - name: Create GitHub release (draft)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.inputs.tag }}
+        run: |
+          gh release create "$TAG" \
+            --draft \
+            --title "KRYLO $TAG" \
+            --notes "See CHANGELOG.md." \
+            "krylo-$TAG.zip" "krylo-$TAG.zip.sha256"

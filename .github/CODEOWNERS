@@ -1,0 +1,24 @@
+# KRYLO code ownership (docs/23-versioning-and-governance.md).
+# Replace @OWNER with the real maintainer account or team before the first
+# public push (tracked in docs/templates/release-checklist.md).
+
+# Default owner
+* @OWNER
+
+# Security-sensitive areas require the security maintainer
+/plugins/krylo/hooks/ @OWNER
+/plugins/krylo/scripts/security/ @OWNER
+/plugins/krylo/scripts/orbit/ @OWNER
+/plugins/krylo/catalog/ @OWNER
+/plugins/krylo/policies/ @OWNER
+/.github/workflows/ @OWNER
+/SECURITY.md @OWNER
+/THREAT_MODEL.md @OWNER
+
+# Public contracts require the core maintainer
+/plugins/krylo/.claude-plugin/ @OWNER
+/.claude-plugin/ @OWNER
+/plugins/krylo/schemas/ @OWNER
+/plugins/krylo/skills/ @OWNER
+/plugins/krylo/agents/ @OWNER
+/docs/adr/ @OWNER
