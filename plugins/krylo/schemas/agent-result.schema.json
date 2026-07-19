@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://krylo.dev/schemas/agent-result.schema.json",
+  "title": "KRYLO Agent Result",
+  "description": "Structured result every KRYLO agent must return.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "status",
+    "summary",
+    "evidence",
+    "filesInspected",
+    "filesModified",
+    "commandsExecutedSummary",
+    "findings",
+    "risks",
+    "unresolvedItems",
+    "recommendedNextAction"
+  ],
+  "properties": {
+    "status": {
+      "type": "string",
+      "enum": ["success", "partial", "failed", "blocked"]
+    },
+    "summary": { "type": "string", "maxLength": 1000 },
+    "evidence": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 300 }
+    },
+    "filesInspected": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "filesModified": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "commandsExecutedSummary": {
+      "type": "array",
+      "description": "Human-readable command summaries without secrets or full argument values.",
+      "items": { "type": "string", "maxLength": 200 }
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["severity", "summary"],
+        "properties": {
+          "severity": { "type": "string", "enum": ["critical", "high", "medium", "low", "info"] },
+          "summary": { "type": "string", "maxLength": 500 },
+          "confidence": { "type": "string", "enum": ["confirmed", "likely", "theoretical"] },
+          "location": { "type": "string", "maxLength": 200 },
+          "remediation": { "type": "string", "maxLength": 500 }
+        }
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 300 }
+    },
+    "unresolvedItems": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 300 }
+    },
+    "recommendedNextAction": { "type": "string", "maxLength": 300 }
+  }
+}

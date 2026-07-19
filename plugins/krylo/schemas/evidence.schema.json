@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://krylo.dev/schemas/evidence.schema.json",
+  "title": "KRYLO Evidence Record",
+  "description": "One evidence record. Contains a safe summary only: no secrets, raw commands, or full tool output.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "type", "label", "timestamp", "sourceTool", "result", "summary", "stale"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^EV-\\d{1,4}$" },
+    "type": {
+      "type": "string",
+      "enum": [
+        "test",
+        "build",
+        "lint",
+        "types",
+        "format",
+        "migration",
+        "runtime",
+        "browser",
+        "screenshot",
+        "performance",
+        "security-scan",
+        "review",
+        "diff-inspection",
+        "command",
+        "other"
+      ]
+    },
+    "label": { "type": "string", "maxLength": 120 },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "sourceTool": { "type": "string", "maxLength": 60 },
+    "result": { "type": "string", "enum": ["pass", "fail", "partial", "blocked", "info"] },
+    "summary": {
+      "type": "string",
+      "description": "Redacted, human-readable outcome summary. For example: '42 tests passed, 0 failed'.",
+      "maxLength": 300
+    },
+    "artifactPath": {
+      "type": ["string", "null"],
+      "description": "Optional path to a stored artifact under plugin runtime data."
+    },
+    "stale": {
+      "type": "boolean",
+      "description": "True when the repository changed after this evidence was captured."
+    },
+    "criterionRefs": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

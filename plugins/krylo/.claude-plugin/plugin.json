@@ -1,0 +1,66 @@
+{
+  "name": "krylo",
+  "displayName": "KRYLO",
+  "version": "0.1.0",
+  "description": "Autonomous, evidence-driven software-development workflow. One explicit command turns a task into a controlled run: acceptance criteria, minimal agent team, deterministic verification, independent review, bounded Orbit loop, and an evidence-backed final report.",
+  "author": {
+    "name": "KRYLO Maintainers"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "autonomous-development",
+    "workflow",
+    "orchestration",
+    "verification",
+    "code-review",
+    "security"
+  ],
+  "userConfig": {
+    "language": {
+      "type": "string",
+      "title": "Report language",
+      "description": "Final-report language: auto, en, or he.",
+      "default": "auto"
+    },
+    "autonomy_level": {
+      "type": "string",
+      "title": "Autonomy level",
+      "description": "How much KRYLO decides alone: safe, standard, or high.",
+      "default": "standard"
+    },
+    "max_orbit_cycles": {
+      "type": "number",
+      "title": "Maximum Orbit cycles",
+      "description": "Upper bound for Orbit correction cycles in one run. KRYLO may reduce this value but never exceeds the platform-safe maximum.",
+      "default": 7,
+      "min": 1,
+      "max": 10
+    },
+    "status_detail": {
+      "type": "string",
+      "title": "Status detail",
+      "description": "Status-line verbosity: minimal, normal, or detailed.",
+      "default": "normal"
+    },
+    "local_telemetry": {
+      "type": "boolean",
+      "title": "Local telemetry",
+      "description": "Persist local-only run metadata (never sent anywhere). Disable to keep no run history.",
+      "default": true
+    },
+    "telemetry_retention_days": {
+      "type": "number",
+      "title": "Telemetry retention (days)",
+      "description": "How long local run metadata is kept before cleanup.",
+      "default": 14,
+      "min": 1,
+      "max": 90
+    },
+    "security_profile": {
+      "type": "string",
+      "title": "Security profile",
+      "description": "Active data-egress profile: local-only, private-approved, public-repository, or production-read-only.",
+      "default": "local-only"
+    }
+  }
+}

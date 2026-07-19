@@ -1,0 +1,92 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://krylo.dev/schemas/tool-record.schema.json",
+  "title": "KRYLO Tool Trust Record",
+  "description": "One governed tool identity in the KRYLO trust catalog.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "category", "publisher", "sourceType", "source", "trustTier", "reviewedVersion", "lastReviewDate", "installationPolicy"],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]{1,63}$" },
+    "category": {
+      "type": "string",
+      "enum": [
+        "claude-plugin",
+        "skill",
+        "mcp-server",
+        "lsp-server",
+        "browser-tool",
+        "design-tool",
+        "database-tool",
+        "infrastructure-tool",
+        "security-tool",
+        "observability-tool",
+        "documentation-tool",
+        "orchestration-framework",
+        "cli",
+        "package"
+      ]
+    },
+    "publisher": { "type": "string", "maxLength": 120 },
+    "sourceType": { "type": "string", "enum": ["official", "github", "npm", "pypi", "container", "local", "other"] },
+    "source": { "type": "string", "maxLength": 300 },
+    "trustTier": { "type": "string", "enum": ["A", "A-", "B+", "B", "C", "Blocked"] },
+    "reviewedVersion": {
+      "type": "string",
+      "description": "Exact version or commit that was reviewed. A newer version is not automatically trusted.",
+      "maxLength": 120
+    },
+    "blockedRanges": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 120 }
+    },
+    "lastReviewDate": { "type": "string", "format": "date" },
+    "reviewer": { "type": "string", "maxLength": 120 },
+    "installationPolicy": {
+      "type": "string",
+      "enum": ["preinstalled-only", "user-approved", "recommended-after-audit", "never"]
+    },
+    "capabilities": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 60 }
+    },
+    "networkBehavior": {
+      "type": "string",
+      "enum": ["none", "local-only", "declared-endpoints", "broad", "unknown"]
+    },
+    "secretAccess": {
+      "type": "string",
+      "enum": ["none", "scoped", "broad", "unknown"]
+    },
+    "productionAccess": {
+      "type": "string",
+      "enum": ["none", "read-only", "gated-write", "unknown"]
+    },
+    "dataEgress": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sourceCode": { "type": "boolean" },
+        "prompts": { "type": "boolean" },
+        "logs": { "type": "boolean" },
+        "repositoryMetadata": { "type": "boolean" },
+        "testOutput": { "type": "boolean" },
+        "personalData": { "type": "boolean" },
+        "productionData": { "type": "boolean" }
+      },
+      "description": "Declared data flows. An undeclared flow is denied."
+    },
+    "allowedProfiles": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["local-only", "private-approved", "public-repository", "production-read-only"]
+      }
+    },
+    "reReviewTriggers": {
+      "type": "array",
+      "items": { "type": "string", "maxLength": 200 }
+    },
+    "notes": { "type": "string", "maxLength": 1000 }
+  }
+}
