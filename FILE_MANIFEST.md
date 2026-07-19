@@ -1,33 +1,38 @@
-# Planned File Manifest
+# File Manifest
 
-This manifest defines the target repository files that the implementation prompt must create. Markdown files included in this blueprint are marked as drafted. Non-Markdown files are implementation work.
+Originally the planned target manifest of the blueprint (preserved verbatim in the baseline commit). Updated at implementation time to record the delivered 0.1.0 repository. Deltas from the plan are marked; per-file hashes live in `RELEASE_MANIFEST.json`.
 
 ## Marketplace root
 
 ```text
-.claude-plugin/marketplace.json             # implement
-CLAUDE.md                                   # drafted, compact index, <=130 lines
-README.md                                   # drafted
-CHANGELOG.md                                # drafted
-CONTRIBUTING.md                             # drafted
-CODE_OF_CONDUCT.md                          # drafted
-SECURITY.md                                 # drafted
-THREAT_MODEL.md                             # drafted
-LICENSE                                     # implement from LICENSE_DECISION.md
+.claude-plugin/marketplace.json             # implemented
+CLAUDE.md                                   # compact index, 113 lines (<=130)
+README.md                                   # implemented (public repository readme)
+CHANGELOG.md                                # implemented (0.1.0 entry)
+CONTRIBUTING.md                             # as drafted
+CODE_OF_CONDUCT.md                          # as drafted
+SECURITY.md                                 # as drafted
+THREAT_MODEL.md                             # as drafted
+LICENSE                                     # implemented, Apache-2.0 canonical text
+package.json / package-lock.json            # implemented (zero dependencies, node:test)
+RELEASE_READINESS.md                        # implemented (progress + evidence record)
+RELEASE_MANIFEST.json                       # implemented (per-file SHA-256 of the release tree)
+BLUEPRINT_MANIFEST.json                     # immutable blueprint record (unchanged)
+plugin/                                     # immutable blueprint drafts (unchanged)
 ```
 
 ## Plugin root
 
 ```text
-plugins/krylo/.claude-plugin/plugin.json    # implement
-plugins/krylo/settings.json                 # implement, optional subagentStatusLine only
-plugins/krylo/hooks/hooks.json              # implement
-plugins/krylo/monitors/monitors.json        # optional, implement only if justified
-plugins/krylo/README.md                     # derive from blueprint
-plugins/krylo/LICENSE                       # implement
+plugins/krylo/.claude-plugin/plugin.json    # implemented, with userConfig
+plugins/krylo/hooks/hooks.json              # implemented (6 events)
+plugins/krylo/settings.json                 # NOT shipped in 0.1.0 (ADR-0016)
+plugins/krylo/monitors/monitors.json        # NOT shipped (optional; not needed, docs/07)
+plugins/krylo/README.md                     # implemented
+plugins/krylo/LICENSE                       # implemented
 ```
 
-## Skills
+## Skills (five, wired to deterministic runtime scripts)
 
 ```text
 plugins/krylo/skills/run/SKILL.md
@@ -37,34 +42,28 @@ plugins/krylo/skills/audit-tool/SKILL.md
 plugins/krylo/skills/status/SKILL.md
 ```
 
-All five drafts are included under `plugin/skills/` in this blueprint.
-
-## Agents
+## Agents (twelve; only Builder holds Write/Edit)
 
 ```text
-plugins/krylo/agents/scout.md
-plugins/krylo/agents/builder.md
-plugins/krylo/agents/verifier.md
-plugins/krylo/agents/reviewer.md
-plugins/krylo/agents/security-reviewer.md
-plugins/krylo/agents/architect.md
-plugins/krylo/agents/design-reviewer.md
-plugins/krylo/agents/product-strategist.md
-plugins/krylo/agents/migration-reviewer.md
-plugins/krylo/agents/ai-eval-engineer.md
-plugins/krylo/agents/performance-reviewer.md
-plugins/krylo/agents/deep-debugger.md
+plugins/krylo/agents/{scout,builder,verifier,reviewer,security-reviewer,architect,
+  design-reviewer,product-strategist,migration-reviewer,ai-eval-engineer,
+  performance-reviewer,deep-debugger}.md
 ```
 
-All agent drafts are included under `plugin/agents/`.
-
-## Runtime scripts
+## Runtime scripts (Node.js ESM, zero dependencies)
 
 ```text
+plugins/krylo/scripts/lib/paths.mjs          # + (delta) shared data-root and safe-path helpers
+plugins/krylo/scripts/lib/atomic.mjs         # + (delta) atomic JSON persistence
+plugins/krylo/scripts/lib/redact.mjs         # + (delta) redaction engine
+plugins/krylo/scripts/lib/state.mjs          # + (delta) state model, validator, completion gate
+plugins/krylo/scripts/lib/telemetry.mjs      # + (delta) whitelist local telemetry
+plugins/krylo/scripts/lib/hook-utils.mjs     # + (delta) hook stdin + active-run resolution
 plugins/krylo/scripts/runtime/init-run.mjs
 plugins/krylo/scripts/runtime/read-state.mjs
 plugins/krylo/scripts/runtime/update-state.mjs
 plugins/krylo/scripts/runtime/cleanup.mjs
+plugins/krylo/scripts/runtime/posttool-telemetry.mjs   # + (delta) PostToolUse hook entry
 plugins/krylo/scripts/orbit/stop-gate.mjs
 plugins/krylo/scripts/orbit/fingerprint.mjs
 plugins/krylo/scripts/orbit/stagnation.mjs
@@ -73,14 +72,13 @@ plugins/krylo/scripts/security/risk-gate.mjs
 plugins/krylo/scripts/security/redact.mjs
 plugins/krylo/scripts/status/subagent-statusline.mjs
 plugins/krylo/scripts/status/statusline-wrapper.mjs
+plugins/krylo/scripts/status/agent-events.mjs          # + (delta) SubagentStart/Stop hook entry
 plugins/krylo/scripts/setup/install-alias.mjs
 plugins/krylo/scripts/setup/remove-alias.mjs
 plugins/krylo/scripts/setup/doctor.mjs
 plugins/krylo/scripts/audit/audit-tool.mjs
 plugins/krylo/scripts/validation/validate-runtime.mjs
 ```
-
-These are intentionally not included yet.
 
 ## Schemas and policy data
 
@@ -99,11 +97,25 @@ plugins/krylo/policies/production-policy.json
 plugins/krylo/policies/mcp-policy.json
 ```
 
+## References and adapters
+
+```text
+plugins/krylo/references/*.md                # 13 policies from the approved drafts
+plugins/krylo/adapters/README.md
+plugins/krylo/adapters/{git-github,playwright,context7,figma,supabase-databases,
+  sentry,vercel,openwiki,superpowers}.md
+```
+
 ## Tests and evaluations
 
 ```text
-plugins/krylo/tests/**/*.test.mjs
-plugins/krylo/tests/fixtures/**
+plugins/krylo/tests/unit/*.test.mjs          # state, redact, atomic, telemetry, cli, cleanup, resume
+plugins/krylo/tests/platform/paths.test.mjs
+plugins/krylo/tests/hooks/*.test.mjs         # question-gate, risk-gate, stop-gate, fingerprint, posttool (+helpers.mjs)
+plugins/krylo/tests/security/injection.test.mjs
+plugins/krylo/tests/status/*.test.mjs        # statusline, agent-events, wrapper
+plugins/krylo/tests/setup/*.test.mjs         # alias, doctor
+plugins/krylo/tests/governance/*.test.mjs    # audit, policy-consistency, agents
 plugins/krylo/evals/evals.json
 plugins/krylo/evals/expected-behaviors.md
 ```
@@ -121,6 +133,7 @@ plugins/krylo/evals/expected-behaviors.md
 .github/workflows/sbom.yml
 .github/workflows/release.yml
 .github/dependabot.yml
-.github/CODEOWNERS
+.github/CODEOWNERS                           # @OWNER placeholder until first push
 .github/pull_request_template.md
+.github/ISSUE_TEMPLATE/*.md
 ```

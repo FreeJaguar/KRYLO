@@ -1,0 +1,1179 @@
+{
+  "name": "krylo-release",
+  "version": "0.1.0",
+  "generatedAt": "2026-07-19T10:38:40.112Z",
+  "note": "Per-file SHA-256 of the implemented 0.1.0 repository tree (git-tracked files at generation time, excluding this manifest). BLUEPRINT_MANIFEST.json remains the immutable record of blueprint 0.1.2 as delivered in the baseline commit.",
+  "fileCount": 234,
+  "files": [
+    {
+      "path": ".claude-plugin/marketplace.json",
+      "bytes": 734,
+      "sha256": "e3792d08151fefa0c4cefa80de4b6b73d8b87fd5586991f49adc210f4fcd75c2"
+    },
+    {
+      "path": ".gitattributes",
+      "bytes": 58,
+      "sha256": "9a5b3e8c93ebcd35a580f2c2cf3b51cad2f4e5c1514a6984f454f36b355dacd8"
+    },
+    {
+      "path": ".github/CODEOWNERS",
+      "bytes": 747,
+      "sha256": "6b7342d41424a197eb3c6cb97f60179317a55345cd3b6cdfdb1f245bac701940"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/bug_report.md",
+      "bytes": 467,
+      "sha256": "3c5c254ed84ac6c5982db9d165f11b3e197ecd6476f3ef6a8f7c77df298d09c9"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/feature_request.md",
+      "bytes": 369,
+      "sha256": "a7cbeace01d86dd775cf64d5413b0367739dfc0ed0d0513c1669f63b1eb7c738"
+    },
+    {
+      "path": ".github/ISSUE_TEMPLATE/tool_security_review.md",
+      "bytes": 481,
+      "sha256": "fdb11a530432dfe36fd1cc45952572d259450f9eca1b8bdcf70d442f9c7187e8"
+    },
+    {
+      "path": ".github/dependabot.yml",
+      "bytes": 248,
+      "sha256": "fb1b1a6ed4ae186fba80113d46b38a139645c58121f77edb5c32e5aa57e92c52"
+    },
+    {
+      "path": ".github/pull_request_template.md",
+      "bytes": 464,
+      "sha256": "0ad479a12f2d76782e67180fb4c2777708a4e6769cf628b14240d031d2903ea8"
+    },
+    {
+      "path": ".github/workflows/actions-security.yml",
+      "bytes": 1226,
+      "sha256": "d0029078165ebe0ac16f313d18be4ef368ffa4d616b37b7b1c52b815c605f0d5"
+    },
+    {
+      "path": ".github/workflows/codeql.yml",
+      "bytes": 720,
+      "sha256": "9ec00230f06dddf6d0fbed03a59b9c4b863cc1d92b27f4142f9843815b692279"
+    },
+    {
+      "path": ".github/workflows/dependency-security.yml",
+      "bytes": 894,
+      "sha256": "b1335fcac1e3b69aa9cda77b2f6705727b436e7494bb1f13e4a64b05e90227ba"
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "bytes": 2316,
+      "sha256": "531968a938d8ce967e4bacbbfc16c3284481c2dd88fb9ed6d9afeb31b1758d23"
+    },
+    {
+      "path": ".github/workflows/sbom.yml",
+      "bytes": 617,
+      "sha256": "96317781aa5b1a0ae1666d93784c0b6f0deba44f3e68fa316cbc0f3b5a696f80"
+    },
+    {
+      "path": ".github/workflows/secret-scan.yml",
+      "bytes": 586,
+      "sha256": "8b7574e28bc9d9a57b823b3dd9fff6519ea376fb668b0aa39c581189edbd6d96"
+    },
+    {
+      "path": ".github/workflows/semgrep.yml",
+      "bytes": 521,
+      "sha256": "bc765c8bdc35778b40081100820e4eaa3d7c48322dc774ca9e6f92f91ca891c7"
+    },
+    {
+      "path": ".github/workflows/test.yml",
+      "bytes": 841,
+      "sha256": "97fe301f270699db2f60bdb75530a6b626a5880f1ad300a1c547d239c1b2cc6a"
+    },
+    {
+      "path": ".github/workflows/validate-plugin.yml",
+      "bytes": 1001,
+      "sha256": "441c9f849a51d5c992dcb9fc6a3bc5aea9e6235b2ea2cc223a5499acba5f6aa5"
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 132,
+      "sha256": "5687caf6d6e96316925e18ac9da0e180145f2d4e908aa2c24439cc397248ad1e"
+    },
+    {
+      "path": "ARCHITECTURE.md",
+      "bytes": 4147,
+      "sha256": "26a93b1f575d4af9701f96f784e536a9523df5d03abcc6f2137b706ee7950536"
+    },
+    {
+      "path": "BLUEPRINT_MANIFEST.json",
+      "bytes": 17849,
+      "sha256": "5c9301a0c77abe06c9bedd6f87e364a2f6619f5c2c5ca74aacc67399a72a4b33"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "bytes": 2723,
+      "sha256": "33d974414cd408232f3a99231dd5d35b13fffe8a9fce31c4c5ed51258618570a"
+    },
+    {
+      "path": "CLAUDE.md",
+      "bytes": 6354,
+      "sha256": "648859d27c625d0c875b3d111950da8f850196f1805a25b2569c8054a85a637b"
+    },
+    {
+      "path": "CODE_OF_CONDUCT.md",
+      "bytes": 686,
+      "sha256": "079fe30abeea719d33be6dbad4ea6a4c0464eab65012dba26e732955424138ba"
+    },
+    {
+      "path": "CONTRIBUTING.md",
+      "bytes": 1579,
+      "sha256": "266aa5cff76693efd21b3ab3313491021c0139ab716ba032c92d17eae769ebab"
+    },
+    {
+      "path": "FILE_MANIFEST.md",
+      "bytes": 5845,
+      "sha256": "54828688f511fec60a701575800bbc35a783426498f671f7b2b4eec3bd169fb6"
+    },
+    {
+      "path": "IMPLEMENTATION_PLAN.md",
+      "bytes": 4652,
+      "sha256": "e65feab40e6ea1f6a9b514c38fdaabaef56fcff8d7a134dd567a0470c1bbaef0"
+    },
+    {
+      "path": "LICENSE",
+      "bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "LICENSE_DECISION.md",
+      "bytes": 645,
+      "sha256": "5d6e92596ee12a3cfad7ad4bcef11fc56c8fc25f11f5db3b209ebf2f3b57db8c"
+    },
+    {
+      "path": "PRODUCT_SPEC.md",
+      "bytes": 3167,
+      "sha256": "7c48866124fa289f73ead8b258c2f6edd59cca1f93980b0e019d258e4e09f804"
+    },
+    {
+      "path": "PROMPT_INPUT_CONTRACT.md",
+      "bytes": 2625,
+      "sha256": "4d6c2b156c7f39fb0aae7749493a4c0d41d00a709ce32423ca481de09faa4352"
+    },
+    {
+      "path": "README.md",
+      "bytes": 2770,
+      "sha256": "791c225487e8b5a3982c97b558769c98a71652a63b4a0d4b284c450a13b52d25"
+    },
+    {
+      "path": "RELEASE_READINESS.md",
+      "bytes": 9484,
+      "sha256": "17f9b352f6e2ab4ac894533edbcaa6f2b2cffcc2d694655ce923c64588f449e3"
+    },
+    {
+      "path": "REVIEW_CHECKLIST.md",
+      "bytes": 2929,
+      "sha256": "51db6a4e42c026b7e0e5a848abdf5bcf9f9d54370d7233d13c6e41318301229b"
+    },
+    {
+      "path": "SECURITY.md",
+      "bytes": 2487,
+      "sha256": "a7ecb2895db691ed54a88d0eff874c0fc80d0e367a7157b940eef18d37055a35"
+    },
+    {
+      "path": "SOURCES.md",
+      "bytes": 1310,
+      "sha256": "f43b925c4fb7e41343fdf3bcd718dbe81731d723474b22c4ca49b0e359ddc513"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "bytes": 927,
+      "sha256": "eab2aa014b70c61380bdaf0e96291b80bb0208401298ff7740a6b1c7bef3bae2"
+    },
+    {
+      "path": "THREAT_MODEL.md",
+      "bytes": 3499,
+      "sha256": "6dad2c5bec08159c8a4a2f93365dc1e42b97c8d9a7f07ea385c34ebb4fdcbf33"
+    },
+    {
+      "path": "docs/01-command-surface.md",
+      "bytes": 2136,
+      "sha256": "f151ebbb0d035b7678a96deda55c98308b94791664d5b6b541c10a790086c0d2"
+    },
+    {
+      "path": "docs/02-runtime-state-machine.md",
+      "bytes": 2294,
+      "sha256": "7c1fe51a363741dfa688d784d10465f81646a8ec3b0f548b6d1a006c55135828"
+    },
+    {
+      "path": "docs/03-orbit-loop.md",
+      "bytes": 1831,
+      "sha256": "a9f3e2d04f6e7bd4184d531c49fa8bab03ce207033b71261f8e08ee68cc7fa39"
+    },
+    {
+      "path": "docs/04-agent-system.md",
+      "bytes": 2340,
+      "sha256": "4fd216d6dc05e4b2dcea8a82a915282388fcb624a47c2e0423498857c04343d9"
+    },
+    {
+      "path": "docs/05-model-routing.md",
+      "bytes": 1806,
+      "sha256": "8450a35c8cbb74c5207eb742f88fb41c4970065b5e41032103bf39d6dc348377"
+    },
+    {
+      "path": "docs/06-context-management.md",
+      "bytes": 1387,
+      "sha256": "bd6475fdd90fd8604b31260276352e957b6a04e340df0761695c0f0ec00a67c8"
+    },
+    {
+      "path": "docs/07-hooks-and-observability.md",
+      "bytes": 1299,
+      "sha256": "f4a48f78beeb042d2c1d32683d38188a8ec90d2856f61d0097d27b4ab8e4145f"
+    },
+    {
+      "path": "docs/08-status-lines.md",
+      "bytes": 1441,
+      "sha256": "fe70921c0d1f0fdc03eb950fcaf91b0d608cb2a17e0fc52b09a39133527f194a"
+    },
+    {
+      "path": "docs/09-tool-governance.md",
+      "bytes": 1871,
+      "sha256": "c0ed5da0c7f7dca3376b1334d18481b9a9f120c2cfeaee31fa1927d745488816"
+    },
+    {
+      "path": "docs/10-data-egress.md",
+      "bytes": 1385,
+      "sha256": "9648ca08c6767571393321fc94c64256f7074e87a361e81b4462c2fa8e6c9a30"
+    },
+    {
+      "path": "docs/11-integration-adapters.md",
+      "bytes": 2064,
+      "sha256": "9d653200c6346713ef1ffdacb2b30a21131020e042d91b2be1017a3c526217ec"
+    },
+    {
+      "path": "docs/12-testing-and-evals.md",
+      "bytes": 1700,
+      "sha256": "3d768cde60636dd8091dc84cbc42274ec3c8ee1655075a8bfd4c0e1b03937370"
+    },
+    {
+      "path": "docs/13-design-quality.md",
+      "bytes": 1335,
+      "sha256": "8b882473f3d5c67343646e7090bf578de85f7f5617c448d34765e69eaa295ad7"
+    },
+    {
+      "path": "docs/14-product-quality.md",
+      "bytes": 1165,
+      "sha256": "8a4d322e4a1c1dd27f35f16ae41fb4ab6566638e04d5d325e075225554dc607e"
+    },
+    {
+      "path": "docs/15-database-and-infrastructure.md",
+      "bytes": 1200,
+      "sha256": "a5eda863573952eeb88a500ebe238132dddf8c23a54390190b4806bb031e21df"
+    },
+    {
+      "path": "docs/16-openwiki-policy.md",
+      "bytes": 976,
+      "sha256": "f2236be909573e2bac8b50579f674039a6c32401cc2c9319752f5de38004aaa8"
+    },
+    {
+      "path": "docs/17-distribution-and-release.md",
+      "bytes": 1147,
+      "sha256": "9e8136b74a337e0a93c7ceef758d3dc41e03eb049e2a2071aa92a32329407685"
+    },
+    {
+      "path": "docs/18-setup-and-alias.md",
+      "bytes": 1220,
+      "sha256": "0534f4635737821fc88d56322bc325ed01a476192a8f1c26c846a98571ab8865"
+    },
+    {
+      "path": "docs/19-backward-compatibility.md",
+      "bytes": 974,
+      "sha256": "0c4e936699c4a2c944fa9efc6564d5794c5dc9212bfeb3a3a29fd3856963ddad"
+    },
+    {
+      "path": "docs/20-definition-of-done.md",
+      "bytes": 1082,
+      "sha256": "28ad970a7f2bea38bf8f2413c7d1ae11aa9c2db088a322987220fe2d9da12ef0"
+    },
+    {
+      "path": "docs/21-public-api-and-schemas.md",
+      "bytes": 1046,
+      "sha256": "e500b3789fa0b59331d04e1c73e67d8e2f2df7bf4ed65614d3a11f3bb2756ed0"
+    },
+    {
+      "path": "docs/22-privacy-and-telemetry.md",
+      "bytes": 901,
+      "sha256": "bdd1d6ba737c50bbc03b5c8a7cda92773ff4242228a5ac11cd59d46514c3bae7"
+    },
+    {
+      "path": "docs/23-versioning-and-governance.md",
+      "bytes": 840,
+      "sha256": "69fff66beee1c7380d7ea23d1b3694d19ea0139cd331038d15e6158058410577"
+    },
+    {
+      "path": "docs/24-implementation-roadmap.md",
+      "bytes": 1001,
+      "sha256": "f2465131404594aafe5913141ff0caadbce4f466d3cf32201186914d2468774b"
+    },
+    {
+      "path": "docs/LICENSING.md",
+      "bytes": 838,
+      "sha256": "d1d7b84a1ffbdb825a49c3bb7c56ef81f076a7085e970d5c566b6b235780e361"
+    },
+    {
+      "path": "docs/MAINTAINERS.md",
+      "bytes": 947,
+      "sha256": "c721e3590728cc4ecc8821aac5a9e346a82432d1c1e9f959c5aa1571eb08a457"
+    },
+    {
+      "path": "docs/adr/0001-public-plugin-and-marketplace.md",
+      "bytes": 527,
+      "sha256": "c88b7fcb6c51d287ceeb9f18405d7a4947884fd05928a07d2cb42a4247315aec"
+    },
+    {
+      "path": "docs/adr/0002-namespaced-command-and-alias.md",
+      "bytes": 496,
+      "sha256": "c4987fc960eea58952580f2923c45d778bd99846af2b6efda60bd21b35c06790"
+    },
+    {
+      "path": "docs/adr/0003-zero-required-third-party-integrations.md",
+      "bytes": 508,
+      "sha256": "deb293e5c43e47d54d678a8eede89805fad43f5a21b0985b08743a3adb64d426"
+    },
+    {
+      "path": "docs/adr/0004-bounded-delta-orbit.md",
+      "bytes": 489,
+      "sha256": "f13adbe1d72a42ef0b93376fdf4e3e83435d9766b7f5a7f4cea79cf11634f64e"
+    },
+    {
+      "path": "docs/adr/0005-minimal-agent-team.md",
+      "bytes": 437,
+      "sha256": "259c83ac49f3cca67a0226363bcb6ebefaeb751f52edbf48d92838ebed05dabd"
+    },
+    {
+      "path": "docs/adr/0006-sonnet-haiku-opus-routing.md",
+      "bytes": 688,
+      "sha256": "4db9fe7a3176c6383d5ea810a557cb5650e6edc5bc169940eaedbd4741ef53e8"
+    },
+    {
+      "path": "docs/adr/0007-local-only-telemetry.md",
+      "bytes": 441,
+      "sha256": "7b825fcdd03ca794d569f60f3ecb9b9d7f9ad12df9099ad5508a1f7a64dd77f5"
+    },
+    {
+      "path": "docs/adr/0008-tool-trust-registry.md",
+      "bytes": 490,
+      "sha256": "4461ef6669dcefae9356831e50f79d010784db62edd34c9eb5689b63ab76572b"
+    },
+    {
+      "path": "docs/adr/0009-not-a-default-agent.md",
+      "bytes": 443,
+      "sha256": "772ce0f4563d018cc74db04f58e03054d7b980903ddb01448bd1f42bc75eae0f"
+    },
+    {
+      "path": "docs/adr/0010-openwiki-optional.md",
+      "bytes": 495,
+      "sha256": "164cf05da2c35089e388dfce1e3cbf34c39fcf1c971965c3b26b6313dda130c9"
+    },
+    {
+      "path": "docs/adr/0011-security-by-default.md",
+      "bytes": 482,
+      "sha256": "c6e5815f8c6555304498fb729227c25128676ed664ba6e379fec10b02638b1db"
+    },
+    {
+      "path": "docs/adr/0012-node-runtime.md",
+      "bytes": 506,
+      "sha256": "26011e3e7075f890eab2ae66dda42e4a303a8e5d7f4beb18a19a5cd8ae7ed999"
+    },
+    {
+      "path": "docs/adr/0013-no-silent-settings-mutation.md",
+      "bytes": 453,
+      "sha256": "53de1765ac5fec38b13ec2248a5385fe6cff6f767e0bfc2f66d03078363cf22b"
+    },
+    {
+      "path": "docs/adr/0014-one-writer-per-worktree.md",
+      "bytes": 414,
+      "sha256": "a58db63caf75b0be2de33e7fa61546604dcecf5098484a262326cd65520de3fd"
+    },
+    {
+      "path": "docs/adr/0015-user-config-for-preferences.md",
+      "bytes": 539,
+      "sha256": "46624fb084acc843237bf74d3852765dee75497ec6f8443c00bc0cab8929375d"
+    },
+    {
+      "path": "docs/adr/0016-subagent-statusline-deferred.md",
+      "bytes": 1178,
+      "sha256": "fc1eac1993cfdee40a3c2d9880138745aeb385a51e7705345c0063a435559698"
+    },
+    {
+      "path": "docs/adr/0017-handwritten-schema-validation.md",
+      "bytes": 1112,
+      "sha256": "7f01e82aaf85ba0b999383e25459b47342baac55c9f436e90572393c6ce79aa7"
+    },
+    {
+      "path": "docs/adr/README.md",
+      "bytes": 451,
+      "sha256": "8da79a6ef78e8f2cda90a7cc8e9109b5b4592cc68b2e42751b2b5b026de7a207"
+    },
+    {
+      "path": "docs/templates/adr-template.md",
+      "bytes": 320,
+      "sha256": "ffbd45d38370d5ffd03f78ff7c762ef5cbd69f85a8167d3ab300f06ae153fef5"
+    },
+    {
+      "path": "docs/templates/agent-result-template.md",
+      "bytes": 188,
+      "sha256": "358ce99fc3f8a4442e2c5e0d041a08bd40df998337f86007ce3b9688b6af14a7"
+    },
+    {
+      "path": "docs/templates/evidence-bundle-template.md",
+      "bytes": 583,
+      "sha256": "91d5fdc614c176ddece46e0a37627e7d3eb1e26aa32e168e01b0b8675d8efeca"
+    },
+    {
+      "path": "docs/templates/release-checklist.md",
+      "bytes": 610,
+      "sha256": "e103a5a87c6c6fa21d64868341b87a764fdaa393219b0a5021ee00a8eb70abac"
+    },
+    {
+      "path": "docs/templates/run-spec-template.md",
+      "bytes": 342,
+      "sha256": "1de5d6401510f157adf23456bee5668bc262a525d63f2531247d0d5fdaced598"
+    },
+    {
+      "path": "docs/templates/security-finding-template.md",
+      "bytes": 181,
+      "sha256": "9b5064e79bcd5726baad19197ece6462e95ad7dadc6b5aad1ab638adc4fc7cef"
+    },
+    {
+      "path": "docs/templates/tool-review-template.md",
+      "bytes": 435,
+      "sha256": "d21991ef2f991090ddaec23094675a8b422f56fafeaceea146be2e5cd9e49f74"
+    },
+    {
+      "path": "package-lock.json",
+      "bytes": 283,
+      "sha256": "560c5c5b92cb7a879dd1326fd1c6bef612efa69eb818c86deabcd0ddbdd6800a"
+    },
+    {
+      "path": "package.json",
+      "bytes": 914,
+      "sha256": "a47f640fe6738afdeb938e345fcac1791691185980c09b4ca11620f332eeb951"
+    },
+    {
+      "path": "plugin/README.md",
+      "bytes": 890,
+      "sha256": "55b161238340589792eecaab1d6ae7a15c7971c2e6bf9f82dcf50bf2a5c5c758"
+    },
+    {
+      "path": "plugin/adapters/README.md",
+      "bytes": 517,
+      "sha256": "868c7d8582176c5bf55b8fb9ded476f74c9236f4bcb25bcda0c944106f7ce456"
+    },
+    {
+      "path": "plugin/agents/README.md",
+      "bytes": 729,
+      "sha256": "9155ac6d49230b13da011ab285160d659ebb994ec9a6865494bb631f7f95e86e"
+    },
+    {
+      "path": "plugin/agents/ai-eval-engineer.md",
+      "bytes": 928,
+      "sha256": "6e38342a9b6ad8ba89fe7abad10383615e5a8d8fe8d385f717038fcaaa0d59d3"
+    },
+    {
+      "path": "plugin/agents/architect.md",
+      "bytes": 847,
+      "sha256": "b380f2b3830e6372d9d91953d7d8ec63facd129dc0c2ac52fe789dbfd2162f98"
+    },
+    {
+      "path": "plugin/agents/builder.md",
+      "bytes": 948,
+      "sha256": "b7cecfe4d7336cb0e9f9787d9683048ed0bd20fd5ef209f55ed8b86bdbc02da5"
+    },
+    {
+      "path": "plugin/agents/deep-debugger.md",
+      "bytes": 1013,
+      "sha256": "b0cf8f279f847894deb95656f79d2c967d187b0691dc4ebba77205192f3dda0c"
+    },
+    {
+      "path": "plugin/agents/design-reviewer.md",
+      "bytes": 938,
+      "sha256": "33071a1a68832f30405d8fa9f69e48fd10e55e9b002d6bf7020723492e7442ad"
+    },
+    {
+      "path": "plugin/agents/migration-reviewer.md",
+      "bytes": 794,
+      "sha256": "11ef2addaccfe3652013cddc0fe0e03cc380897ed719924474ccc4f2e4752622"
+    },
+    {
+      "path": "plugin/agents/performance-reviewer.md",
+      "bytes": 791,
+      "sha256": "25b8287b7693d2a1d4200444c227c06504229958b2e6782a73ceae4499140bcf"
+    },
+    {
+      "path": "plugin/agents/product-strategist.md",
+      "bytes": 855,
+      "sha256": "b4821fd0db42bd4cc0bbef370e452bdef3fa2d3f86dae192204cf89664643ba6"
+    },
+    {
+      "path": "plugin/agents/reviewer.md",
+      "bytes": 981,
+      "sha256": "e2ed3eb0d46bb903de15a9a5479de6372c3b69e290c32e43677e6de4664d005a"
+    },
+    {
+      "path": "plugin/agents/scout.md",
+      "bytes": 817,
+      "sha256": "619eb320041f0cdd39e9e09c2098231199fcf5bf3a0e79ec1f1c6e1e7ae626cc"
+    },
+    {
+      "path": "plugin/agents/security-reviewer.md",
+      "bytes": 978,
+      "sha256": "50d1bbb28571d94452c04be26d634fe60c3a243535f79df526a5e88aa098e5d1"
+    },
+    {
+      "path": "plugin/agents/verifier.md",
+      "bytes": 916,
+      "sha256": "bf8ce2c234b2536ef05b6e65177a72f09f41ec3c0ccdde625720a86d17d78abe"
+    },
+    {
+      "path": "plugin/catalog/README.md",
+      "bytes": 443,
+      "sha256": "f3bed80f9d946ec6b4f91ec30c9c3a11ef77fb3afe291fc1e9231478ab88d6f1"
+    },
+    {
+      "path": "plugin/evals/README.md",
+      "bytes": 469,
+      "sha256": "1ea07c745ff7bd4575ae20d6417a85a36d88816c0b97b8e985aadfb9db9c04ed"
+    },
+    {
+      "path": "plugin/evals/expected-behaviors.md",
+      "bytes": 1064,
+      "sha256": "eabee742de3063e64603ba918743900cd6a0fdca1b405b50c668369e5b622ab0"
+    },
+    {
+      "path": "plugin/policies/README.md",
+      "bytes": 310,
+      "sha256": "aa458d6f0fbccf8f60b68bfb4bfd973c5bfa35cf9a18ed65e21dee3204102be2"
+    },
+    {
+      "path": "plugin/references/adapter-policy.md",
+      "bytes": 588,
+      "sha256": "dfc0118728a7e1d4373a403b1500768d95f1bd69568096d4c8ce18b969861ad8"
+    },
+    {
+      "path": "plugin/references/completion-contract.md",
+      "bytes": 703,
+      "sha256": "fca9c24fe8cac35a12cf992b27414ca42b5bb14ab873c8e963e75654ddb2fd41"
+    },
+    {
+      "path": "plugin/references/design-policy.md",
+      "bytes": 574,
+      "sha256": "e68137280073efc6c89534b9462061aff2ea147ba8e7f6a768a046bcadd822b8"
+    },
+    {
+      "path": "plugin/references/final-report-template.md",
+      "bytes": 1003,
+      "sha256": "73dc031446a2dbdba305eacaff776da79adf73feece5ae3fd6325ab93eba8287"
+    },
+    {
+      "path": "plugin/references/lane-policy.md",
+      "bytes": 1333,
+      "sha256": "d8cf047be19cd584d5734f06537590fc3f89b963ccd620c6e27933dfb9482a5b"
+    },
+    {
+      "path": "plugin/references/operating-principles.md",
+      "bytes": 823,
+      "sha256": "0001ddab6fa13708adc99dd9f5ab695eb2fbf726361ecf6bc31baf59d3b59a09"
+    },
+    {
+      "path": "plugin/references/orbit-policy.md",
+      "bytes": 718,
+      "sha256": "dbbcbb43166ce6784f760c10d7dfb56de403b6210705faf1c90d55f29a17c9ec"
+    },
+    {
+      "path": "plugin/references/question-policy.md",
+      "bytes": 824,
+      "sha256": "274d52ff12496aa0eefae0cac642d048e52f286403eeb86000dd47325ffca901"
+    },
+    {
+      "path": "plugin/references/risk-policy.md",
+      "bytes": 1049,
+      "sha256": "c2f9a93badb863d9ba6f5d7adaa90edd82b500a6fdd41f6872b64fb6d6383508"
+    },
+    {
+      "path": "plugin/references/security-policy.md",
+      "bytes": 716,
+      "sha256": "b8f7070b0d1556ae377029015efc0f8d682f8933493ddca2093529bbee71b90c"
+    },
+    {
+      "path": "plugin/references/testing-policy.md",
+      "bytes": 838,
+      "sha256": "b402094442033c92fb1e6805513985d93b0861546129d4a87a43a4638fdd40fb"
+    },
+    {
+      "path": "plugin/references/tool-policy.md",
+      "bytes": 771,
+      "sha256": "8f4a354b1e19cf9a7469a683b157bcedff1fe143839ff13bf0964d27c9d1e3e7"
+    },
+    {
+      "path": "plugin/scripts/README.md",
+      "bytes": 558,
+      "sha256": "ae0dffe9bbf04e0bdffc0225b8308ee8d36655ad807bacdf28060fcb89614b21"
+    },
+    {
+      "path": "plugin/skills/README.md",
+      "bytes": 538,
+      "sha256": "cdff262924f564d351e20d232b9aeb67ec06bb1451990a6e91595af8c5c06238"
+    },
+    {
+      "path": "plugin/skills/audit-tool/SKILL.md",
+      "bytes": 1165,
+      "sha256": "c2bcf93577015a11e1539723b59dcdaa901acba37479cf5e337a019e814cba1e"
+    },
+    {
+      "path": "plugin/skills/doctor/SKILL.md",
+      "bytes": 886,
+      "sha256": "832fa34e575bae48b2e199b65788229b9fb4c4fad2cecc5951512dc8ef53056b"
+    },
+    {
+      "path": "plugin/skills/run/SKILL.md",
+      "bytes": 1760,
+      "sha256": "050214cdc94bdd685db35f91b690092785ca7fefd9f619e3de0cb8f435172a8b"
+    },
+    {
+      "path": "plugin/skills/setup/SKILL.md",
+      "bytes": 1108,
+      "sha256": "82295d23d4116337483aca4a91624e3c156d88541fa9e30e969f4b12de6df63c"
+    },
+    {
+      "path": "plugin/skills/status/SKILL.md",
+      "bytes": 730,
+      "sha256": "d53ed64deeaadf9b69cc46cfee42080afc161ede361ffca33484fc9c5e0c3909"
+    },
+    {
+      "path": "plugin/tests/README.md",
+      "bytes": 468,
+      "sha256": "6ddc1fb4c69b8ff0c872f8bb2f3225d262ff2b3847dc57fd9ca4612566eb0441"
+    },
+    {
+      "path": "plugins/krylo/.claude-plugin/plugin.json",
+      "bytes": 2157,
+      "sha256": "049a55e2ba232c3e0c7ae28213912e6cf29ba402b872153fb38fd47ef227fe00"
+    },
+    {
+      "path": "plugins/krylo/LICENSE",
+      "bytes": 11358,
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
+    },
+    {
+      "path": "plugins/krylo/README.md",
+      "bytes": 1909,
+      "sha256": "5b125ec9bdb6d7e606362e307ef36a5ee3ca7027f92dca95d4fccad8cdb45429"
+    },
+    {
+      "path": "plugins/krylo/adapters/README.md",
+      "bytes": 517,
+      "sha256": "868c7d8582176c5bf55b8fb9ded476f74c9236f4bcb25bcda0c944106f7ce456"
+    },
+    {
+      "path": "plugins/krylo/adapters/context7.md",
+      "bytes": 939,
+      "sha256": "8d5f2861c42abe2ae322775e58b4d498be1ad48318b1aa8047cbed77a7f9463e"
+    },
+    {
+      "path": "plugins/krylo/adapters/figma.md",
+      "bytes": 1031,
+      "sha256": "cbf15367e8e4d5fa3888f972e46cdbab79da205e7231d2fa1a274e89ed3b4c45"
+    },
+    {
+      "path": "plugins/krylo/adapters/git-github.md",
+      "bytes": 1359,
+      "sha256": "938b7d1cda469666310d2e7947aa0c0a38b0cbc28b2f670817f25e4da6eccb23"
+    },
+    {
+      "path": "plugins/krylo/adapters/openwiki.md",
+      "bytes": 1108,
+      "sha256": "9f7541568e6a6e6c136aa31637e4e976757fe567d4d16193727fab942fd3cd72"
+    },
+    {
+      "path": "plugins/krylo/adapters/playwright.md",
+      "bytes": 1271,
+      "sha256": "8262d003d70b0da138db6baa85bbae8c2a5d908c72f4b86383c0a1149d866769"
+    },
+    {
+      "path": "plugins/krylo/adapters/sentry.md",
+      "bytes": 990,
+      "sha256": "41e3692be74eedb403471fa7a5daf7241eb0b57454737c279df8ac5a8a1af914"
+    },
+    {
+      "path": "plugins/krylo/adapters/supabase-databases.md",
+      "bytes": 1378,
+      "sha256": "0178b76c2e6a8fec42d9037b7017cb00dd22e66d2f114926800b8a197ea49cdf"
+    },
+    {
+      "path": "plugins/krylo/adapters/superpowers.md",
+      "bytes": 1016,
+      "sha256": "2904c89e3d925bd04bfb5852686c10c2ea3d8ca36ebada5314541c56ca28e2b8"
+    },
+    {
+      "path": "plugins/krylo/adapters/vercel.md",
+      "bytes": 971,
+      "sha256": "c27378355ff5b45eddb972f687e1dc52b99cb5cfc4378e778688514ac99e38c2"
+    },
+    {
+      "path": "plugins/krylo/agents/ai-eval-engineer.md",
+      "bytes": 928,
+      "sha256": "6e38342a9b6ad8ba89fe7abad10383615e5a8d8fe8d385f717038fcaaa0d59d3"
+    },
+    {
+      "path": "plugins/krylo/agents/architect.md",
+      "bytes": 847,
+      "sha256": "b380f2b3830e6372d9d91953d7d8ec63facd129dc0c2ac52fe789dbfd2162f98"
+    },
+    {
+      "path": "plugins/krylo/agents/builder.md",
+      "bytes": 948,
+      "sha256": "b7cecfe4d7336cb0e9f9787d9683048ed0bd20fd5ef209f55ed8b86bdbc02da5"
+    },
+    {
+      "path": "plugins/krylo/agents/deep-debugger.md",
+      "bytes": 1013,
+      "sha256": "b0cf8f279f847894deb95656f79d2c967d187b0691dc4ebba77205192f3dda0c"
+    },
+    {
+      "path": "plugins/krylo/agents/design-reviewer.md",
+      "bytes": 938,
+      "sha256": "33071a1a68832f30405d8fa9f69e48fd10e55e9b002d6bf7020723492e7442ad"
+    },
+    {
+      "path": "plugins/krylo/agents/migration-reviewer.md",
+      "bytes": 794,
+      "sha256": "11ef2addaccfe3652013cddc0fe0e03cc380897ed719924474ccc4f2e4752622"
+    },
+    {
+      "path": "plugins/krylo/agents/performance-reviewer.md",
+      "bytes": 791,
+      "sha256": "25b8287b7693d2a1d4200444c227c06504229958b2e6782a73ceae4499140bcf"
+    },
+    {
+      "path": "plugins/krylo/agents/product-strategist.md",
+      "bytes": 855,
+      "sha256": "b4821fd0db42bd4cc0bbef370e452bdef3fa2d3f86dae192204cf89664643ba6"
+    },
+    {
+      "path": "plugins/krylo/agents/reviewer.md",
+      "bytes": 981,
+      "sha256": "e2ed3eb0d46bb903de15a9a5479de6372c3b69e290c32e43677e6de4664d005a"
+    },
+    {
+      "path": "plugins/krylo/agents/scout.md",
+      "bytes": 817,
+      "sha256": "619eb320041f0cdd39e9e09c2098231199fcf5bf3a0e79ec1f1c6e1e7ae626cc"
+    },
+    {
+      "path": "plugins/krylo/agents/security-reviewer.md",
+      "bytes": 978,
+      "sha256": "50d1bbb28571d94452c04be26d634fe60c3a243535f79df526a5e88aa098e5d1"
+    },
+    {
+      "path": "plugins/krylo/agents/verifier.md",
+      "bytes": 916,
+      "sha256": "bf8ce2c234b2536ef05b6e65177a72f09f41ec3c0ccdde625720a86d17d78abe"
+    },
+    {
+      "path": "plugins/krylo/catalog/blocked-versions.json",
+      "bytes": 262,
+      "sha256": "96e7a269a8874e3a101fa3183062e19a88af6fc56e0392d2a7ce40b4d92397fd"
+    },
+    {
+      "path": "plugins/krylo/catalog/publishers.json",
+      "bytes": 1025,
+      "sha256": "a78435ee9da7b1533c491f990d353be0b8f4e472893165f1e825acb0030f0e9d"
+    },
+    {
+      "path": "plugins/krylo/catalog/tools.json",
+      "bytes": 12417,
+      "sha256": "c80b987b7fd94ea7db9c11ed114665ca8e4bfbf88da83e8f44e4da49e3cf1a7b"
+    },
+    {
+      "path": "plugins/krylo/catalog/trust-policy.json",
+      "bytes": 1374,
+      "sha256": "e5aa8ad54291629b3f2b82d66771c3a9f307908f3edff849bb95cfca5aad6347"
+    },
+    {
+      "path": "plugins/krylo/evals/evals.json",
+      "bytes": 4227,
+      "sha256": "5322750258c425d24fe191bfecf6593668503fab0f774fc4bf7bccf3a4c460b6"
+    },
+    {
+      "path": "plugins/krylo/evals/expected-behaviors.md",
+      "bytes": 1064,
+      "sha256": "eabee742de3063e64603ba918743900cd6a0fdca1b405b50c668369e5b622ab0"
+    },
+    {
+      "path": "plugins/krylo/hooks/hooks.json",
+      "bytes": 1788,
+      "sha256": "e007ba2f378f38da77158682a380eb059aa35818a38acd5646109f957f8809ae"
+    },
+    {
+      "path": "plugins/krylo/policies/data-egress.json",
+      "bytes": 828,
+      "sha256": "419370f324c3fce590c5303a823c0dd8326a58944a88dacef0bd33e75445e70d"
+    },
+    {
+      "path": "plugins/krylo/policies/environment-profiles.json",
+      "bytes": 1686,
+      "sha256": "e7cbf4c0914652ae2c7839e99eebb113bd5215fa36ba2bffaadde7152a9287b1"
+    },
+    {
+      "path": "plugins/krylo/policies/mcp-policy.json",
+      "bytes": 1425,
+      "sha256": "c6d4b61f2b6dfa8aa828c7dad03982f1357c0022f47034b62e1eb9b23f9bf6d8"
+    },
+    {
+      "path": "plugins/krylo/policies/production-policy.json",
+      "bytes": 5564,
+      "sha256": "910796875e6e6d13202d9d2ee504834bca59b61315640f94bc19b5adac6c470e"
+    },
+    {
+      "path": "plugins/krylo/references/adapter-policy.md",
+      "bytes": 588,
+      "sha256": "dfc0118728a7e1d4373a403b1500768d95f1bd69568096d4c8ce18b969861ad8"
+    },
+    {
+      "path": "plugins/krylo/references/completion-contract.md",
+      "bytes": 703,
+      "sha256": "fca9c24fe8cac35a12cf992b27414ca42b5bb14ab873c8e963e75654ddb2fd41"
+    },
+    {
+      "path": "plugins/krylo/references/design-policy.md",
+      "bytes": 574,
+      "sha256": "e68137280073efc6c89534b9462061aff2ea147ba8e7f6a768a046bcadd822b8"
+    },
+    {
+      "path": "plugins/krylo/references/final-report-template.md",
+      "bytes": 1003,
+      "sha256": "73dc031446a2dbdba305eacaff776da79adf73feece5ae3fd6325ab93eba8287"
+    },
+    {
+      "path": "plugins/krylo/references/lane-policy.md",
+      "bytes": 1333,
+      "sha256": "d8cf047be19cd584d5734f06537590fc3f89b963ccd620c6e27933dfb9482a5b"
+    },
+    {
+      "path": "plugins/krylo/references/operating-principles.md",
+      "bytes": 823,
+      "sha256": "0001ddab6fa13708adc99dd9f5ab695eb2fbf726361ecf6bc31baf59d3b59a09"
+    },
+    {
+      "path": "plugins/krylo/references/orbit-policy.md",
+      "bytes": 718,
+      "sha256": "dbbcbb43166ce6784f760c10d7dfb56de403b6210705faf1c90d55f29a17c9ec"
+    },
+    {
+      "path": "plugins/krylo/references/question-policy.md",
+      "bytes": 824,
+      "sha256": "274d52ff12496aa0eefae0cac642d048e52f286403eeb86000dd47325ffca901"
+    },
+    {
+      "path": "plugins/krylo/references/risk-policy.md",
+      "bytes": 1049,
+      "sha256": "c2f9a93badb863d9ba6f5d7adaa90edd82b500a6fdd41f6872b64fb6d6383508"
+    },
+    {
+      "path": "plugins/krylo/references/security-policy.md",
+      "bytes": 716,
+      "sha256": "b8f7070b0d1556ae377029015efc0f8d682f8933493ddca2093529bbee71b90c"
+    },
+    {
+      "path": "plugins/krylo/references/testing-policy.md",
+      "bytes": 838,
+      "sha256": "b402094442033c92fb1e6805513985d93b0861546129d4a87a43a4638fdd40fb"
+    },
+    {
+      "path": "plugins/krylo/references/tool-policy.md",
+      "bytes": 771,
+      "sha256": "8f4a354b1e19cf9a7469a683b157bcedff1fe143839ff13bf0964d27c9d1e3e7"
+    },
+    {
+      "path": "plugins/krylo/schemas/agent-result.schema.json",
+      "bytes": 2055,
+      "sha256": "9a8050419415e23bdece256b3d57de458d41f1575d45718a624d82548db5fe36"
+    },
+    {
+      "path": "plugins/krylo/schemas/evidence.schema.json",
+      "bytes": 1687,
+      "sha256": "96f48b32848cb00eba3e805f2e15ae52892f3a9244a8a77967db9a5400b0cba1"
+    },
+    {
+      "path": "plugins/krylo/schemas/run-state.schema.json",
+      "bytes": 10019,
+      "sha256": "411c4dc2c013d80058388bb1ffe4e1769ddd28e9d44b226015454043c5bc1277"
+    },
+    {
+      "path": "plugins/krylo/schemas/tool-record.schema.json",
+      "bytes": 3168,
+      "sha256": "61f95f0cd48468bfb0df48ca1722cfb41b6c8cb51d736957a0ca871f6b00a319"
+    },
+    {
+      "path": "plugins/krylo/scripts/audit/audit-tool.mjs",
+      "bytes": 10073,
+      "sha256": "a7dd790c1da6d332a2bdee962bc2f836ab4b69635c2251f983732cab20af6b95"
+    },
+    {
+      "path": "plugins/krylo/scripts/lib/atomic.mjs",
+      "bytes": 3285,
+      "sha256": "138bd6b9db98188d3bada2e49c8b55d1f0d7f5bb2cd081dae1aa5deb759ae8a6"
+    },
+    {
+      "path": "plugins/krylo/scripts/lib/hook-utils.mjs",
+      "bytes": 2514,
+      "sha256": "d7647b92254eb4052fc963180a2cd05f3a60a4b1e2c63dc97ad177a0da067399"
+    },
+    {
+      "path": "plugins/krylo/scripts/lib/paths.mjs",
+      "bytes": 3572,
+      "sha256": "038fcb9b4599e77e5fc6a26cb1de5a04e56ebccb0e90d4dce0ae79bff38a7299"
+    },
+    {
+      "path": "plugins/krylo/scripts/lib/redact.mjs",
+      "bytes": 3310,
+      "sha256": "39c09f06309089ae833aef33ec5a9b4b9cc03bcfee8b57581ea9f0469894bac5"
+    },
+    {
+      "path": "plugins/krylo/scripts/lib/state.mjs",
+      "bytes": 27141,
+      "sha256": "59b962c73dd166faa81deb0b663da6091c3f5515e23a4681891af6053a2acfbc"
+    },
+    {
+      "path": "plugins/krylo/scripts/lib/telemetry.mjs",
+      "bytes": 1548,
+      "sha256": "73d9ce902ca0283afe17c8098a43b2a83ff993ad2c4560eb2d46e9d5298b5860"
+    },
+    {
+      "path": "plugins/krylo/scripts/orbit/fingerprint.mjs",
+      "bytes": 3500,
+      "sha256": "57eccd1a1547079bdefa970d1983a5c378b19f2d1fff9b235b45fa0a6dc74a99"
+    },
+    {
+      "path": "plugins/krylo/scripts/orbit/stagnation.mjs",
+      "bytes": 1961,
+      "sha256": "bc3a39ed974722569eab33bce6a64e2f3d9a36f69c03b75cffd6dae99ef70cc8"
+    },
+    {
+      "path": "plugins/krylo/scripts/orbit/stop-gate.mjs",
+      "bytes": 4068,
+      "sha256": "181c358296eec787c106c000c146235d0be5e8d0a348386cc454a57d0c00b956"
+    },
+    {
+      "path": "plugins/krylo/scripts/runtime/cleanup.mjs",
+      "bytes": 3395,
+      "sha256": "18196b64f3a2ebb15bf27c46ff555f10cae66ef303c3433b123217b8a738c887"
+    },
+    {
+      "path": "plugins/krylo/scripts/runtime/init-run.mjs",
+      "bytes": 3586,
+      "sha256": "e82448a01059654bf31b713a4dd86e09833ff627007e9b4b3618eb90302b3ec4"
+    },
+    {
+      "path": "plugins/krylo/scripts/runtime/posttool-telemetry.mjs",
+      "bytes": 1198,
+      "sha256": "95d2d756acd73d14a74fd9c6a5d18cb8a89ac2165bc67cd9e70816c7cecf3c20"
+    },
+    {
+      "path": "plugins/krylo/scripts/runtime/read-state.mjs",
+      "bytes": 1614,
+      "sha256": "7d97ac644518c2d9bdb9f753d1d578e975914f63a6a3d3c160988dee1f268488"
+    },
+    {
+      "path": "plugins/krylo/scripts/runtime/update-state.mjs",
+      "bytes": 13953,
+      "sha256": "a10dd142343fd657fcc428a4e9ae382ed82b6ed488284a7a6aae6d65e424e87b"
+    },
+    {
+      "path": "plugins/krylo/scripts/security/question-gate.mjs",
+      "bytes": 2295,
+      "sha256": "2eacd173181fb73e7c025414f1fde88bfa75e8e0e6468a0377c78cc4a22facec"
+    },
+    {
+      "path": "plugins/krylo/scripts/security/redact.mjs",
+      "bytes": 607,
+      "sha256": "1938dfd77eb9b9dd3f8a7f604cabe073e32119ac364db20888fa982a2c76d1a6"
+    },
+    {
+      "path": "plugins/krylo/scripts/security/risk-gate.mjs",
+      "bytes": 5431,
+      "sha256": "dc716f73c1485f98621b89453092bcb174cdc6e3b71784f8cae4dbd7d94e7101"
+    },
+    {
+      "path": "plugins/krylo/scripts/setup/doctor.mjs",
+      "bytes": 8806,
+      "sha256": "8e6af325be40371cc12c65c381dceb546414be2d3ad1c0edf8433dc03144e56b"
+    },
+    {
+      "path": "plugins/krylo/scripts/setup/install-alias.mjs",
+      "bytes": 3266,
+      "sha256": "04d0e1da80abeae2ca3fa4b41675b0c01c76d196ac85475a71ae3e93b30f47fe"
+    },
+    {
+      "path": "plugins/krylo/scripts/setup/remove-alias.mjs",
+      "bytes": 2746,
+      "sha256": "894020b7f54032c2422e0e20509346f15ed2302e0d3a6e55c9fa3e99c53b4160"
+    },
+    {
+      "path": "plugins/krylo/scripts/status/agent-events.mjs",
+      "bytes": 2748,
+      "sha256": "77cfedfa4259ded547fcac2885e4f06ec67c5891e8874f6b8b1992489cd494d1"
+    },
+    {
+      "path": "plugins/krylo/scripts/status/statusline-wrapper.mjs",
+      "bytes": 2389,
+      "sha256": "f273fb4222860b5faff52520baf6cbe74496bb1c48c5a0c90ed1a9ff4dee2421"
+    },
+    {
+      "path": "plugins/krylo/scripts/status/subagent-statusline.mjs",
+      "bytes": 3361,
+      "sha256": "b97d86b0c8b15944da588752a2113d1fe765bf1e2b6e98fc974d49f44a154cbf"
+    },
+    {
+      "path": "plugins/krylo/scripts/validation/validate-runtime.mjs",
+      "bytes": 6954,
+      "sha256": "70e528d121c8be2fc613304454ce00383e476b7f5854a6f9a08927e2fb054fb1"
+    },
+    {
+      "path": "plugins/krylo/skills/audit-tool/SKILL.md",
+      "bytes": 1631,
+      "sha256": "c210030d8a293d2e7ef33d9be170531d7579e667bee71c7de188532fbb2104f5"
+    },
+    {
+      "path": "plugins/krylo/skills/doctor/SKILL.md",
+      "bytes": 1390,
+      "sha256": "bcfb8c7607a489ad7b5e71dac7a8d7ee67537bc2234d06fefeee4855fb829145"
+    },
+    {
+      "path": "plugins/krylo/skills/run/SKILL.md",
+      "bytes": 4661,
+      "sha256": "c92774ece0247bb91f60b88323df2ce5c2a922c4bdf34b21e3b351af2e71069a"
+    },
+    {
+      "path": "plugins/krylo/skills/setup/SKILL.md",
+      "bytes": 1991,
+      "sha256": "2381b44147e503db1346f1c79a2c38d24ec8913bfc1e3526eef82f21d3db6331"
+    },
+    {
+      "path": "plugins/krylo/skills/status/SKILL.md",
+      "bytes": 1182,
+      "sha256": "2b4ba497e0a8fd3d8bdec5c23bb67f4f73aa9d9717075f3e7b098a9c67a0bbbe"
+    },
+    {
+      "path": "plugins/krylo/tests/governance/agents.test.mjs",
+      "bytes": 3104,
+      "sha256": "cd8175b0ba491731c8bba1cd8fd3ce8715c2cceaf7b6dc4f8f75b724ec71670c"
+    },
+    {
+      "path": "plugins/krylo/tests/governance/audit.test.mjs",
+      "bytes": 4443,
+      "sha256": "e4f0900ef922dc581f70b002ff8005d90efc553121f8f02561ac37d0cd4c3c9f"
+    },
+    {
+      "path": "plugins/krylo/tests/governance/policy-consistency.test.mjs",
+      "bytes": 4224,
+      "sha256": "889757d5b6774142e48f1f2e2b920f283aed3f60b78b30f51deb1ec33012f071"
+    },
+    {
+      "path": "plugins/krylo/tests/hooks/fingerprint.test.mjs",
+      "bytes": 2921,
+      "sha256": "998d5490ff1339efbabcb81f29b7a63e5a97be8d7df3bff045d2195916e3ad9f"
+    },
+    {
+      "path": "plugins/krylo/tests/hooks/helpers.mjs",
+      "bytes": 3417,
+      "sha256": "992a6ad27e73a51798d4f7d303870c4014b211259a1ae8b2cff9f8b2ff8a3f32"
+    },
+    {
+      "path": "plugins/krylo/tests/hooks/posttool.test.mjs",
+      "bytes": 1359,
+      "sha256": "79145cc02048cd350d9668bc9ad9e2e506b76db8df227675412e797d206d7440"
+    },
+    {
+      "path": "plugins/krylo/tests/hooks/question-gate.test.mjs",
+      "bytes": 3238,
+      "sha256": "a6a261903ef9e9d386289d577412711e21e071b99aaa2339d9fec4d3aed08286"
+    },
+    {
+      "path": "plugins/krylo/tests/hooks/risk-gate.test.mjs",
+      "bytes": 4674,
+      "sha256": "784b477465cd3ecef2443bcc206d1c6de92e1eb980c56ae07e9f688873f284cc"
+    },
+    {
+      "path": "plugins/krylo/tests/hooks/stop-gate.test.mjs",
+      "bytes": 6094,
+      "sha256": "bd4c5638ce7141d003a8e3b7efff2eb6bf72d8ec500187b94244d97fd018896d"
+    },
+    {
+      "path": "plugins/krylo/tests/platform/paths.test.mjs",
+      "bytes": 2768,
+      "sha256": "0b92ff550da70b85a5587f505ae5a75f2d8b00d91d775063de443bd360b216d1"
+    },
+    {
+      "path": "plugins/krylo/tests/security/injection.test.mjs",
+      "bytes": 3704,
+      "sha256": "5298bea8f8943b653b8622ee7c5a78b239bc5b5a853abc8bda6a6193c1e0b74b"
+    },
+    {
+      "path": "plugins/krylo/tests/setup/alias.test.mjs",
+      "bytes": 4515,
+      "sha256": "4aaf911ab586bcc6555f74cf118372ab330395d8668734d9180d9aa5446dd6dc"
+    },
+    {
+      "path": "plugins/krylo/tests/setup/doctor.test.mjs",
+      "bytes": 3685,
+      "sha256": "aa4dc41bc89c27c416f068b53e18a3f50293fd9413bc1246a11cce3377e34860"
+    },
+    {
+      "path": "plugins/krylo/tests/status/agent-events.test.mjs",
+      "bytes": 2351,
+      "sha256": "384b1b4384d274f23040c4c98a4ce66425bf8448009dc742014238583565eeba"
+    },
+    {
+      "path": "plugins/krylo/tests/status/statusline.test.mjs",
+      "bytes": 3862,
+      "sha256": "ce39824d0a3b78648da31879f993b0294064160f74479bd097fc11164584f2df"
+    },
+    {
+      "path": "plugins/krylo/tests/status/wrapper.test.mjs",
+      "bytes": 2123,
+      "sha256": "d018946ea7acf0de237ea08056a8f0244cf67231e2bc379dcbd5c474387798ca"
+    },
+    {
+      "path": "plugins/krylo/tests/unit/atomic.test.mjs",
+      "bytes": 3134,
+      "sha256": "3bfc7a5e82104f90da1beb9f18dc727f8597169d060f8e3b7e1f048f6bbbbfe5"
+    },
+    {
+      "path": "plugins/krylo/tests/unit/cleanup.test.mjs",
+      "bytes": 4159,
+      "sha256": "1f2a7e7d944d78201441f3f2ec4fbb889219ce67576e781fb87f6b8893630293"
+    },
+    {
+      "path": "plugins/krylo/tests/unit/cli.test.mjs",
+      "bytes": 9247,
+      "sha256": "c2a44ab2d90d03eec46da7afa581614ebaff66f8db3d3d6590f412f767077def"
+    },
+    {
+      "path": "plugins/krylo/tests/unit/redact.test.mjs",
+      "bytes": 4538,
+      "sha256": "57785bc91e27cecd0670c2de9b323b65c9eee2e9e2bd567152771d26fbfd5387"
+    },
+    {
+      "path": "plugins/krylo/tests/unit/resume.test.mjs",
+      "bytes": 2515,
+      "sha256": "880a47a75c1ec0cdba7067bb1f7e9f7c3be74bab1dee27f45a1cfa2fcaafad71"
+    },
+    {
+      "path": "plugins/krylo/tests/unit/state.test.mjs",
+      "bytes": 6748,
+      "sha256": "86f85ad4dc50d3d804420a9aa55be874ca853903d169f2c740a5dbd64ae2a3a4"
+    },
+    {
+      "path": "plugins/krylo/tests/unit/telemetry.test.mjs",
+      "bytes": 3067,
+      "sha256": "87a2d651ad870e7e7a998ac55a6bc93d6e74ad35e4262c00f22ad8e0f45b288d"
+    }
+  ]
+}
