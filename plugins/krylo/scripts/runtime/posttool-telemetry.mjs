@@ -1,0 +1,36 @@
+#!/usr/bin/env node
+// KRYLO tool-usage telemetry (PostToolUse hook).
+//
+// Increments the per-run tool-name counter and records a local telemetry
+// event. Only the tool NAME and duration are recorded — never arguments,
+// output, or file contents. Fail open: always exit 0, never any output.
+
+import { readStdinJson, resolveActiveRun, allowSilently } from '../lib/hook-utils.mjs';
+import { saveState } from '../lib/state.mjs';
+import { recordEvent } from '../lib/telemetry.mjs';
+
+async function main() {
+  const input = await readStdinJson();
+  if (!input.ok) allowSilently();
+  const payload = input.value;
+
+  const run = resolveActiveRun(payload);
+  if (!run.active) allowSilently();
+
+  const state = run.state;
+  const toolName = typeof payload.tool_name === 'string' && payload.tool_name !== '' ? payload.tool_name : 'unknown';
+
+  state.toolCounters[toolName] = (state.toolCounters[toolName] ?? 0) + 1;
+  saveState(state);
+
+  const duration = Number(payload.duration_ms ?? payload.durationMs);
+  recordEvent(state.runId, {
+    event: 'tool',
+    toolName,
+    ...(Number.isFinite(duration) ? { durationMs: duration } : {}),
+  });
+
+  allowSilently();
+}
+
+main().catch(() => allowSilently());
