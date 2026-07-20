@@ -5,7 +5,7 @@ KRYLO is an explicit, namespaced Claude Code workflow for autonomous, evidence-d
 ## Installation
 
 ```text
-claude plugin marketplace add <marketplace-repo-or-path>
+claude plugin marketplace add FreeJaguar/KRYLO
 claude plugin install krylo@krylo-marketplace
 ```
 
