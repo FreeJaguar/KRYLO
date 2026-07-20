@@ -38,13 +38,13 @@
         "\\bsupabase\\s+db\\s+reset\\b",
         "\\bprisma\\s+migrate\\s+reset\\b",
         "\\brails\\s+db:drop\\b",
-        "\\bgit\\s+reset\\s+--hard\\b",
-        "\\bgit\\s+clean\\s+-[a-z]*f",
-        "\\bgit\\s+checkout\\s+--\\s+\\.",
-        "\\bgit\\s+restore\\s+(--worktree\\s+)?\\.(?:\\s|$)",
+        "\\bgit\\b[^|;&\\n]*?\\breset\\s+--hard\\b",
+        "\\bgit\\b[^|;&\\n]*?\\bclean\\s+-[a-z]*f",
+        "\\bgit\\b[^|;&\\n]*?\\bcheckout\\s+--\\s+\\.",
+        "\\bgit\\b[^|;&\\n]*?\\brestore\\s+(--worktree\\s+)?\\.(?:\\s|$)",
         "\\brm\\s+(-[a-z]*[rf][a-z]*\\s+)+(/|~|\\$HOME|[a-z]:\\\\)",
-        "\\bgit\\s+branch\\s+-[dD]\\b",
-        "\\bgit\\s+stash\\s+(drop|clear)\\b"
+        "\\bgit\\b[^|;&\\n]*?\\bbranch\\s+-[dD]\\b",
+        "\\bgit\\b[^|;&\\n]*?\\bstash\\s+(drop|clear)\\b"
       ]
     },
     "package-publish": {
@@ -67,7 +67,7 @@
       "reason": "Release creation requires explicit user approval.",
       "patterns": [
         "\\bgh\\s+release\\s+(create|edit|delete|upload)\\b",
-        "\\bgit\\s+push\\b.*--tags",
+        "\\bgit\\b[^|;&\\n]*?\\bpush\\b[^|;&\\n]*--tags",
         "\\bgoreleaser\\b"
       ]
     },
@@ -75,14 +75,14 @@
       "decision": "deny",
       "reason": "Git push requires explicit user approval unless the active task explicitly requested the exact action.",
       "patterns": [
-        "\\bgit\\s+push\\b"
+        "\\bgit\\b[^|;&\\n]*?\\bpush\\b"
       ]
     },
     "git-force": {
       "decision": "deny",
       "reason": "Force push is never automatic.",
       "patterns": [
-        "\\bgit\\s+push\\b.*(--force|-f\\b|--force-with-lease)"
+        "\\bgit\\b[^|;&\\n]*?\\bpush\\b[^|;&\\n]*(--force(-with-lease)?\\b|\\s-f\\b|\\s\\+\\S+)"
       ]
     },
     "merge": {

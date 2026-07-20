@@ -17,10 +17,58 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { readStdinJson, resolveActiveRun, emitPreToolDecision, allowSilently } from '../lib/hook-utils.mjs';
+import { getDataRoot } from '../lib/paths.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const POLICY_PATH = path.join(HERE, '..', '..', 'policies', 'production-policy.json');
+
+const DATA_ROOT_REASON =
+  'The KRYLO runtime data directory (run state, approvals, pointers, wrapper config) is integrity-protected. ' +
+  'It may only be modified through the KRYLO runtime scripts, never directly.';
+
+/**
+ * KRYLO's own control plane (state.json, current-run.json, wrapper-config.json)
+ * must not be writable through direct tool calls, or a prompt-injected model
+ * could self-approve gated actions or disable the gates entirely. Legitimate
+ * mutations go through the runtime CLIs, which never embed the data-root path
+ * in the command line.
+ */
+function touchesDataRoot(payload, cwd) {
+  const dataRoot = getDataRoot();
+  const variants = [
+    dataRoot,
+    dataRoot.split(path.sep).join('/'),
+    '.claude/plugins/data/krylo',
+    '.claude\\plugins\\data\\krylo',
+    'current-run.json',
+    'wrapper-config.json',
+  ].map((v) => v.toLowerCase());
+
+  const toolInput = payload.tool_input && typeof payload.tool_input === 'object' ? payload.tool_input : {};
+  const toolName = String(payload.tool_name ?? '');
+
+  if (toolName === 'Bash') {
+    const command = String(toolInput.command ?? '').toLowerCase();
+    return variants.some((v) => command.includes(v));
+  }
+
+  const target = typeof toolInput.file_path === 'string'
+    ? toolInput.file_path
+    : typeof toolInput.notebook_path === 'string'
+      ? toolInput.notebook_path
+      : '';
+  if (target === '') return false;
+  const lower = target.toLowerCase();
+  if (variants.some((v) => lower.includes(v))) return true;
+  try {
+    const resolved = path.resolve(cwd || process.cwd(), target).toLowerCase();
+    const rootLower = path.resolve(dataRoot).toLowerCase();
+    return resolved === rootLower || resolved.startsWith(rootLower + path.sep.toLowerCase());
+  } catch {
+    return false;
+  }
+}
 
 function loadPolicy() {
   const raw = fs.readFileSync(POLICY_PATH, 'utf8');
@@ -79,6 +127,11 @@ async function main() {
     const policy = loadPolicy();
     const toolName = String(payload.tool_name ?? '');
     const toolInput = payload.tool_input && typeof payload.tool_input === 'object' ? payload.tool_input : {};
+
+    if (touchesDataRoot(payload, typeof payload.cwd === 'string' ? payload.cwd : '')) {
+      recordEvent(state.runId, { event: 'risk-gate', category: 'data-root-protection', status: 'denied' });
+      emitPreToolDecision('deny', DATA_ROOT_REASON);
+    }
 
     if (toolName === 'Bash') {
       const command = typeof toolInput.command === 'string' ? toolInput.command : '';

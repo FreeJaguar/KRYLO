@@ -41,7 +41,7 @@ test('wrapper: preserves original status line and appends KRYLO segment', () => 
   const dataDir = mkTempDataDir('krylo-wrap-');
   try {
     createActiveRun(dataDir);
-    const original = `"${process.execPath}" -e "console.log('orig-line')"`;
+    const original = [process.execPath, '-e', "console.log('orig-line')"];
     fs.writeFileSync(path.join(dataDir, 'wrapper-config.json'), JSON.stringify({ originalCommand: original }), 'utf8');
     const res = runWrapper(dataDir);
     assert.equal(res.status, 0);
@@ -51,11 +51,27 @@ test('wrapper: preserves original status line and appends KRYLO segment', () => 
   }
 });
 
+test('wrapper: legacy string originalCommand is refused (never shell-executed)', () => {
+  const dataDir = mkTempDataDir('krylo-wrap-');
+  try {
+    createActiveRun(dataDir);
+    const canary = path.join(dataDir, 'wrapper-canary.txt');
+    const original = `node -e "require('fs').writeFileSync('${canary.replace(/\\/g, '/')}','x')"`;
+    fs.writeFileSync(path.join(dataDir, 'wrapper-config.json'), JSON.stringify({ originalCommand: original }), 'utf8');
+    const res = runWrapper(dataDir);
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /^KRYLO INITIALIZING/);
+    assert.ok(!fs.existsSync(canary), 'string command must never execute');
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
 test('wrapper: failing original command degrades gracefully', () => {
   const dataDir = mkTempDataDir('krylo-wrap-');
   try {
     createActiveRun(dataDir);
-    fs.writeFileSync(path.join(dataDir, 'wrapper-config.json'), JSON.stringify({ originalCommand: 'definitely-not-a-command-xyz' }), 'utf8');
+    fs.writeFileSync(path.join(dataDir, 'wrapper-config.json'), JSON.stringify({ originalCommand: ['definitely-not-a-command-xyz'] }), 'utf8');
     const res = runWrapper(dataDir);
     assert.equal(res.status, 0);
     assert.match(res.stdout, /KRYLO INITIALIZING/);

@@ -28,16 +28,19 @@ function maskBearer(s) {
 }
 
 function maskUrlCredentials(s) {
+  // Greedy password segment backtracks to the LAST @, so passwords that
+  // themselves contain @ are fully masked.
   return s.replace(
-    /([a-zA-Z][a-zA-Z0-9+.-]*):\/\/[^/\s:@]+:[^/\s@]+@/g,
+    /([a-zA-Z][a-zA-Z0-9+.-]*):\/\/[^/\s:@]+:[^/\s]*@/g,
     (_m, scheme) => `${scheme}://${MASK}@`,
   );
 }
 
 function maskKeyValueSecrets(s) {
+  // Key may carry a prefix (client_secret, access_token, MY_API_KEY, ...).
   return s.replace(
-    /\b(password|passwd|secret|token|api[_-]?key)\s*=\s*("[^"]*"|'[^']*'|[^\s&"']+)/gi,
-    (_m, key) => `${key}=${MASK}`,
+    /\b[\w.-]*(password|passwd|secret|token|api[_-]?key)\s*=\s*("[^"]*"|'[^']*'|[^\s&"']+)/gi,
+    (m, key) => `${m.slice(0, m.indexOf('='))}=${MASK}`,
   );
 }
 
@@ -46,7 +49,11 @@ function maskAwsAccessKey(s) {
 }
 
 function maskSkKeys(s) {
-  return s.replace(/\bsk-[A-Za-z0-9_-]{16,}\b/g, MASK);
+  return s
+    .replace(/\bsk-[A-Za-z0-9_-]{16,}\b/g, MASK)
+    .replace(/\bsk_(live|test)_[A-Za-z0-9]{10,}\b/g, MASK)
+    .replace(/\brk_(live|test)_[A-Za-z0-9]{10,}\b/g, MASK)
+    .replace(/\bAIza[0-9A-Za-z_-]{35}\b/g, MASK);
 }
 
 function maskHomeDir(s) {
