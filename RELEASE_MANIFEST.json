@@ -1,14 +1,19 @@
 {
   "name": "krylo-release",
   "version": "0.1.0",
-  "generatedAt": "2026-07-19T10:38:40.112Z",
+  "generatedAt": "2026-07-20T07:05:24.271Z",
   "note": "Per-file SHA-256 of the implemented 0.1.0 repository tree (git-tracked files at generation time, excluding this manifest). BLUEPRINT_MANIFEST.json remains the immutable record of blueprint 0.1.2 as delivered in the baseline commit.",
-  "fileCount": 234,
+  "fileCount": 235,
   "files": [
     {
       "path": ".claude-plugin/marketplace.json",
       "bytes": 734,
       "sha256": "e3792d08151fefa0c4cefa80de4b6b73d8b87fd5586991f49adc210f4fcd75c2"
+    },
+    {
+      "path": ".claude/scheduled_tasks.lock",
+      "bytes": 124,
+      "sha256": "e60d417895e68907cebb9d84db67975fb1323f573e09a0f85f7ac0627bdd0f73"
     },
     {
       "path": ".gitattributes",
@@ -83,7 +88,7 @@
     {
       "path": ".github/workflows/test.yml",
       "bytes": 841,
-      "sha256": "97fe301f270699db2f60bdb75530a6b626a5880f1ad300a1c547d239c1b2cc6a"
+      "sha256": "7c628a4a1be82727375f17e521c10c4bd2bbb99f217c4597113828f8f7cb5868"
     },
     {
       "path": ".github/workflows/validate-plugin.yml",
@@ -452,8 +457,8 @@
     },
     {
       "path": "package.json",
-      "bytes": 914,
-      "sha256": "a47f640fe6738afdeb938e345fcac1791691185980c09b4ca11620f332eeb951"
+      "bytes": 1149,
+      "sha256": "afbaec063cefe61e9935db3dd8fce28a3d4eca97cc7aa01f88a7855d3b0a3ef1"
     },
     {
       "path": "plugin/README.md",
@@ -827,8 +832,8 @@
     },
     {
       "path": "plugins/krylo/policies/production-policy.json",
-      "bytes": 5564,
-      "sha256": "910796875e6e6d13202d9d2ee504834bca59b61315640f94bc19b5adac6c470e"
+      "bytes": 6148,
+      "sha256": "94cbaa2fb94553a5d132b1cede07166f981e8174a84670b517dc125899e3ec00"
     },
     {
       "path": "plugins/krylo/references/adapter-policy.md",
@@ -927,13 +932,13 @@
     },
     {
       "path": "plugins/krylo/scripts/lib/paths.mjs",
-      "bytes": 3572,
-      "sha256": "038fcb9b4599e77e5fc6a26cb1de5a04e56ebccb0e90d4dce0ae79bff38a7299"
+      "bytes": 3738,
+      "sha256": "c4c6d6e99ad8cda83f24967246de70c0fbca50c56ee9b01dc7e71e6c20cbf545"
     },
     {
       "path": "plugins/krylo/scripts/lib/redact.mjs",
-      "bytes": 3310,
-      "sha256": "39c09f06309089ae833aef33ec5a9b4b9cc03bcfee8b57581ea9f0469894bac5"
+      "bytes": 3703,
+      "sha256": "aa3a0e6536f0e66bed40502a1ee362b63aebdb420d03395ed28955870617dff6"
     },
     {
       "path": "plugins/krylo/scripts/lib/state.mjs",
@@ -997,8 +1002,8 @@
     },
     {
       "path": "plugins/krylo/scripts/security/risk-gate.mjs",
-      "bytes": 5431,
-      "sha256": "dc716f73c1485f98621b89453092bcb174cdc6e3b71784f8cae4dbd7d94e7101"
+      "bytes": 7512,
+      "sha256": "afa48c94eb4c9c80f2ef63cf3d4801a15cf9e66f66555920241e3d173f759150"
     },
     {
       "path": "plugins/krylo/scripts/setup/doctor.mjs",
@@ -1022,8 +1027,8 @@
     },
     {
       "path": "plugins/krylo/scripts/status/statusline-wrapper.mjs",
-      "bytes": 2389,
-      "sha256": "f273fb4222860b5faff52520baf6cbe74496bb1c48c5a0c90ed1a9ff4dee2421"
+      "bytes": 2659,
+      "sha256": "ed2319f4bc9d7c72528cdac8383e6ee6451e89d6d19f03ca3ce660b2497d26cf"
     },
     {
       "path": "plugins/krylo/scripts/status/subagent-statusline.mjs",
@@ -1097,8 +1102,8 @@
     },
     {
       "path": "plugins/krylo/tests/hooks/risk-gate.test.mjs",
-      "bytes": 4674,
-      "sha256": "784b477465cd3ecef2443bcc206d1c6de92e1eb980c56ae07e9f688873f284cc"
+      "bytes": 7111,
+      "sha256": "33ddbefca237f1bbacc89c9c2c19315c58ff26b861e910f04b94f78a852f3ccd"
     },
     {
       "path": "plugins/krylo/tests/hooks/stop-gate.test.mjs",
@@ -1137,8 +1142,8 @@
     },
     {
       "path": "plugins/krylo/tests/status/wrapper.test.mjs",
-      "bytes": 2123,
-      "sha256": "d018946ea7acf0de237ea08056a8f0244cf67231e2bc379dcbd5c474387798ca"
+      "bytes": 2823,
+      "sha256": "898596831c7a6b16b74b0f07e4423410558ba5dc4c1cd5bf00452b88f28fde03"
     },
     {
       "path": "plugins/krylo/tests/unit/atomic.test.mjs",
