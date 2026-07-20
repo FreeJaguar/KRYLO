@@ -1,0 +1,16 @@
+# Paths excluded from secret scanning.
+#
+# These test files intentionally contain synthetic, non-functional
+# credential-shaped strings (fake GitHub/AWS/Stripe/Slack/JWT tokens) used
+# solely to prove that scripts/lib/redact.mjs correctly masks real secrets
+# before they are persisted or displayed. None of these values are real
+# credentials, and none were ever valid. See RELEASE_READINESS.md.
+#
+# Regex patterns, matched against the repository-relative file path.
+^plugins/krylo/tests/hooks/fingerprint\.test\.mjs$
+^plugins/krylo/tests/hooks/risk-gate\.test\.mjs$
+^plugins/krylo/tests/security/injection\.test\.mjs$
+^plugins/krylo/tests/status/statusline\.test\.mjs$
+^plugins/krylo/tests/unit/cli\.test\.mjs$
+^plugins/krylo/tests/unit/redact\.test\.mjs$
+^plugins/krylo/tests/unit/state\.test\.mjs$
