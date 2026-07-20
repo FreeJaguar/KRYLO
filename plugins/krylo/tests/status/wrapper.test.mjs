@@ -10,6 +10,10 @@ function runWrapper(dataDir) {
   return spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, 'status', 'statusline-wrapper.mjs')], {
     encoding: 'utf8',
     input: '{}',
+    // createActiveRun() defaults the fixture's project dir to dataDir; the
+    // wrapper resolves the active run from its own process.cwd(), so the
+    // spawned process must run with that same directory as its cwd.
+    cwd: dataDir,
     env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir },
   });
 }

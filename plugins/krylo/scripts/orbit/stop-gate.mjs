@@ -11,7 +11,7 @@
 // internal error allows the stop.
 
 import { readStdinJson, resolveActiveRun, allowSilently } from '../lib/hook-utils.mjs';
-import { saveState, clearCurrentRunPointer, completionEval } from '../lib/state.mjs';
+import { saveState, clearActiveRunPointerForState, completionEval } from '../lib/state.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { assessStagnation } from './stagnation.mjs';
 
@@ -54,7 +54,7 @@ function finalize(state, terminalState, phase) {
   state.terminalState = terminalState;
   state.phase = phase;
   saveState(state);
-  clearCurrentRunPointer();
+  clearActiveRunPointerForState(state);
   recordEvent(state.runId, { event: 'terminal', terminalState, cycle: state.orbit.cycle });
 }
 

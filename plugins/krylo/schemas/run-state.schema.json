@@ -242,13 +242,46 @@
               "payment",
               "external-message",
               "external-write",
+              "repository-admin",
               "other"
             ]
           },
-          "status": { "type": "string", "enum": ["pending", "approved", "denied"] },
+          "status": { "type": "string", "enum": ["pending", "approved", "denied", "consumed", "expired"] },
           "requestedAt": { "type": "string", "format": "date-time" },
           "resolvedAt": { "type": ["string", "null"], "format": "date-time" },
-          "summary": { "type": "string", "maxLength": 200 }
+          "summary": { "type": "string", "maxLength": 200 },
+          "projectRootHash": {
+            "type": "string",
+            "description": "SHA-256 hash of the project root this approval was requested in. Consumption is refused if the current run's project does not match.",
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "runId": {
+            "type": "string",
+            "description": "The run this approval was requested by. Consumption is refused for any other run."
+          },
+          "environment": {
+            "type": ["string", "null"],
+            "description": "Optional security profile bound at request time. Consumption is refused if the current profile differs."
+          },
+          "expiresAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "An approved-but-expired approval is treated as not-approved and can never be consumed."
+          },
+          "consumedAt": {
+            "type": ["string", "null"],
+            "format": "date-time",
+            "description": "Set the moment this single-use approval is spent by a matching action."
+          },
+          "fingerprint": {
+            "type": ["string", "null"],
+            "description": "SHA-256 hash of the normalized, redacted action that consumed this approval. Recorded for audit only; never used to authorize a second action."
+          },
+          "target": {
+            "type": ["string", "null"],
+            "maxLength": 300,
+            "description": "Redacted, truncated description of the action that consumed this approval. Never the raw command or a secret."
+          }
         }
       }
     },

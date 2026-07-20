@@ -7,7 +7,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-import { ensureDir, runStatePath, currentRunPointerPath } from './paths.mjs';
+import {
+  ensureDir,
+  runStatePath,
+  currentRunPointerPath,
+  activeRunPointerPath,
+  activeRunsProjectDir,
+} from './paths.mjs';
 import { writeJsonAtomic, readJson } from './atomic.mjs';
 import { redactText } from './redact.mjs';
 
@@ -44,9 +50,10 @@ export const ENUMS = {
     'payment',
     'external-message',
     'external-write',
+    'repository-admin',
     'other',
   ],
-  approvalStatus: ['pending', 'approved', 'denied'],
+  approvalStatus: ['pending', 'approved', 'denied', 'consumed', 'expired'],
   findingSeverity: ['critical', 'high', 'medium', 'low', 'info'],
   findingStatus: ['open', 'resolved', 'accepted', 'invalid'],
   evidenceType: [
@@ -442,7 +449,10 @@ export function validateState(state) {
       state.riskApprovals.forEach((r, i) => {
         if (!isObject(r)) { push(`riskApprovals[${i}] must be an object`); return; }
         for (const req of ['id', 'actionClass', 'status', 'requestedAt']) if (!(req in r)) push(`riskApprovals[${i}].${req} is required`);
-        const allowed = new Set(['id', 'actionClass', 'status', 'requestedAt', 'resolvedAt', 'summary']);
+        const allowed = new Set([
+          'id', 'actionClass', 'status', 'requestedAt', 'resolvedAt', 'summary',
+          'projectRootHash', 'runId', 'environment', 'expiresAt', 'consumedAt', 'fingerprint', 'target',
+        ]);
         for (const k of Object.keys(r)) if (!allowed.has(k)) push(`unexpected field riskApprovals[${i}].${k}`);
         if ('id' in r && !isString(r.id)) push(`riskApprovals[${i}].id must be a string`);
         if ('actionClass' in r && !ENUMS.actionClass.includes(r.actionClass)) push(`riskApprovals[${i}].actionClass is invalid`);
@@ -450,6 +460,13 @@ export function validateState(state) {
         if ('requestedAt' in r && !isString(r.requestedAt)) push(`riskApprovals[${i}].requestedAt must be a string`);
         if ('resolvedAt' in r && !isStringOrNull(r.resolvedAt)) push(`riskApprovals[${i}].resolvedAt must be a string or null`);
         if ('summary' in r && (!isString(r.summary) || r.summary.length > 200)) push(`riskApprovals[${i}].summary must be a string with maxLength 200`);
+        if ('projectRootHash' in r && (!isString(r.projectRootHash) || !/^[a-f0-9]{64}$/.test(r.projectRootHash))) push(`riskApprovals[${i}].projectRootHash must be a 64-char lowercase hex string`);
+        if ('runId' in r && !isString(r.runId)) push(`riskApprovals[${i}].runId must be a string`);
+        if ('environment' in r && !isStringOrNull(r.environment)) push(`riskApprovals[${i}].environment must be a string or null`);
+        if ('expiresAt' in r && !isStringOrNull(r.expiresAt)) push(`riskApprovals[${i}].expiresAt must be a string or null`);
+        if ('consumedAt' in r && !isStringOrNull(r.consumedAt)) push(`riskApprovals[${i}].consumedAt must be a string or null`);
+        if ('fingerprint' in r && !isStringOrNull(r.fingerprint)) push(`riskApprovals[${i}].fingerprint must be a string or null`);
+        if ('target' in r && (!isStringOrNull(r.target) || (isString(r.target) && r.target.length > 300))) push(`riskApprovals[${i}].target must be a string (maxLength 300) or null`);
       });
     }
   }
@@ -612,23 +629,153 @@ export function saveState(state) {
   return { ok: true, value: updated };
 }
 
-export function readCurrentRunPointer() {
-  const result = readJson(currentRunPointerPath());
-  if (!result.ok) return { ok: false, error: result.error };
-  return { ok: true, value: result.value };
-}
-
-export function writeCurrentRunPointer({ runId, projectRootHash, sessionId }) {
+/**
+ * Persist the pointer for one project + session pair. Two projects never
+ * share a path (projectRootHash segment) and two sessions in the same
+ * project never share a path (session segment), so concurrent runs cannot
+ * overwrite each other. The write is atomic (temp file + rename).
+ */
+export function writeActiveRunPointer({ runId, projectRootHash, sessionId }) {
   const value = { runId, projectRootHash, sessionId, updatedAt: nowIso() };
-  ensureDir(path.dirname(currentRunPointerPath()));
-  writeJsonAtomic(currentRunPointerPath(), value);
+  const pointerPath = activeRunPointerPath(projectRootHash, sessionId);
+  ensureDir(path.dirname(pointerPath));
+  writeJsonAtomic(pointerPath, value);
   return value;
 }
 
-export function clearCurrentRunPointer() {
+function listProjectPointers(projectRootHash) {
+  const dir = activeRunsProjectDir(projectRootHash);
+  let entries;
   try {
+    entries = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith('.json'));
+  } catch {
+    return [];
+  }
+  const pointers = [];
+  for (const entry of entries) {
+    const result = readJson(path.join(dir, entry.name));
+    // A corrupted or unreadable pointer file is simply skipped (treated as
+    // absent) rather than crashing the caller; it is harmless leftover state.
+    if (result.ok && result.value && typeof result.value.runId === 'string') {
+      pointers.push(result.value);
+    }
+  }
+  return pointers;
+}
+
+/**
+ * One legacy migration attempt: a pre-0.1.1 install may still have a single
+ * global current-run.json. If it matches this project, adopt it into the new
+ * per-session layout and remove the legacy file. Best-effort; never throws.
+ */
+function migrateLegacyPointer(projectRootHash, sessionId) {
+  const legacy = readJson(currentRunPointerPath());
+  if (!legacy.ok || !legacy.value || legacy.value.projectRootHash !== projectRootHash) {
+    return null;
+  }
+  const adoptedSessionId = sessionId || legacy.value.sessionId || 'legacy';
+  try {
+    writeActiveRunPointer({ runId: legacy.value.runId, projectRootHash, sessionId: adoptedSessionId });
     fs.rmSync(currentRunPointerPath(), { force: true });
+  } catch {
+    // Migration is best-effort: the legacy pointer is still returned below
+    // even if adopting it into the new layout did not succeed.
+  }
+  return legacy.value;
+}
+
+/**
+ * Resolve the active run pointer for a project, preferring the exact session
+ * pointer when a sessionId is known. Falls back to the most recently updated
+ * pointer for the project (pre-concurrency behavior, and a safe default when
+ * the caller has no session context), then to one-time legacy migration.
+ */
+export function readActiveRunPointer({ projectRootHash, sessionId } = {}) {
+  if (sessionId) {
+    const direct = readJson(activeRunPointerPath(projectRootHash, sessionId));
+    if (direct.ok) return direct;
+  }
+
+  const pointers = listProjectPointers(projectRootHash);
+  if (pointers.length > 0) {
+    const best = pointers.reduce((a, b) => (String(b.updatedAt) > String(a.updatedAt) ? b : a));
+    return { ok: true, value: best };
+  }
+
+  const migrated = migrateLegacyPointer(projectRootHash, sessionId);
+  if (migrated) return { ok: true, value: migrated };
+
+  return { ok: false, error: 'not-found' };
+}
+
+/**
+ * Convenience wrapper for callers (statusline, doctor, stagnation CLI) that
+ * only know a working directory, not a structured project/session pair.
+ * sessionId defaults to CLAUDE_SESSION_ID when the host sets it; otherwise
+ * the most recently updated pointer for the project is used.
+ */
+export function readActiveRunPointerForCwd(cwd = process.cwd(), sessionId) {
+  const resolvedSessionId = sessionId
+    || (typeof process.env.CLAUDE_SESSION_ID === 'string' && process.env.CLAUDE_SESSION_ID.trim() !== ''
+      ? process.env.CLAUDE_SESSION_ID
+      : undefined);
+  return readActiveRunPointer({ projectRootHash: computeProjectRootHash(cwd), sessionId: resolvedSessionId });
+}
+
+/** Clear the pointer for a project + session pair, but only if it still names `runId`. */
+export function clearActiveRunPointer({ projectRootHash, sessionId, runId }) {
+  try {
+    const pointerPath = activeRunPointerPath(projectRootHash, sessionId);
+    const current = readJson(pointerPath);
+    if (current.ok && current.value && (!runId || current.value.runId === runId)) {
+      fs.rmSync(pointerPath, { force: true });
+    }
   } catch {
     // ignore: pointer may already be absent
   }
+}
+
+/** Clear a run's own pointer using the identity recorded in its state (no external args needed). */
+export function clearActiveRunPointerForState(state) {
+  clearActiveRunPointer({
+    projectRootHash: state.project.rootHash,
+    sessionId: state.sessionId,
+    runId: state.runId,
+  });
+}
+
+/** Remove pointer files whose run no longer exists or has reached a terminal state. Best-effort. */
+export function pruneStaleActiveRunPointers(activeRunsRoot) {
+  const removed = [];
+  let projectDirs;
+  try {
+    projectDirs = fs.readdirSync(activeRunsRoot, { withFileTypes: true }).filter((e) => e.isDirectory());
+  } catch {
+    return removed;
+  }
+  for (const projectEntry of projectDirs) {
+    const projectDir = path.join(activeRunsRoot, projectEntry.name);
+    let pointerFiles;
+    try {
+      pointerFiles = fs.readdirSync(projectDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith('.json'));
+    } catch {
+      continue;
+    }
+    for (const fileEntry of pointerFiles) {
+      const pointerPath = path.join(projectDir, fileEntry.name);
+      const pointer = readJson(pointerPath);
+      const runId = pointer.ok && pointer.value ? pointer.value.runId : null;
+      const loaded = typeof runId === 'string' ? loadState(runId) : { ok: false };
+      const isStale = !pointer.ok || !runId || !loaded.ok || loaded.value.terminalState !== null;
+      if (isStale) {
+        try {
+          fs.rmSync(pointerPath, { force: true });
+          removed.push(path.join(projectEntry.name, fileEntry.name));
+        } catch {
+          // best-effort
+        }
+      }
+    }
+  }
+  return removed;
 }

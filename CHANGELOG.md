@@ -6,6 +6,30 @@ The project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-20
+
+Hardening pass on the 0.1.0 implementation, in preparation for the first public release.
+
+### Added
+
+- MCP and external-tool write protection in the risk gate (`scripts/security/mcp-classifier.mjs`, `policies/mcp-policy.json`): SQL/database writes, Supabase writes and migrations, GitHub merge/release/repository-setting/workflow-dispatch/secret operations, Vercel production deploys, Figma writes, Sentry mutation, Slack/email/external-message sending, cloud resource writes, IAM/RBAC/DNS/firewall/secret changes, and payment/refund/payout/billing actions are now gated for any `mcp__<server>__<operation>` tool call, not just Bash/Write/Edit/NotebookEdit. Unknown MCP servers are always gated, for every operation.
+- Scoped, single-use, expiring risk approvals (ADR-0019): an approval now binds to action class, a normalized action fingerprint, target, project, run, and optional environment; it is consumed atomically under a per-run file lock and cannot be replayed, reused, or matched against an altered target.
+- Concurrent-run support (ADR-0020): the single global `current-run.json` pointer is replaced by a per-project-per-session pointer layout (`active-runs/<projectRootHash>/<sessionId>.json`), with legacy-pointer migration and traversal/symlink-safe path resolution, so multiple simultaneous projects and Claude Code sessions no longer share or overwrite run state.
+- Hook-scoping to the `run` skill (ADR-0021): KRYLO's six gate/telemetry hooks now live in the `run` skill's own frontmatter instead of plugin-wide `hooks/hooks.json`, so an ordinary Claude Code session that never invokes `/krylo:run` launches zero KRYLO hook processes.
+- Separate Claude Code current-version compatibility check (ADR-0022): `.github/workflows/claude-code-compat.yml` runs weekly/on-demand against the latest published CLI without ever gating a release; the pinned minimum-supported floor in `validate-plugin.yml` is unchanged and unaffected by its outcome.
+- Regression test rejecting any committed Claude Code local-runtime, lock, or session file (`tests/governance/repo-hygiene.test.mjs`).
+- Repository-quality documentation: CI/license/security badges, a quick-usage example, a Known Limitations section, a v0.2 roadmap, an explicit "Risk Gate is defense in depth, not an OS sandbox" statement, rollback instructions, and security-sensitive contribution guidance.
+
+### Fixed
+
+- Removed the committed local Claude Code runtime lock file `.claude/scheduled_tasks.lock` (leaked a PID, session id, and timestamps into the public repository) and added `.gitignore` rules for local Claude state.
+- `max_orbit_cycles` cap semantics (low=3/medium=5/high=7 risk-based budget, cap only ever lowers it, platform-safe maximum 10) are now consistently documented and reported across the plugin manifest, runtime, `references/orbit-policy.md`, `/krylo:doctor` output, and tests; `doctor.mjs` no longer masks the configured cap as a sensitive value.
+- Independent review (code + security) found and fixed, before any release: an MCP-classifier bypass letting camelCase write operations (e.g. `mergePullRequest`, `createRefund`) pass ungated; an MCP-classifier bypass letting an attacker-chosen server name (e.g. containing `git`, or prefixed with a real catalog id like `context7-`) inherit an unrelated trusted server's classification; a lost-update race between `update-state.mjs` and the risk gate's approval consumption (`update-state.mjs` now shares the same per-run file lock); and — found while fixing that race — a genuine TOCTOU race in the path-resolution helper (`scripts/lib/paths.mjs`) that could crash under concurrent lock-file creation/removal on Windows.
+
+### Security
+
+- See `docs/adr/0018-mcp-and-external-tool-gating.md` through `docs/adr/0022-claude-code-compatibility-policy.md` for the full architecture-decision record of this hardening pass.
+
 ## [0.1.0] - 2026-07-19
 
 Initial implementation of the KRYLO plugin and marketplace from blueprint 0.1.2.
@@ -30,7 +54,9 @@ Initial implementation of the KRYLO plugin and marketplace from blueprint 0.1.2.
 - `BLUEPRINT_MANIFEST.json` remains the immutable blueprint record; `RELEASE_MANIFEST.json` records the implemented repository.
 - Publication (repository creation, push, release, marketplace submission) is approval-gated and did not occur in this release preparation.
 
-## [0.1.2] - 2026-07-19
+## [blueprint-0.1.2] - 2026-07-19
+
+Pre-implementation blueprint-document change, not a plugin release (the plugin's own first release is `0.1.0` above). Renamed from a bare `[0.1.2]` heading, which collided with real plugin version numbers.
 
 ### Changed
 
@@ -39,7 +65,9 @@ Initial implementation of the KRYLO plugin and marketplace from blueprint 0.1.2.
 - Added an explicit 130-line maximum for the root `CLAUDE.md` to the architecture, implementation plan, prompt contract, manifest, and review checklist.
 - Regenerated blueprint hashes and the distribution archive.
 
-## [0.1.1] - 2026-07-19
+## [blueprint-0.1.1] - 2026-07-19
+
+Pre-implementation blueprint-document change, not a plugin release. Renamed from a bare `[0.1.1]` heading, which collided with the real plugin release `[0.1.1] - 2026-07-20` above.
 
 ### Added
 
@@ -48,7 +76,3 @@ Initial implementation of the KRYLO plugin and marketplace from blueprint 0.1.2.
 ### Changed
 
 - Reading order, implementation contract, architecture, manifest, and review checklist were updated to include `CLAUDE.md`.
-
-## [0.1.0] - Planned
-
-Initial public plugin release.

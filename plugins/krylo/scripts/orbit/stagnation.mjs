@@ -36,8 +36,8 @@ export function assessStagnation(state) {
 }
 
 async function cli() {
-  const { readCurrentRunPointer, loadState } = await import('../lib/state.mjs');
-  const pointer = readCurrentRunPointer();
+  const { readActiveRunPointerForCwd, loadState } = await import('../lib/state.mjs');
+  const pointer = readActiveRunPointerForCwd();
   if (!pointer.ok) {
     process.stdout.write(JSON.stringify({ ok: false, error: 'no-current-run' }));
     process.exit(1);

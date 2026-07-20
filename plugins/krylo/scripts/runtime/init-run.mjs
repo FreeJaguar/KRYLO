@@ -8,7 +8,7 @@ import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 
 import { getDataRoot } from '../lib/paths.mjs';
-import { createInitialState, saveState, writeCurrentRunPointer } from '../lib/state.mjs';
+import { createInitialState, saveState, writeActiveRunPointer } from '../lib/state.mjs';
 import { redactText } from '../lib/redact.mjs';
 
 const RISK_BUDGETS = { low: 3, medium: 5, high: 7 };
@@ -96,7 +96,7 @@ function main() {
     return;
   }
 
-  writeCurrentRunPointer({ runId, projectRootHash: state.project.rootHash, sessionId: args.session });
+  writeActiveRunPointer({ runId, projectRootHash: state.project.rootHash, sessionId: args.session });
 
   const statePath = path.join(getDataRoot(), 'runs', runId, 'state.json');
   console.log(JSON.stringify({

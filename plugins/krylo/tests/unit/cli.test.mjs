@@ -6,13 +6,18 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { computeProjectRootHash } from '../../scripts/lib/state.mjs';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPTS_ROOT = path.resolve(__dirname, '..', '..', 'scripts');
 
-function runCli(scriptRelPath, args, dataDir) {
+function runCli(scriptRelPath, args, dataDir, extraEnv = {}) {
   const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath), ...args], {
     encoding: 'utf8',
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir },
+    // Tests that omit --project-dir rely on process.cwd() matching the
+    // fixture's project dir (dataDir), exactly as init-run.mjs was invoked.
+    cwd: dataDir,
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, ...extraEnv },
   });
   let json;
   try {
@@ -145,9 +150,12 @@ test('update-state.mjs full flow: criterion -> evidence -> proven -> VERIFIED_CO
     assert.equal(stateRaw.terminalState, 'VERIFIED_COMPLETE');
     assert.equal(stateRaw.phase, 'COMPLETING');
 
-    // Terminal transition clears the current-run pointer for this run.
-    const pointerPath = path.join(dataDir, 'current-run.json');
+    // Terminal transition clears this run's active-run pointer.
+    const projectRootHash = computeProjectRootHash(dataDir);
+    const pointerPath = path.join(dataDir, 'active-runs', projectRootHash, 'session-cli-3.json');
     assert.equal(fs.existsSync(pointerPath), false);
+    const legacyPointerPath = path.join(dataDir, 'current-run.json');
+    assert.equal(fs.existsSync(legacyPointerPath), false);
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
@@ -245,6 +253,43 @@ test('update-state.mjs: risk approval request and resolve', () => {
     const stateRaw = JSON.parse(fs.readFileSync(path.join(dataDir, 'runs', runId, 'state.json'), 'utf8'));
     assert.equal(stateRaw.riskApprovals[0].status, 'approved');
     assert.equal(stateRaw.riskApprovals[0].actionClass, 'git-push');
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('init-run.mjs: max_orbit_cycles is a cap that can only lower the risk-based budget, never raise it', () => {
+  const dataDir = mkTempDataDir();
+  try {
+    // A low-risk run's budget (3) must not be raised by a generous cap.
+    const lowUncapped = runCli('runtime/init-run.mjs', [
+      '--goal', 'orbit cap low, generous cap',
+      '--session', 'session-cli-cap-1',
+      '--project-dir', dataDir,
+      '--lane', 'PATCH',
+      '--risk', 'low',
+    ], dataDir, { CLAUDE_PLUGIN_OPTION_MAX_ORBIT_CYCLES: '10' });
+    assert.equal(lowUncapped.json.budget, 3);
+
+    // A high-risk run's budget (7) must be lowered by a stricter cap.
+    const highCapped = runCli('runtime/init-run.mjs', [
+      '--goal', 'orbit cap high, strict cap',
+      '--session', 'session-cli-cap-2',
+      '--project-dir', dataDir,
+      '--lane', 'BUILD',
+      '--risk', 'high',
+    ], dataDir, { CLAUDE_PLUGIN_OPTION_MAX_ORBIT_CYCLES: '2' });
+    assert.equal(highCapped.json.budget, 2);
+
+    // An out-of-range cap value is ignored; the risk-based default applies.
+    const outOfRange = runCli('runtime/init-run.mjs', [
+      '--goal', 'orbit cap out of range is ignored',
+      '--session', 'session-cli-cap-3',
+      '--project-dir', dataDir,
+      '--lane', 'BUILD',
+      '--risk', 'medium',
+    ], dataDir, { CLAUDE_PLUGIN_OPTION_MAX_ORBIT_CYCLES: '999' });
+    assert.equal(outOfRange.json.budget, 5);
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
