@@ -21,4 +21,9 @@ jobs:
           persist-credentials: false
       - name: Run Semgrep (pinned, metrics off)
         run: |
-          pipx run semgrep==1.170.0 scan --config p/ci --metrics=off --error --exclude 'plugin/**'
+          # plugins/krylo/tests/** is excluded because several fixtures
+          # intentionally contain synthetic, non-functional secret-shaped
+          # strings (see .github/trufflehog-exclude.txt) to test redaction;
+          # application code is fully scanned.
+          pipx run semgrep==1.170.0 scan --config p/ci --metrics=off --error \
+            --exclude 'plugin/**' --exclude 'plugins/krylo/tests/**'
