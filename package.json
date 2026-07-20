@@ -6,15 +6,17 @@
   "type": "module",
   "license": "Apache-2.0",
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   },
   "scripts": {
-    "test": "node --test plugins/krylo/tests/",
-    "test:unit": "node --test plugins/krylo/tests/unit/",
-    "test:hooks": "node --test plugins/krylo/tests/hooks/",
-    "test:security": "node --test plugins/krylo/tests/security/",
-    "test:platform": "node --test plugins/krylo/tests/platform/",
-    "test:integration": "node --test plugins/krylo/tests/integration/",
+    "test": "node --test \"plugins/krylo/tests/**/*.test.mjs\"",
+    "test:unit": "node --test \"plugins/krylo/tests/unit/*.test.mjs\"",
+    "test:hooks": "node --test \"plugins/krylo/tests/hooks/*.test.mjs\"",
+    "test:security": "node --test \"plugins/krylo/tests/security/*.test.mjs\"",
+    "test:platform": "node --test \"plugins/krylo/tests/platform/*.test.mjs\"",
+    "test:status": "node --test \"plugins/krylo/tests/status/*.test.mjs\"",
+    "test:setup": "node --test \"plugins/krylo/tests/setup/*.test.mjs\"",
+    "test:governance": "node --test \"plugins/krylo/tests/governance/*.test.mjs\"",
     "syntax": "node plugins/krylo/scripts/validation/validate-runtime.mjs --syntax-only",
     "validate:runtime": "node plugins/krylo/scripts/validation/validate-runtime.mjs"
   }
