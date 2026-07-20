@@ -70,9 +70,12 @@ export function safeJoin(root, ...segments) {
   const resolvedRoot = path.resolve(root);
   const rootReal = fs.existsSync(resolvedRoot) ? fs.realpathSync(resolvedRoot) : resolvedRoot;
 
-  // path.resolve (unlike path.join) collapses `..` and lets an absolute
-  // segment override the base, which is exactly the injection we must catch.
-  const candidate = path.resolve(resolvedRoot, ...segments);
+  // Build the candidate from the REAL root so a data root that is itself
+  // reached through a symlink (e.g. macOS /tmp) does not fail-closed on
+  // legitimate paths. path.resolve (unlike path.join) collapses `..` and lets
+  // an absolute segment override the base, which is exactly the injection we
+  // must catch.
+  const candidate = path.resolve(rootReal, ...segments);
   assertWithinRoot(rootReal, candidate);
 
   const candidateReal = resolveRealOrNearestExisting(candidate);

@@ -49,10 +49,15 @@ async function main() {
   let originalOut = '';
   try {
     const config = readJson(path.join(getDataRoot(), 'wrapper-config.json'));
-    const originalCommand = config.ok ? config.value?.originalCommand : null;
-    if (typeof originalCommand === 'string' && originalCommand.trim() !== '') {
-      // Executes the user-approved command captured at install time.
-      const res = spawnSync(originalCommand, { shell: true, input: stdinRaw, encoding: 'utf8', timeout: 2000 });
+    // Contract: originalCommand is an argv ARRAY captured by user-approved
+    // setup. Executed without a shell so a planted config file cannot smuggle
+    // shell metacharacters into an execution (defense-in-depth; the data root
+    // is additionally write-protected by the risk gate).
+    const argv = config.ok && Array.isArray(config.value?.originalCommand)
+      ? config.value.originalCommand.filter((a) => typeof a === 'string')
+      : null;
+    if (argv && argv.length > 0) {
+      const res = spawnSync(argv[0], argv.slice(1), { shell: false, input: stdinRaw, encoding: 'utf8', timeout: 2000 });
       if (typeof res.stdout === 'string') originalOut = res.stdout.trim();
     }
   } catch {

@@ -19,6 +19,11 @@ function decision(res) {
 
 const DENIED_COMMANDS = [
   ['git push origin main', 'git-push or git-force'],
+  ['git -C /some/repo push origin main', 'git-push via -C (security finding 1)'],
+  ['git -c user.name=x push origin main', 'git-push via -c'],
+  ['git --git-dir=/r/.git push', 'git-push via --git-dir'],
+  ['git push origin +main', 'force via +refspec'],
+  ['git -C ../other reset --hard HEAD~1', 'destructive via -C'],
   ['git push --force origin main', 'force'],
   ['npm publish', 'publish'],
   ['gh release create v1.0.0', 'release'],
@@ -72,20 +77,24 @@ test('risk-gate: benign commands pass silently during an active run', () => {
 
 test('risk-gate: sensitive file targets are denied for Write and Bash', () => {
   const dataDir = mkTempDataDir();
+  // Distinct project dir: in production the project is never the data root,
+  // and a benign relative write must not resolve into the protected root.
+  const projectDir = mkTempDataDir('krylo-proj-');
   try {
-    createActiveRun(dataDir);
+    createActiveRun(dataDir, { projectDir });
     for (const target of ['.env', '.env.local', 'config/secrets.yaml', '~/.ssh/id_rsa']) {
-      const res = runHook(GATE, writePayload(dataDir, target), dataDir);
+      const res = runHook(GATE, writePayload(projectDir, target), dataDir);
       assert.equal(decision(res), 'deny', `expected deny for Write ${target}`);
     }
     for (const command of ['cat .env', 'echo TOKEN=x >> .env']) {
-      const res = runHook(GATE, bashPayload(dataDir, command), dataDir);
+      const res = runHook(GATE, bashPayload(projectDir, command), dataDir);
       assert.equal(decision(res), 'deny', `expected deny for: ${command}`);
     }
-    const ok = runHook(GATE, writePayload(dataDir, 'src/app.js'), dataDir);
+    const ok = runHook(GATE, writePayload(projectDir, 'src/app.js'), dataDir);
     assert.equal(decision(ok), null);
   } finally {
     cleanup(dataDir);
+    cleanup(projectDir);
   }
 });
 
@@ -108,6 +117,40 @@ test('risk-gate: approved override allows the matching class only', () => {
 
     const publishRes = runHook(GATE, bashPayload(dataDir, 'npm publish'), dataDir);
     assert.equal(decision(publishRes), 'deny');
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate: KRYLO data root is integrity-protected (security finding 2)', () => {
+  const dataDir = mkTempDataDir();
+  try {
+    createActiveRun(dataDir);
+    const stateTarget = `${dataDir.replace(/\\/g, '/')}/runs/x/state.json`;
+
+    // Direct Write into the data root -> deny
+    const w = runHook(GATE, writePayload(dataDir, stateTarget), dataDir);
+    assert.equal(decision(w), 'deny');
+
+    // Bash commands naming the pointer, wrapper config, or data root -> deny
+    for (const command of [
+      `rm ${dataDir.replace(/\\/g, '/')}/current-run.json`,
+      'rm ~/.claude/plugins/data/krylo/current-run.json',
+      `echo '{"originalCommand":["evil"]}' > ${dataDir.replace(/\\/g, '/')}/wrapper-config.json`,
+      'del %USERPROFILE%\\.claude\\plugins\\data\\krylo\\current-run.json',
+    ]) {
+      const res = runHook(GATE, bashPayload(dataDir, command), dataDir);
+      assert.equal(decision(res), 'deny', `expected deny for: ${command}`);
+    }
+
+    // Self-approval attempt through Edit -> deny
+    const e = runHook(GATE, {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Edit',
+      tool_input: { file_path: stateTarget, old_string: '"status": "pending"', new_string: '"status": "approved"' },
+      cwd: dataDir,
+    }, dataDir);
+    assert.equal(decision(e), 'deny');
   } finally {
     cleanup(dataDir);
   }
