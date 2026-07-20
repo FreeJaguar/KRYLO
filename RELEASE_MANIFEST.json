@@ -1,9 +1,9 @@
 {
   "name": "krylo-release",
   "version": "0.1.0",
-  "generatedAt": "2026-07-20T07:05:24.271Z",
+  "generatedAt": "2026-07-20T07:26:08.371Z",
   "note": "Per-file SHA-256 of the implemented 0.1.0 repository tree (git-tracked files at generation time, excluding this manifest). BLUEPRINT_MANIFEST.json remains the immutable record of blueprint 0.1.2 as delivered in the baseline commit.",
-  "fileCount": 235,
+  "fileCount": 236,
   "files": [
     {
       "path": ".claude-plugin/marketplace.json",
@@ -22,8 +22,8 @@
     },
     {
       "path": ".github/CODEOWNERS",
-      "bytes": 747,
-      "sha256": "6b7342d41424a197eb3c6cb97f60179317a55345cd3b6cdfdb1f245bac701940"
+      "bytes": 741,
+      "sha256": "54d2f69ef3a62706e25e1ff2670c91d41241992bd033d6aee60defde1f880f32"
     },
     {
       "path": ".github/ISSUE_TEMPLATE/bug_report.md",
@@ -49,6 +49,11 @@
       "path": ".github/pull_request_template.md",
       "bytes": 464,
       "sha256": "0ad479a12f2d76782e67180fb4c2777708a4e6769cf628b14240d031d2903ea8"
+    },
+    {
+      "path": ".github/trufflehog-exclude.txt",
+      "bytes": 802,
+      "sha256": "84750166ca94995173a54c0283ced73161da01e3ed193352a40073b5ba7082d9"
     },
     {
       "path": ".github/workflows/actions-security.yml",
@@ -77,13 +82,13 @@
     },
     {
       "path": ".github/workflows/secret-scan.yml",
-      "bytes": 586,
-      "sha256": "8b7574e28bc9d9a57b823b3dd9fff6519ea376fb668b0aa39c581189edbd6d96"
+      "bytes": 999,
+      "sha256": "82cbceae0a04741fb8bcb8d2fee0d5c891e98702f065c0a75a7f850891e944e5"
     },
     {
       "path": ".github/workflows/semgrep.yml",
-      "bytes": 521,
-      "sha256": "bc765c8bdc35778b40081100820e4eaa3d7c48322dc774ca9e6f92f91ca891c7"
+      "bytes": 839,
+      "sha256": "f91bc1e629d83cf4d3de123ef6ed53936a5a5fdd5cc215ff4e60cd7f89e89031"
     },
     {
       "path": ".github/workflows/test.yml",
@@ -167,8 +172,8 @@
     },
     {
       "path": "RELEASE_READINESS.md",
-      "bytes": 9484,
-      "sha256": "17f9b352f6e2ab4ac894533edbcaa6f2b2cffcc2d694655ce923c64588f449e3"
+      "bytes": 11950,
+      "sha256": "a9e94d1379e699253d2d32f31c713ddc14e058de4318d3ba8c42f08c295c09e6"
     },
     {
       "path": "REVIEW_CHECKLIST.md",
