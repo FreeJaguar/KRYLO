@@ -1,7 +1,7 @@
 {
   "name": "krylo-release",
   "version": "0.1.0",
-  "generatedAt": "2026-07-20T07:26:08.371Z",
+  "generatedAt": "2026-07-20T07:39:45.060Z",
   "note": "Per-file SHA-256 of the implemented 0.1.0 repository tree (git-tracked files at generation time, excluding this manifest). BLUEPRINT_MANIFEST.json remains the immutable record of blueprint 0.1.2 as delivered in the baseline commit.",
   "fileCount": 236,
   "files": [
@@ -42,8 +42,8 @@
     },
     {
       "path": ".github/dependabot.yml",
-      "bytes": 248,
-      "sha256": "fb1b1a6ed4ae186fba80113d46b38a139645c58121f77edb5c32e5aa57e92c52"
+      "bytes": 320,
+      "sha256": "c936349820514111eb0d1231acbcef2a767e379bbda28add91da0b30a5e7d251"
     },
     {
       "path": ".github/pull_request_template.md",
