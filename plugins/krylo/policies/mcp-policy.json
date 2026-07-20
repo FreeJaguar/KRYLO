@@ -36,5 +36,35 @@
       "id": "mcp-egress-declared",
       "rule": "Each server's data egress must be declared in the catalog; undeclared flows are denied."
     }
+  ],
+  "$actionGateComment": "Consumed by scripts/security/risk-gate.mjs to classify PreToolUse calls to any tool matching mcp__<server>__<operation>. A server is 'known' when its name (case-insensitive substring) appears in serverActionClasses OR its id/publisher/source is present in catalog/tools.json (any category, since the underlying service's write risk does not depend on CLI vs MCP transport). An unknown server is always gated (unknownServerClass), for every operation, read or write, because KRYLO cannot assess a service it has never classified. A known server is gated only for operations whose name matches writeVerbPattern (or, for servers with treatAnyExecuteAsWrite, any query/execute/statement-shaped operation, since arbitrary SQL cannot be judged read-only from its name).",
+  "unknownServerClass": "other",
+  "writeVerbPattern": "(^|[_-])(create|update|delete|remove|put|post|send|write|set|insert|upsert|merge|deploy|publish|release|push|reset|drop|truncate|pay|charge|refund|payout|invite|grant|revoke|apply|migrate|execute|run|modify|edit|upload|add|enable|disable|toggle|cancel|subscribe|unsubscribe|close|archive|restart|kill|terminate|provision|rotate|transfer|rename|assign|approve|reject|invoke|trigger|dispatch)([_-]|$)",
+  "sqlLikeOperationPattern": "sql|query|statement|execute",
+  "serverActionClasses": [
+    { "match": "^git$", "writeClass": "repository-admin", "reason": "Git write operations require explicit user approval.", "operationOverrides": [
+      { "pattern": "force", "class": "git-force" },
+      { "pattern": "reset", "class": "git-force" },
+      { "pattern": "push", "class": "git-push" },
+      { "pattern": "merge", "class": "merge" }
+    ] },
+    { "match": "github", "writeClass": "repository-admin", "reason": "GitHub write operations require explicit user approval.", "operationOverrides": [
+      { "pattern": "merge", "class": "merge" },
+      { "pattern": "release", "class": "release" },
+      { "pattern": "secret", "class": "iam-or-secrets" },
+      { "pattern": "dispatch", "class": "repository-admin" },
+      { "pattern": "push", "class": "git-push" }
+    ] },
+    { "match": "supabase", "writeClass": "production-data-write", "reason": "Supabase writes and migrations require explicit user approval.", "treatAnyExecuteAsWrite": true, "operationOverrides": [
+      { "pattern": "deploy", "class": "production-deploy" }
+    ] },
+    { "match": "vercel", "writeClass": "production-deploy", "reason": "Vercel production deploys require explicit user approval." },
+    { "match": "figma", "writeClass": "external-write", "reason": "Figma writes require explicit user approval." },
+    { "match": "sentry", "writeClass": "external-write", "reason": "Sentry mutation requires explicit user approval." },
+    { "match": "stripe|paypal|braintree|adyen", "writeClass": "payment", "reason": "Payment, refund, payout, and billing actions require explicit user approval." },
+    { "match": "slack|sendgrid|twilio|mailgun|discord|teams|email", "writeClass": "external-message", "reason": "External messages to broad audiences require explicit user approval." },
+    { "match": "aws|gcp|azure|gcloud|kubernetes|k8s|docker|terraform|pulumi|cloud", "writeClass": "production-deploy", "reason": "Cloud resource writes require explicit user approval." },
+    { "match": "vault|iam|rbac|dns|firewall|secretsmanager|secret-manager", "writeClass": "iam-or-secrets", "reason": "IAM, RBAC, DNS, firewall, and secret changes require explicit user approval." },
+    { "match": "postgres|mysql|mongo|database|sql", "writeClass": "production-data-write", "reason": "Database writes require explicit user approval.", "treatAnyExecuteAsWrite": true }
   ]
 }

@@ -13,7 +13,7 @@ import { spawnSync } from 'node:child_process';
 
 import { getDataRoot } from '../lib/paths.mjs';
 import { readJson } from '../lib/atomic.mjs';
-import { readCurrentRunPointer, loadState } from '../lib/state.mjs';
+import { readActiveRunPointerForCwd, loadState } from '../lib/state.mjs';
 
 async function readStdinRaw() {
   try {
@@ -31,7 +31,7 @@ async function readStdinRaw() {
 
 function kryloSegment() {
   try {
-    const pointer = readCurrentRunPointer();
+    const pointer = readActiveRunPointerForCwd();
     if (!pointer.ok || !pointer.value?.runId) return '';
     const loaded = loadState(pointer.value.runId);
     if (!loaded.ok) return '';

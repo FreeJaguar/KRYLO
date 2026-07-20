@@ -1,7 +1,7 @@
 {
   "name": "krylo",
   "displayName": "KRYLO",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Autonomous, evidence-driven software-development workflow. One explicit command turns a task into a controlled run: acceptance criteria, minimal agent team, deterministic verification, independent review, bounded Orbit loop, and an evidence-backed final report.",
   "author": {
     "name": "KRYLO Maintainers"
@@ -31,7 +31,7 @@
     "max_orbit_cycles": {
       "type": "number",
       "title": "Maximum Orbit cycles",
-      "description": "Upper bound for Orbit correction cycles in one run. KRYLO may reduce this value but never exceeds the platform-safe maximum.",
+      "description": "A cap, not a target. Each run still starts from its risk-based Orbit budget (low=3, medium=5, high=7); this setting can only lower that budget further for every run, never raise it, and never above the platform-safe maximum of 10.",
       "default": 7,
       "min": 1,
       "max": 10

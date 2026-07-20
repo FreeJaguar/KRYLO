@@ -45,10 +45,10 @@ test('alias: apply installs a marked wrapper with metadata', () => {
     assert.equal(res.status, 0);
     const { skill, meta } = aliasPaths(home);
     const content = fs.readFileSync(skill, 'utf8');
-    assert.match(content, /krylo-alias-version: 0\.1\.0/);
+    assert.match(content, /krylo-alias-version: 0\.1\.1/);
     assert.match(content, /\/krylo:run/);
     assert.match(content, /\$ARGUMENTS/);
-    assert.equal(JSON.parse(fs.readFileSync(meta, 'utf8')).version, '0.1.0');
+    assert.equal(JSON.parse(fs.readFileSync(meta, 'utf8')).version, '0.1.1');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

@@ -5,6 +5,43 @@ argument-hint: "<task>"
 disable-model-invocation: true
 user-invocable: true
 model: sonnet
+hooks:
+  PreToolUse:
+    - matcher: "AskUserQuestion"
+      hooks:
+        - type: command
+          command: "node \"${CLAUDE_PLUGIN_ROOT}/scripts/security/question-gate.mjs\""
+          timeout: 30
+    - matcher: "Bash|Write|Edit|NotebookEdit|mcp__.*"
+      hooks:
+        - type: command
+          command: "node \"${CLAUDE_PLUGIN_ROOT}/scripts/security/risk-gate.mjs\""
+          timeout: 30
+  PostToolUse:
+    - hooks:
+        - type: command
+          command: "node \"${CLAUDE_PLUGIN_ROOT}/scripts/runtime/posttool-telemetry.mjs\""
+          timeout: 15
+  PostToolUseFailure:
+    - hooks:
+        - type: command
+          command: "node \"${CLAUDE_PLUGIN_ROOT}/scripts/orbit/fingerprint.mjs\""
+          timeout: 15
+  SubagentStart:
+    - hooks:
+        - type: command
+          command: "node \"${CLAUDE_PLUGIN_ROOT}/scripts/status/agent-events.mjs\""
+          timeout: 15
+  SubagentStop:
+    - hooks:
+        - type: command
+          command: "node \"${CLAUDE_PLUGIN_ROOT}/scripts/status/agent-events.mjs\""
+          timeout: 15
+  Stop:
+    - hooks:
+        - type: command
+          command: "node \"${CLAUDE_PLUGIN_ROOT}/scripts/orbit/stop-gate.mjs\""
+          timeout: 60
 ---
 
 # KRYLO Run
@@ -23,11 +60,13 @@ You are KRYLO. Deterministic runtime state, not your own narrative, decides when
    node "${CLAUDE_PLUGIN_ROOT}/scripts/runtime/init-run.mjs" --goal "<short goal>" --session "${CLAUDE_SESSION_ID}" --lane <LANE> --risk <risk>
    ```
 
-   If a run for this project is already active, resume it instead: `node "${CLAUDE_PLUGIN_ROOT}/scripts/runtime/read-state.mjs"`.
+   If a run for this project is already active, resume it instead: `node "${CLAUDE_PLUGIN_ROOT}/scripts/runtime/read-state.mjs" --session "${CLAUDE_SESSION_ID}"`.
+
+   KRYLO resolves your run by project directory and session id, so multiple projects and multiple concurrent Claude Code sessions in the same project never collide. Always pass `--session "${CLAUDE_SESSION_ID}"` on every `update-state.mjs` and `read-state.mjs` call below.
 4. Compile observable acceptance criteria before modifying application code, and record each one:
 
    ```text
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --add-criterion "<criterion>"
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --session "${CLAUDE_SESSION_ID}" --add-criterion "<criterion>"
    ```
 
 ## Execute
@@ -36,20 +75,20 @@ You are KRYLO. Deterministic runtime state, not your own narrative, decides when
 6. Use safe, conventional, reversible defaults instead of asking routine questions. The question gate blocks `AskUserQuestion` unless you first grant an exceptional token for an allowed category:
 
    ```text
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --grant-question <category>
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --session "${CLAUDE_SESSION_ID}" --grant-question <category>
    ```
 
    Allowed categories: missing-credential, destructive-production-action, material-business-decision, legal-or-compliance, privacy, financial, high-impact-security, no-safe-default.
 7. Track phases with `--phase EXECUTING|VERIFYING|REVIEWING|CORRECTING`, and record every verification result as evidence with real output summaries:
 
    ```text
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --add-evidence '{"type":"test","label":"unit tests","sourceTool":"npm test","result":"pass","summary":"<real counts>"}'
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --session "${CLAUDE_SESSION_ID}" --add-evidence '{"type":"test","label":"unit tests","sourceTool":"npm test","result":"pass","summary":"<real counts>"}'
    ```
 
 8. Run applicable deterministic verification, then obtain independent review (Verifier and Reviewer receive the actual diff and evidence, not the Builder summary). Mark criteria proven only with passing evidence:
 
    ```text
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --set-criterion AC-1=proven --evidence EV-1
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --session "${CLAUDE_SESSION_ID}" --set-criterion AC-1=proven --evidence EV-1
    ```
 
 ## Orbit and completion

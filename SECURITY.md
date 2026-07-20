@@ -17,6 +17,9 @@ KRYLO is a high-privilege development orchestrator. Its security goal is not to 
 - Production and destructive actions require approval.
 - The Orbit loop is bounded.
 - Tool versions may be blocked independently of tool names.
+- MCP and other external tools are classified by server/namespace and operation, not by tool name alone; an MCP server not recognized in the Tool Trust Registry is always gated, for both read- and write-shaped operations (`docs/adr/0018-mcp-and-external-tool-gating.md`).
+- Risk approvals are scoped, single-use, and time-limited: bound to the exact action fingerprint, project, run, and (when set) environment, consumed atomically on first use, and refused on reuse, expiry, or any altered target (`docs/adr/0019-scoped-single-use-approvals.md`).
+- **The Risk Gate is defense in depth, not an operating-system sandbox.** It is a policy layer that intercepts tool calls Claude Code reports to it; it does not confine process, filesystem, or network access at the OS level. Treat it as one control among several (least-privileged credentials, isolated environments, human approval), not as a substitute for OS- or container-level isolation.
 
 ## Mandatory approval classes
 

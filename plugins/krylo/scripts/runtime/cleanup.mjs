@@ -7,8 +7,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { runsRootDir, telemetryRootDir } from '../lib/paths.mjs';
-import { loadState } from '../lib/state.mjs';
+import { runsRootDir, telemetryRootDir, activeRunsRootDir } from '../lib/paths.mjs';
+import { loadState, pruneStaleActiveRunPointers } from '../lib/state.mjs';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -109,6 +109,12 @@ function main() {
       kept.telemetry.push(runId);
     }
   }
+
+  // Stale active-run pointers (terminal or orphaned runs) are always safe to
+  // drop regardless of retention: a pointer to a finished or missing run is
+  // never useful, and pruning it never removes another project's or
+  // session's pointer.
+  removed.activeRunPointers = args.dryRun ? [] : pruneStaleActiveRunPointers(activeRunsRootDir());
 
   console.log(JSON.stringify({ ok: true, dryRun: args.dryRun, retentionDays, removed, kept }));
   process.exit(0);

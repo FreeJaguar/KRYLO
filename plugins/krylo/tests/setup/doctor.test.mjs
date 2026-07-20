@@ -40,7 +40,7 @@ test('doctor: healthy environment -> exit 0, correct inventory, read-only', () =
     const res = runDoctor(dataDir, home);
     assert.equal(res.status, 0, res.stdout);
     assert.equal(res.json.ok, true);
-    assert.equal(res.json.versions.krylo, '0.1.0');
+    assert.equal(res.json.versions.krylo, '0.1.1');
     assert.equal(res.json.components.skills, 5);
     assert.equal(res.json.components.agents, 12);
     assert.equal(res.json.components.hooksHealthy, true);

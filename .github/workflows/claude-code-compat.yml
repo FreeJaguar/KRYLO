@@ -1,0 +1,42 @@
+name: claude-code-compat
+
+# Separate current-version compatibility check (docs/adr/0022-claude-code-compatibility-policy.md).
+# Deliberately never runs on push/pull_request: it installs the current
+# published Claude Code CLI (unpinned, on purpose) and must never gate a PR
+# or a release. validate-plugin.yml keeps the pinned minimum-supported floor.
+on:
+  schedule:
+    - cron: "17 4 * * 1" # weekly, Monday 04:17 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: claude-code-compat-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  compat:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Install current Claude Code CLI (intentionally unpinned)
+        run: npm install -g @anthropic-ai/claude-code@latest
+      - name: Report installed version
+        run: claude --version
+      - name: Validate plugin manifest (strict)
+        run: claude plugin validate --strict plugins/krylo
+      - name: Validate marketplace manifest (strict)
+        run: claude plugin validate --strict .
+      - name: Syntax check runtime scripts
+        run: npm run syntax
+      - name: Runtime self-validation
+        run: npm run validate:runtime
+      - name: Run full test suite
+        run: npm test
