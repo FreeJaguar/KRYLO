@@ -144,8 +144,20 @@ function isStringOrNull(v) {
   return v === null || isString(v);
 }
 
+/**
+ * `path.resolve` only understands backslash as a separator on Windows: on
+ * POSIX it treats a literal `\` as a normal filename character, so a
+ * Windows-spelled absolute path (`C:\Users\...`) and its forward-slash
+ * equivalent (`C:/Users/...`) resolve to two different, unrelated paths when
+ * this runs on Linux/macOS instead of Windows — breaking the project-root
+ * hash's one guarantee (the same logical project always hashes the same).
+ * Converting `\` to `/` before resolving makes the two spellings identical
+ * *before* any OS-specific resolution happens, so the hash is stable
+ * regardless of which separator style was used to spell the path, on any OS.
+ */
 function normalizeProjectPath(projectDir) {
-  const resolved = path.resolve(projectDir);
+  const slashified = String(projectDir).replace(/\\/g, '/');
+  const resolved = path.resolve(slashified);
   return resolved.split(path.sep).join('/').toLowerCase();
 }
 
