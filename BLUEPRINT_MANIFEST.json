@@ -351,197 +351,197 @@
       "sha256": "d21991ef2f991090ddaec23094675a8b422f56fafeaceea146be2e5cd9e49f74"
     },
     {
-      "path": "plugin/README.md",
+      "path": "archive/blueprint-v0.1.2/README.md",
       "bytes": 890,
       "sha256": "55b161238340589792eecaab1d6ae7a15c7971c2e6bf9f82dcf50bf2a5c5c758"
     },
     {
-      "path": "plugin/adapters/README.md",
+      "path": "archive/blueprint-v0.1.2/adapters/README.md",
       "bytes": 517,
       "sha256": "868c7d8582176c5bf55b8fb9ded476f74c9236f4bcb25bcda0c944106f7ce456"
     },
     {
-      "path": "plugin/agents/README.md",
+      "path": "archive/blueprint-v0.1.2/agents/README.md",
       "bytes": 729,
       "sha256": "9155ac6d49230b13da011ab285160d659ebb994ec9a6865494bb631f7f95e86e"
     },
     {
-      "path": "plugin/agents/ai-eval-engineer.md",
+      "path": "archive/blueprint-v0.1.2/agents/ai-eval-engineer.md",
       "bytes": 928,
       "sha256": "6e38342a9b6ad8ba89fe7abad10383615e5a8d8fe8d385f717038fcaaa0d59d3"
     },
     {
-      "path": "plugin/agents/architect.md",
+      "path": "archive/blueprint-v0.1.2/agents/architect.md",
       "bytes": 847,
       "sha256": "b380f2b3830e6372d9d91953d7d8ec63facd129dc0c2ac52fe789dbfd2162f98"
     },
     {
-      "path": "plugin/agents/builder.md",
+      "path": "archive/blueprint-v0.1.2/agents/builder.md",
       "bytes": 948,
       "sha256": "b7cecfe4d7336cb0e9f9787d9683048ed0bd20fd5ef209f55ed8b86bdbc02da5"
     },
     {
-      "path": "plugin/agents/deep-debugger.md",
+      "path": "archive/blueprint-v0.1.2/agents/deep-debugger.md",
       "bytes": 1013,
       "sha256": "b0cf8f279f847894deb95656f79d2c967d187b0691dc4ebba77205192f3dda0c"
     },
     {
-      "path": "plugin/agents/design-reviewer.md",
+      "path": "archive/blueprint-v0.1.2/agents/design-reviewer.md",
       "bytes": 938,
       "sha256": "33071a1a68832f30405d8fa9f69e48fd10e55e9b002d6bf7020723492e7442ad"
     },
     {
-      "path": "plugin/agents/migration-reviewer.md",
+      "path": "archive/blueprint-v0.1.2/agents/migration-reviewer.md",
       "bytes": 794,
       "sha256": "11ef2addaccfe3652013cddc0fe0e03cc380897ed719924474ccc4f2e4752622"
     },
     {
-      "path": "plugin/agents/performance-reviewer.md",
+      "path": "archive/blueprint-v0.1.2/agents/performance-reviewer.md",
       "bytes": 791,
       "sha256": "25b8287b7693d2a1d4200444c227c06504229958b2e6782a73ceae4499140bcf"
     },
     {
-      "path": "plugin/agents/product-strategist.md",
+      "path": "archive/blueprint-v0.1.2/agents/product-strategist.md",
       "bytes": 855,
       "sha256": "b4821fd0db42bd4cc0bbef370e452bdef3fa2d3f86dae192204cf89664643ba6"
     },
     {
-      "path": "plugin/agents/reviewer.md",
+      "path": "archive/blueprint-v0.1.2/agents/reviewer.md",
       "bytes": 981,
       "sha256": "e2ed3eb0d46bb903de15a9a5479de6372c3b69e290c32e43677e6de4664d005a"
     },
     {
-      "path": "plugin/agents/scout.md",
+      "path": "archive/blueprint-v0.1.2/agents/scout.md",
       "bytes": 817,
       "sha256": "619eb320041f0cdd39e9e09c2098231199fcf5bf3a0e79ec1f1c6e1e7ae626cc"
     },
     {
-      "path": "plugin/agents/security-reviewer.md",
+      "path": "archive/blueprint-v0.1.2/agents/security-reviewer.md",
       "bytes": 978,
       "sha256": "50d1bbb28571d94452c04be26d634fe60c3a243535f79df526a5e88aa098e5d1"
     },
     {
-      "path": "plugin/agents/verifier.md",
+      "path": "archive/blueprint-v0.1.2/agents/verifier.md",
       "bytes": 916,
       "sha256": "bf8ce2c234b2536ef05b6e65177a72f09f41ec3c0ccdde625720a86d17d78abe"
     },
     {
-      "path": "plugin/catalog/README.md",
+      "path": "archive/blueprint-v0.1.2/catalog/README.md",
       "bytes": 443,
       "sha256": "f3bed80f9d946ec6b4f91ec30c9c3a11ef77fb3afe291fc1e9231478ab88d6f1"
     },
     {
-      "path": "plugin/evals/README.md",
+      "path": "archive/blueprint-v0.1.2/evals/README.md",
       "bytes": 469,
       "sha256": "1ea07c745ff7bd4575ae20d6417a85a36d88816c0b97b8e985aadfb9db9c04ed"
     },
     {
-      "path": "plugin/evals/expected-behaviors.md",
+      "path": "archive/blueprint-v0.1.2/evals/expected-behaviors.md",
       "bytes": 1064,
       "sha256": "eabee742de3063e64603ba918743900cd6a0fdca1b405b50c668369e5b622ab0"
     },
     {
-      "path": "plugin/policies/README.md",
+      "path": "archive/blueprint-v0.1.2/policies/README.md",
       "bytes": 310,
       "sha256": "aa458d6f0fbccf8f60b68bfb4bfd973c5bfa35cf9a18ed65e21dee3204102be2"
     },
     {
-      "path": "plugin/references/adapter-policy.md",
+      "path": "archive/blueprint-v0.1.2/references/adapter-policy.md",
       "bytes": 588,
       "sha256": "dfc0118728a7e1d4373a403b1500768d95f1bd69568096d4c8ce18b969861ad8"
     },
     {
-      "path": "plugin/references/completion-contract.md",
+      "path": "archive/blueprint-v0.1.2/references/completion-contract.md",
       "bytes": 703,
       "sha256": "fca9c24fe8cac35a12cf992b27414ca42b5bb14ab873c8e963e75654ddb2fd41"
     },
     {
-      "path": "plugin/references/design-policy.md",
+      "path": "archive/blueprint-v0.1.2/references/design-policy.md",
       "bytes": 574,
       "sha256": "e68137280073efc6c89534b9462061aff2ea147ba8e7f6a768a046bcadd822b8"
     },
     {
-      "path": "plugin/references/final-report-template.md",
+      "path": "archive/blueprint-v0.1.2/references/final-report-template.md",
       "bytes": 1003,
       "sha256": "73dc031446a2dbdba305eacaff776da79adf73feece5ae3fd6325ab93eba8287"
     },
     {
-      "path": "plugin/references/lane-policy.md",
+      "path": "archive/blueprint-v0.1.2/references/lane-policy.md",
       "bytes": 1333,
       "sha256": "d8cf047be19cd584d5734f06537590fc3f89b963ccd620c6e27933dfb9482a5b"
     },
     {
-      "path": "plugin/references/operating-principles.md",
+      "path": "archive/blueprint-v0.1.2/references/operating-principles.md",
       "bytes": 823,
       "sha256": "0001ddab6fa13708adc99dd9f5ab695eb2fbf726361ecf6bc31baf59d3b59a09"
     },
     {
-      "path": "plugin/references/orbit-policy.md",
+      "path": "archive/blueprint-v0.1.2/references/orbit-policy.md",
       "bytes": 718,
       "sha256": "dbbcbb43166ce6784f760c10d7dfb56de403b6210705faf1c90d55f29a17c9ec"
     },
     {
-      "path": "plugin/references/question-policy.md",
+      "path": "archive/blueprint-v0.1.2/references/question-policy.md",
       "bytes": 824,
       "sha256": "274d52ff12496aa0eefae0cac642d048e52f286403eeb86000dd47325ffca901"
     },
     {
-      "path": "plugin/references/risk-policy.md",
+      "path": "archive/blueprint-v0.1.2/references/risk-policy.md",
       "bytes": 1049,
       "sha256": "c2f9a93badb863d9ba6f5d7adaa90edd82b500a6fdd41f6872b64fb6d6383508"
     },
     {
-      "path": "plugin/references/security-policy.md",
+      "path": "archive/blueprint-v0.1.2/references/security-policy.md",
       "bytes": 716,
       "sha256": "b8f7070b0d1556ae377029015efc0f8d682f8933493ddca2093529bbee71b90c"
     },
     {
-      "path": "plugin/references/testing-policy.md",
+      "path": "archive/blueprint-v0.1.2/references/testing-policy.md",
       "bytes": 838,
       "sha256": "b402094442033c92fb1e6805513985d93b0861546129d4a87a43a4638fdd40fb"
     },
     {
-      "path": "plugin/references/tool-policy.md",
+      "path": "archive/blueprint-v0.1.2/references/tool-policy.md",
       "bytes": 771,
       "sha256": "8f4a354b1e19cf9a7469a683b157bcedff1fe143839ff13bf0964d27c9d1e3e7"
     },
     {
-      "path": "plugin/scripts/README.md",
+      "path": "archive/blueprint-v0.1.2/scripts/README.md",
       "bytes": 558,
       "sha256": "ae0dffe9bbf04e0bdffc0225b8308ee8d36655ad807bacdf28060fcb89614b21"
     },
     {
-      "path": "plugin/skills/README.md",
+      "path": "archive/blueprint-v0.1.2/skills/README.md",
       "bytes": 538,
       "sha256": "cdff262924f564d351e20d232b9aeb67ec06bb1451990a6e91595af8c5c06238"
     },
     {
-      "path": "plugin/skills/audit-tool/SKILL.md",
+      "path": "archive/blueprint-v0.1.2/skills/audit-tool/SKILL.md",
       "bytes": 1165,
       "sha256": "c2bcf93577015a11e1539723b59dcdaa901acba37479cf5e337a019e814cba1e"
     },
     {
-      "path": "plugin/skills/doctor/SKILL.md",
+      "path": "archive/blueprint-v0.1.2/skills/doctor/SKILL.md",
       "bytes": 886,
       "sha256": "832fa34e575bae48b2e199b65788229b9fb4c4fad2cecc5951512dc8ef53056b"
     },
     {
-      "path": "plugin/skills/run/SKILL.md",
+      "path": "archive/blueprint-v0.1.2/skills/run/SKILL.md",
       "bytes": 1760,
       "sha256": "050214cdc94bdd685db35f91b690092785ca7fefd9f619e3de0cb8f435172a8b"
     },
     {
-      "path": "plugin/skills/setup/SKILL.md",
+      "path": "archive/blueprint-v0.1.2/skills/setup/SKILL.md",
       "bytes": 1108,
       "sha256": "82295d23d4116337483aca4a91624e3c156d88541fa9e30e969f4b12de6df63c"
     },
     {
-      "path": "plugin/skills/status/SKILL.md",
+      "path": "archive/blueprint-v0.1.2/skills/status/SKILL.md",
       "bytes": 730,
       "sha256": "d53ed64deeaadf9b69cc46cfee42080afc161ede361ffca33484fc9c5e0c3909"
     },
     {
-      "path": "plugin/tests/README.md",
+      "path": "archive/blueprint-v0.1.2/tests/README.md",
       "bytes": 468,
       "sha256": "6ddc1fb4c69b8ff0c872f8bb2f3225d262ff2b3847dc57fd9ca4612566eb0441"
     }

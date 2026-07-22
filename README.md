@@ -104,8 +104,10 @@ The Risk Gate is **defense in depth, not an operating-system sandbox**: it is a 
 plugins/krylo/                    The KRYLO plugin (manifest, skills, agents,
                                    hooks, scripts, schemas, policies, catalog,
                                    adapters, references, tests, evals)
-docs/                             Architecture documents and ADRs
-plugin/                           Immutable v0.1.2 blueprint record (drafts)
+docs/                             Architecture documents, ADRs, and docs/process/
+                                   (implementation plan, review checklist,
+                                   file manifest, license decision)
+archive/blueprint-v0.1.2/          Immutable v0.1.2 blueprint record (drafts)
 .github/workflows/                CI: validation, tests, security scans
 ```
 

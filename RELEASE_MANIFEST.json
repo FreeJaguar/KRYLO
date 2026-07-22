@@ -1,7 +1,7 @@
 {
   "name": "krylo-release",
   "version": "0.1.1",
-  "generatedAt": "2026-07-20T16:59:59.828Z",
+  "generatedAt": "2026-07-22T12:54:25.316Z",
   "note": "Per-file SHA-256 of the implemented repository tree (git-tracked files at generation time, excluding this manifest). BLUEPRINT_MANIFEST.json remains the immutable record of blueprint 0.1.2 as delivered in the baseline commit.",
   "fileCount": 250,
   "files": [
@@ -112,8 +112,8 @@
     },
     {
       "path": "BLUEPRINT_MANIFEST.json",
-      "bytes": 17849,
-      "sha256": "5c9301a0c77abe06c9bedd6f87e364a2f6619f5c2c5ca74aacc67399a72a4b33"
+      "bytes": 18551,
+      "sha256": "6d5f2a1fa958fb4a15b82d16f0651ba82af8d90e631f248e09f35b660b9d5f32"
     },
     {
       "path": "CHANGELOG.md",
@@ -122,8 +122,8 @@
     },
     {
       "path": "CLAUDE.md",
-      "bytes": 6354,
-      "sha256": "648859d27c625d0c875b3d111950da8f850196f1805a25b2569c8054a85a637b"
+      "bytes": 6551,
+      "sha256": "bebd1ea13e38da3dd930682681e600b06b36cd1cf69eadee4af5f4aa16de8479"
     },
     {
       "path": "CODE_OF_CONDUCT.md",
@@ -136,24 +136,9 @@
       "sha256": "09bd1496bc3f7c66c6b65c8713ffc8096c68c05f1510c5ed2ce20b66240e4329"
     },
     {
-      "path": "FILE_MANIFEST.md",
-      "bytes": 5845,
-      "sha256": "54828688f511fec60a701575800bbc35a783426498f671f7b2b4eec3bd169fb6"
-    },
-    {
-      "path": "IMPLEMENTATION_PLAN.md",
-      "bytes": 4652,
-      "sha256": "e65feab40e6ea1f6a9b514c38fdaabaef56fcff8d7a134dd567a0470c1bbaef0"
-    },
-    {
       "path": "LICENSE",
       "bytes": 11358,
       "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
-    },
-    {
-      "path": "LICENSE_DECISION.md",
-      "bytes": 645,
-      "sha256": "5d6e92596ee12a3cfad7ad4bcef11fc56c8fc25f11f5db3b209ebf2f3b57db8c"
     },
     {
       "path": "PRODUCT_SPEC.md",
@@ -161,24 +146,14 @@
       "sha256": "7c48866124fa289f73ead8b258c2f6edd59cca1f93980b0e019d258e4e09f804"
     },
     {
-      "path": "PROMPT_INPUT_CONTRACT.md",
-      "bytes": 2625,
-      "sha256": "4d6c2b156c7f39fb0aae7749493a4c0d41d00a709ce32423ca481de09faa4352"
-    },
-    {
       "path": "README.md",
-      "bytes": 8239,
-      "sha256": "a7138cde633e09bff1a7d9eafa0287b4cdfdb925dc448a122db6f5a894f1d2f3"
+      "bytes": 8399,
+      "sha256": "c70233f18102a305bcbf195a0c3c4d2a371c81890f69acf79a946f8199a962d4"
     },
     {
       "path": "RELEASE_READINESS.md",
       "bytes": 11106,
       "sha256": "54013dfe2ae68b177094cb65a8291869bc000660213686c795118ffdc3271a95"
-    },
-    {
-      "path": "REVIEW_CHECKLIST.md",
-      "bytes": 2929,
-      "sha256": "51db6a4e42c026b7e0e5a848abdf5bcf9f9d54370d7233d13c6e41318301229b"
     },
     {
       "path": "SECURITY.md",
@@ -199,6 +174,201 @@
       "path": "THREAT_MODEL.md",
       "bytes": 3499,
       "sha256": "6dad2c5bec08159c8a4a2f93365dc1e42b97c8d9a7f07ea385c34ebb4fdcbf33"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/README.md",
+      "bytes": 890,
+      "sha256": "55b161238340589792eecaab1d6ae7a15c7971c2e6bf9f82dcf50bf2a5c5c758"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/adapters/README.md",
+      "bytes": 517,
+      "sha256": "868c7d8582176c5bf55b8fb9ded476f74c9236f4bcb25bcda0c944106f7ce456"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/README.md",
+      "bytes": 729,
+      "sha256": "9155ac6d49230b13da011ab285160d659ebb994ec9a6865494bb631f7f95e86e"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/ai-eval-engineer.md",
+      "bytes": 928,
+      "sha256": "6e38342a9b6ad8ba89fe7abad10383615e5a8d8fe8d385f717038fcaaa0d59d3"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/architect.md",
+      "bytes": 847,
+      "sha256": "b380f2b3830e6372d9d91953d7d8ec63facd129dc0c2ac52fe789dbfd2162f98"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/builder.md",
+      "bytes": 948,
+      "sha256": "b7cecfe4d7336cb0e9f9787d9683048ed0bd20fd5ef209f55ed8b86bdbc02da5"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/deep-debugger.md",
+      "bytes": 1013,
+      "sha256": "b0cf8f279f847894deb95656f79d2c967d187b0691dc4ebba77205192f3dda0c"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/design-reviewer.md",
+      "bytes": 938,
+      "sha256": "33071a1a68832f30405d8fa9f69e48fd10e55e9b002d6bf7020723492e7442ad"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/migration-reviewer.md",
+      "bytes": 794,
+      "sha256": "11ef2addaccfe3652013cddc0fe0e03cc380897ed719924474ccc4f2e4752622"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/performance-reviewer.md",
+      "bytes": 791,
+      "sha256": "25b8287b7693d2a1d4200444c227c06504229958b2e6782a73ceae4499140bcf"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/product-strategist.md",
+      "bytes": 855,
+      "sha256": "b4821fd0db42bd4cc0bbef370e452bdef3fa2d3f86dae192204cf89664643ba6"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/reviewer.md",
+      "bytes": 981,
+      "sha256": "e2ed3eb0d46bb903de15a9a5479de6372c3b69e290c32e43677e6de4664d005a"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/scout.md",
+      "bytes": 817,
+      "sha256": "619eb320041f0cdd39e9e09c2098231199fcf5bf3a0e79ec1f1c6e1e7ae626cc"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/security-reviewer.md",
+      "bytes": 978,
+      "sha256": "50d1bbb28571d94452c04be26d634fe60c3a243535f79df526a5e88aa098e5d1"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/verifier.md",
+      "bytes": 916,
+      "sha256": "bf8ce2c234b2536ef05b6e65177a72f09f41ec3c0ccdde625720a86d17d78abe"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/catalog/README.md",
+      "bytes": 443,
+      "sha256": "f3bed80f9d946ec6b4f91ec30c9c3a11ef77fb3afe291fc1e9231478ab88d6f1"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/evals/README.md",
+      "bytes": 469,
+      "sha256": "1ea07c745ff7bd4575ae20d6417a85a36d88816c0b97b8e985aadfb9db9c04ed"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/evals/expected-behaviors.md",
+      "bytes": 1064,
+      "sha256": "eabee742de3063e64603ba918743900cd6a0fdca1b405b50c668369e5b622ab0"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/policies/README.md",
+      "bytes": 310,
+      "sha256": "aa458d6f0fbccf8f60b68bfb4bfd973c5bfa35cf9a18ed65e21dee3204102be2"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/adapter-policy.md",
+      "bytes": 588,
+      "sha256": "dfc0118728a7e1d4373a403b1500768d95f1bd69568096d4c8ce18b969861ad8"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/completion-contract.md",
+      "bytes": 703,
+      "sha256": "fca9c24fe8cac35a12cf992b27414ca42b5bb14ab873c8e963e75654ddb2fd41"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/design-policy.md",
+      "bytes": 574,
+      "sha256": "e68137280073efc6c89534b9462061aff2ea147ba8e7f6a768a046bcadd822b8"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/final-report-template.md",
+      "bytes": 1003,
+      "sha256": "73dc031446a2dbdba305eacaff776da79adf73feece5ae3fd6325ab93eba8287"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/lane-policy.md",
+      "bytes": 1333,
+      "sha256": "d8cf047be19cd584d5734f06537590fc3f89b963ccd620c6e27933dfb9482a5b"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/operating-principles.md",
+      "bytes": 823,
+      "sha256": "0001ddab6fa13708adc99dd9f5ab695eb2fbf726361ecf6bc31baf59d3b59a09"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/orbit-policy.md",
+      "bytes": 718,
+      "sha256": "dbbcbb43166ce6784f760c10d7dfb56de403b6210705faf1c90d55f29a17c9ec"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/question-policy.md",
+      "bytes": 824,
+      "sha256": "274d52ff12496aa0eefae0cac642d048e52f286403eeb86000dd47325ffca901"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/risk-policy.md",
+      "bytes": 1049,
+      "sha256": "c2f9a93badb863d9ba6f5d7adaa90edd82b500a6fdd41f6872b64fb6d6383508"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/security-policy.md",
+      "bytes": 716,
+      "sha256": "b8f7070b0d1556ae377029015efc0f8d682f8933493ddca2093529bbee71b90c"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/testing-policy.md",
+      "bytes": 838,
+      "sha256": "b402094442033c92fb1e6805513985d93b0861546129d4a87a43a4638fdd40fb"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/tool-policy.md",
+      "bytes": 771,
+      "sha256": "8f4a354b1e19cf9a7469a683b157bcedff1fe143839ff13bf0964d27c9d1e3e7"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/scripts/README.md",
+      "bytes": 558,
+      "sha256": "ae0dffe9bbf04e0bdffc0225b8308ee8d36655ad807bacdf28060fcb89614b21"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/skills/README.md",
+      "bytes": 538,
+      "sha256": "cdff262924f564d351e20d232b9aeb67ec06bb1451990a6e91595af8c5c06238"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/skills/audit-tool/SKILL.md",
+      "bytes": 1165,
+      "sha256": "c2bcf93577015a11e1539723b59dcdaa901acba37479cf5e337a019e814cba1e"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/skills/doctor/SKILL.md",
+      "bytes": 886,
+      "sha256": "832fa34e575bae48b2e199b65788229b9fb4c4fad2cecc5951512dc8ef53056b"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/skills/run/SKILL.md",
+      "bytes": 1760,
+      "sha256": "050214cdc94bdd685db35f91b690092785ca7fefd9f619e3de0cb8f435172a8b"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/skills/setup/SKILL.md",
+      "bytes": 1108,
+      "sha256": "82295d23d4116337483aca4a91624e3c156d88541fa9e30e969f4b12de6df63c"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/skills/status/SKILL.md",
+      "bytes": 730,
+      "sha256": "d53ed64deeaadf9b69cc46cfee42080afc161ede361ffca33484fc9c5e0c3909"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/tests/README.md",
+      "bytes": 468,
+      "sha256": "6ddc1fb4c69b8ff0c872f8bb2f3225d262ff2b3847dc57fd9ca4612566eb0441"
     },
     {
       "path": "docs/01-command-surface.md",
@@ -446,6 +616,31 @@
       "sha256": "8da79a6ef78e8f2cda90a7cc8e9109b5b4592cc68b2e42751b2b5b026de7a207"
     },
     {
+      "path": "docs/process/FILE_MANIFEST.md",
+      "bytes": 6349,
+      "sha256": "7e9b8160cc6bfbc64839374e81b362b89fa649e3ca124c561f6636c825fd6215"
+    },
+    {
+      "path": "docs/process/IMPLEMENTATION_PLAN.md",
+      "bytes": 4652,
+      "sha256": "e65feab40e6ea1f6a9b514c38fdaabaef56fcff8d7a134dd567a0470c1bbaef0"
+    },
+    {
+      "path": "docs/process/LICENSE_DECISION.md",
+      "bytes": 645,
+      "sha256": "5d6e92596ee12a3cfad7ad4bcef11fc56c8fc25f11f5db3b209ebf2f3b57db8c"
+    },
+    {
+      "path": "docs/process/PROMPT_INPUT_CONTRACT.md",
+      "bytes": 2625,
+      "sha256": "4d6c2b156c7f39fb0aae7749493a4c0d41d00a709ce32423ca481de09faa4352"
+    },
+    {
+      "path": "docs/process/REVIEW_CHECKLIST.md",
+      "bytes": 2947,
+      "sha256": "8e567f8aaf5a34954eef1d2e46ada2b89d90c80b3d5614753af40c5ad8851264"
+    },
+    {
       "path": "docs/templates/adr-template.md",
       "bytes": 320,
       "sha256": "ffbd45d38370d5ffd03f78ff7c762ef5cbd69f85a8167d3ab300f06ae153fef5"
@@ -489,201 +684,6 @@
       "path": "package.json",
       "bytes": 1149,
       "sha256": "8b03d073b6c5c108dab7a343395c7113cdc58ab9c8257e4163539dc1ef506fec"
-    },
-    {
-      "path": "plugin/README.md",
-      "bytes": 890,
-      "sha256": "55b161238340589792eecaab1d6ae7a15c7971c2e6bf9f82dcf50bf2a5c5c758"
-    },
-    {
-      "path": "plugin/adapters/README.md",
-      "bytes": 517,
-      "sha256": "868c7d8582176c5bf55b8fb9ded476f74c9236f4bcb25bcda0c944106f7ce456"
-    },
-    {
-      "path": "plugin/agents/README.md",
-      "bytes": 729,
-      "sha256": "9155ac6d49230b13da011ab285160d659ebb994ec9a6865494bb631f7f95e86e"
-    },
-    {
-      "path": "plugin/agents/ai-eval-engineer.md",
-      "bytes": 928,
-      "sha256": "6e38342a9b6ad8ba89fe7abad10383615e5a8d8fe8d385f717038fcaaa0d59d3"
-    },
-    {
-      "path": "plugin/agents/architect.md",
-      "bytes": 847,
-      "sha256": "b380f2b3830e6372d9d91953d7d8ec63facd129dc0c2ac52fe789dbfd2162f98"
-    },
-    {
-      "path": "plugin/agents/builder.md",
-      "bytes": 948,
-      "sha256": "b7cecfe4d7336cb0e9f9787d9683048ed0bd20fd5ef209f55ed8b86bdbc02da5"
-    },
-    {
-      "path": "plugin/agents/deep-debugger.md",
-      "bytes": 1013,
-      "sha256": "b0cf8f279f847894deb95656f79d2c967d187b0691dc4ebba77205192f3dda0c"
-    },
-    {
-      "path": "plugin/agents/design-reviewer.md",
-      "bytes": 938,
-      "sha256": "33071a1a68832f30405d8fa9f69e48fd10e55e9b002d6bf7020723492e7442ad"
-    },
-    {
-      "path": "plugin/agents/migration-reviewer.md",
-      "bytes": 794,
-      "sha256": "11ef2addaccfe3652013cddc0fe0e03cc380897ed719924474ccc4f2e4752622"
-    },
-    {
-      "path": "plugin/agents/performance-reviewer.md",
-      "bytes": 791,
-      "sha256": "25b8287b7693d2a1d4200444c227c06504229958b2e6782a73ceae4499140bcf"
-    },
-    {
-      "path": "plugin/agents/product-strategist.md",
-      "bytes": 855,
-      "sha256": "b4821fd0db42bd4cc0bbef370e452bdef3fa2d3f86dae192204cf89664643ba6"
-    },
-    {
-      "path": "plugin/agents/reviewer.md",
-      "bytes": 981,
-      "sha256": "e2ed3eb0d46bb903de15a9a5479de6372c3b69e290c32e43677e6de4664d005a"
-    },
-    {
-      "path": "plugin/agents/scout.md",
-      "bytes": 817,
-      "sha256": "619eb320041f0cdd39e9e09c2098231199fcf5bf3a0e79ec1f1c6e1e7ae626cc"
-    },
-    {
-      "path": "plugin/agents/security-reviewer.md",
-      "bytes": 978,
-      "sha256": "50d1bbb28571d94452c04be26d634fe60c3a243535f79df526a5e88aa098e5d1"
-    },
-    {
-      "path": "plugin/agents/verifier.md",
-      "bytes": 916,
-      "sha256": "bf8ce2c234b2536ef05b6e65177a72f09f41ec3c0ccdde625720a86d17d78abe"
-    },
-    {
-      "path": "plugin/catalog/README.md",
-      "bytes": 443,
-      "sha256": "f3bed80f9d946ec6b4f91ec30c9c3a11ef77fb3afe291fc1e9231478ab88d6f1"
-    },
-    {
-      "path": "plugin/evals/README.md",
-      "bytes": 469,
-      "sha256": "1ea07c745ff7bd4575ae20d6417a85a36d88816c0b97b8e985aadfb9db9c04ed"
-    },
-    {
-      "path": "plugin/evals/expected-behaviors.md",
-      "bytes": 1064,
-      "sha256": "eabee742de3063e64603ba918743900cd6a0fdca1b405b50c668369e5b622ab0"
-    },
-    {
-      "path": "plugin/policies/README.md",
-      "bytes": 310,
-      "sha256": "aa458d6f0fbccf8f60b68bfb4bfd973c5bfa35cf9a18ed65e21dee3204102be2"
-    },
-    {
-      "path": "plugin/references/adapter-policy.md",
-      "bytes": 588,
-      "sha256": "dfc0118728a7e1d4373a403b1500768d95f1bd69568096d4c8ce18b969861ad8"
-    },
-    {
-      "path": "plugin/references/completion-contract.md",
-      "bytes": 703,
-      "sha256": "fca9c24fe8cac35a12cf992b27414ca42b5bb14ab873c8e963e75654ddb2fd41"
-    },
-    {
-      "path": "plugin/references/design-policy.md",
-      "bytes": 574,
-      "sha256": "e68137280073efc6c89534b9462061aff2ea147ba8e7f6a768a046bcadd822b8"
-    },
-    {
-      "path": "plugin/references/final-report-template.md",
-      "bytes": 1003,
-      "sha256": "73dc031446a2dbdba305eacaff776da79adf73feece5ae3fd6325ab93eba8287"
-    },
-    {
-      "path": "plugin/references/lane-policy.md",
-      "bytes": 1333,
-      "sha256": "d8cf047be19cd584d5734f06537590fc3f89b963ccd620c6e27933dfb9482a5b"
-    },
-    {
-      "path": "plugin/references/operating-principles.md",
-      "bytes": 823,
-      "sha256": "0001ddab6fa13708adc99dd9f5ab695eb2fbf726361ecf6bc31baf59d3b59a09"
-    },
-    {
-      "path": "plugin/references/orbit-policy.md",
-      "bytes": 718,
-      "sha256": "dbbcbb43166ce6784f760c10d7dfb56de403b6210705faf1c90d55f29a17c9ec"
-    },
-    {
-      "path": "plugin/references/question-policy.md",
-      "bytes": 824,
-      "sha256": "274d52ff12496aa0eefae0cac642d048e52f286403eeb86000dd47325ffca901"
-    },
-    {
-      "path": "plugin/references/risk-policy.md",
-      "bytes": 1049,
-      "sha256": "c2f9a93badb863d9ba6f5d7adaa90edd82b500a6fdd41f6872b64fb6d6383508"
-    },
-    {
-      "path": "plugin/references/security-policy.md",
-      "bytes": 716,
-      "sha256": "b8f7070b0d1556ae377029015efc0f8d682f8933493ddca2093529bbee71b90c"
-    },
-    {
-      "path": "plugin/references/testing-policy.md",
-      "bytes": 838,
-      "sha256": "b402094442033c92fb1e6805513985d93b0861546129d4a87a43a4638fdd40fb"
-    },
-    {
-      "path": "plugin/references/tool-policy.md",
-      "bytes": 771,
-      "sha256": "8f4a354b1e19cf9a7469a683b157bcedff1fe143839ff13bf0964d27c9d1e3e7"
-    },
-    {
-      "path": "plugin/scripts/README.md",
-      "bytes": 558,
-      "sha256": "ae0dffe9bbf04e0bdffc0225b8308ee8d36655ad807bacdf28060fcb89614b21"
-    },
-    {
-      "path": "plugin/skills/README.md",
-      "bytes": 538,
-      "sha256": "cdff262924f564d351e20d232b9aeb67ec06bb1451990a6e91595af8c5c06238"
-    },
-    {
-      "path": "plugin/skills/audit-tool/SKILL.md",
-      "bytes": 1165,
-      "sha256": "c2bcf93577015a11e1539723b59dcdaa901acba37479cf5e337a019e814cba1e"
-    },
-    {
-      "path": "plugin/skills/doctor/SKILL.md",
-      "bytes": 886,
-      "sha256": "832fa34e575bae48b2e199b65788229b9fb4c4fad2cecc5951512dc8ef53056b"
-    },
-    {
-      "path": "plugin/skills/run/SKILL.md",
-      "bytes": 1760,
-      "sha256": "050214cdc94bdd685db35f91b690092785ca7fefd9f619e3de0cb8f435172a8b"
-    },
-    {
-      "path": "plugin/skills/setup/SKILL.md",
-      "bytes": 1108,
-      "sha256": "82295d23d4116337483aca4a91624e3c156d88541fa9e30e969f4b12de6df63c"
-    },
-    {
-      "path": "plugin/skills/status/SKILL.md",
-      "bytes": 730,
-      "sha256": "d53ed64deeaadf9b69cc46cfee42080afc161ede361ffca33484fc9c5e0c3909"
-    },
-    {
-      "path": "plugin/tests/README.md",
-      "bytes": 468,
-      "sha256": "6ddc1fb4c69b8ff0c872f8bb2f3225d262ff2b3847dc57fd9ca4612566eb0441"
     },
     {
       "path": "plugins/krylo/.claude-plugin/plugin.json",
@@ -982,8 +982,8 @@
     },
     {
       "path": "plugins/krylo/scripts/lib/state.mjs",
-      "bytes": 33637,
-      "sha256": "e516459598d5501ba8008b87c72552d12d68c651ea05fcc6098582f12af3f5f9"
+      "bytes": 34377,
+      "sha256": "cc4b51d15a481c9849ebd7e0aee0a58d984f34714fc48fad50417ef6b4286941"
     },
     {
       "path": "plugins/krylo/scripts/lib/telemetry.mjs",

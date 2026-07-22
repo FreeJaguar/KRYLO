@@ -17,8 +17,13 @@ LICENSE                                     # implemented, Apache-2.0 canonical 
 package.json / package-lock.json            # implemented (zero dependencies, node:test)
 RELEASE_READINESS.md                        # implemented (progress + evidence record)
 RELEASE_MANIFEST.json                       # implemented (per-file SHA-256 of the release tree)
-BLUEPRINT_MANIFEST.json                     # immutable blueprint record (unchanged)
-plugin/                                     # immutable blueprint drafts (unchanged)
+BLUEPRINT_MANIFEST.json                     # immutable blueprint record (paths updated for the
+                                             # archive/ move below; content and hashes unchanged)
+archive/blueprint-v0.1.2/                   # immutable blueprint drafts (unchanged content; moved
+                                             # from root-level plugin/ during the v0.1.1 repo cleanup)
+docs/process/                               # this file, IMPLEMENTATION_PLAN.md,
+                                             # PROMPT_INPUT_CONTRACT.md, REVIEW_CHECKLIST.md, and
+                                             # LICENSE_DECISION.md (moved from root during v0.1.1)
 ```
 
 ## Plugin root
