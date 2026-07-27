@@ -6,6 +6,18 @@ The project follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Three optional, adapter-first external-capability integrations, each reviewed at an exact pinned commit and added to the tool trust catalog: `mattpocock-skills` (Claude Code Skill/Plugin compatibility — selected advisory engineering disciplines only, upstream setup/triage/ticket/handoff-shaped Skills never auto-invoked), `omniroute` (optional model-gateway compatibility for an already-installed, user-configured instance — never installed/started/configured automatically, every request gated behind explicit project-bound approval, denied under the local-only profile), and `code-review-graph` (repository-intelligence MCP server compatibility — read-only graph/impact queries only; its source/documentation-writing tools, `apply_refactor` and wiki generation, are denied by default). See `docs/external-adapter-audit-2026-07-27.md` and `plugins/krylo/adapters/{mattpocock-skills,omniroute,code-review-graph}.md`.
+- `plugins/krylo/policies/production-policy.json`: new `external-write` approval class gating Bash-level install/start/apply commands for the two new adapters.
+- `plugins/krylo/scripts/audit/audit-tool.mjs`: exact-match alias resolution (repository URL / owner-repo / package name -> canonical catalog id), so an external tool can be audited by any of its common names without ever matching a look-alike by substring.
+- `plugins/krylo/scripts/setup/doctor.mjs`: read-only detection for all three new adapters (executable/version probe for `omniroute` and `code-review-graph`; a read-only `~/.claude/settings.json` check for the `mattpocock-skills` plugin).
+- 11 new focused tests (`plugins/krylo/tests/security/external-adapters.test.mjs`): catalog identity, alias resolution, version-drift refusal, look-alike-name rejection, prototype-lookup safety, doctor detection with and without the adapters present, the `external-write` gate, and a bounded-time regression check against catastrophic regex backtracking.
+
+### Pending
+
+- No plugin/marketplace version bump: this addition is purely additive (new optional adapters, no existing behavior changed) and does not, by itself, require a release. The maintainer should fold it into whichever release is cut next.
+
 ## [0.1.1] - 2026-07-20
 
 Hardening pass on the 0.1.0 implementation, in preparation for the first public release.

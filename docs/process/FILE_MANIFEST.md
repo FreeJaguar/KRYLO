@@ -109,6 +109,7 @@ plugins/krylo/references/*.md                # 13 policies from the approved dra
 plugins/krylo/adapters/README.md
 plugins/krylo/adapters/{git-github,playwright,context7,figma,supabase-databases,
   sentry,vercel,openwiki,superpowers}.md
+plugins/krylo/adapters/{mattpocock-skills,omniroute,code-review-graph}.md   # + (delta) optional external-capability adapters, reviewed 2026-07-27
 ```
 
 ## Tests and evaluations
@@ -118,6 +119,7 @@ plugins/krylo/tests/unit/*.test.mjs          # state, redact, atomic, telemetry,
 plugins/krylo/tests/platform/paths.test.mjs
 plugins/krylo/tests/hooks/*.test.mjs         # question-gate, risk-gate, stop-gate, fingerprint, posttool (+helpers.mjs)
 plugins/krylo/tests/security/injection.test.mjs
+plugins/krylo/tests/security/external-adapters.test.mjs   # + (delta) mattpocock-skills/omniroute/code-review-graph
 plugins/krylo/tests/status/*.test.mjs        # statusline, agent-events, wrapper
 plugins/krylo/tests/setup/*.test.mjs         # alias, doctor
 plugins/krylo/tests/governance/*.test.mjs    # audit, policy-consistency, agents
