@@ -118,6 +118,19 @@
       "patterns": [
         "\\b(sendgrid|mailgun|twilio|slack)\\b[^|;&\\n]*?\\b(send|post|broadcast)\\b"
       ]
+    },
+    "external-write": {
+      "decision": "deny",
+      "reason": "Installing, starting, or configuring an optional external adapter, and writing source or documentation through one, require explicit user approval (adapters/omniroute.md, adapters/code-review-graph.md).",
+      "patterns": [
+        "\\b(npm|npx|pnpm|yarn|bunx)\\b[^|;&\\n]{0,200}\\bomniroute\\b",
+        "\\bomniroute\\b[^|;&\\n]{0,80}\\b(start|serve|up|reset-password)\\b",
+        "\\bomniroute-reset-password\\b",
+        "\\bdocker\\b[^|;&\\n]{0,200}\\bomniroute\\b",
+        "\\b(yay|paru|pacman)\\b[^|;&\\n]{0,120}\\bomniroute\\b",
+        "\\b(uvx|pipx?|uv\\s+tool\\s+install)\\b[^|;&\\n]{0,200}\\bcode[-_]review[-_]graph\\b",
+        "\\bcode[-_]review[-_]graph\\b[^|;&\\n]{0,80}\\b(apply|serve|daemon)\\b"
+      ]
     }
   },
   "sensitivePaths": {

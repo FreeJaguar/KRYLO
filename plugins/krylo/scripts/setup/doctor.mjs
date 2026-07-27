@@ -29,11 +29,32 @@ function homeDir() {
 
 function detectCli(cmd, args = ['--version']) {
   try {
-    const res = spawnSync(cmd, args, { encoding: 'utf8', shell: false, timeout: 10000 });
+    // shell:false so a malicious/odd executable name is never shell-interpreted;
+    // timeout and maxBuffer bound a hanging process or oversized/malicious
+    // stdout; only the first line, truncated, is ever kept.
+    const res = spawnSync(cmd, args, { encoding: 'utf8', shell: false, timeout: 10000, maxBuffer: 64 * 1024 });
     if (res.status === 0 && typeof res.stdout === 'string') {
       return { detected: true, version: res.stdout.trim().split('\n')[0].slice(0, 80) };
     }
     return { detected: false };
+  } catch {
+    return { detected: false };
+  }
+}
+
+/**
+ * Read-only: does the current user's Claude Code settings.json list the
+ * mattpocock/skills plugin as enabled? Never installs, enables, or invokes
+ * anything; a missing/unreadable/malformed settings file is simply "not
+ * detected" (fail-soft, matches the rest of doctor's read-only contract).
+ */
+function detectMattpocockSkillsPlugin() {
+  try {
+    const settingsPath = path.join(homeDir(), '.claude', 'settings.json');
+    const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
+    const enabled = settings.enabledPlugins && typeof settings.enabledPlugins === 'object' ? settings.enabledPlugins : {};
+    const hit = Object.keys(enabled).find((key) => key.toLowerCase().startsWith('mattpocock-skills@') && enabled[key] === true);
+    return hit ? { detected: true, version: hit.slice(0, 80) } : { detected: false };
   } catch {
     return { detected: false };
   }
@@ -200,6 +221,9 @@ function main() {
       gh: detectCli('gh'),
       supabase: detectCli('supabase'),
       vercel: detectCli('vercel'),
+      omniroute: detectCli('omniroute'),
+      'code-review-graph': detectCli('code-review-graph'),
+      'mattpocock-skills': detectMattpocockSkillsPlugin(),
     },
     toolTrust: checkCatalog(),
     alias: checkAlias(),

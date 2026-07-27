@@ -147,6 +147,33 @@ function catalogVerdict(catalog, name, version) {
   return { verdict: `tier-${record.trustTier}`, reason: `reviewed at ${record.reviewedVersion}; default behavior: ${tierBehavior}`, record };
 }
 
+// Known aliases for catalog entries whose upstream identity is commonly
+// spelled several ways (a full repository URL, an "owner/repo" shorthand, a
+// package name, or an executable name). Matching is exact (after trimming a
+// trailing slash and lowercasing), never a substring, so a look-alike name
+// can never borrow another tool's trust (independent-review finding from
+// the KRYLO 0.1.1 hardening pass applied here too: substring matching on
+// external identities is a known bypass shape).
+const CATALOG_ALIASES = {
+  'https://github.com/mattpocock/skills': 'mattpocock-skills',
+  'github.com/mattpocock/skills': 'mattpocock-skills',
+  'mattpocock/skills': 'mattpocock-skills',
+  'https://github.com/diegosouzapw/omniroute': 'omniroute',
+  'github.com/diegosouzapw/omniroute': 'omniroute',
+  'diegosouzapw/omniroute': 'omniroute',
+  'https://github.com/tirth8205/code-review-graph': 'code-review-graph',
+  'github.com/tirth8205/code-review-graph': 'code-review-graph',
+  'tirth8205/code-review-graph': 'code-review-graph',
+  'code_review_graph': 'code-review-graph',
+  'code-review-graph-vscode': 'code-review-graph',
+};
+
+/** Resolve a raw --target string (URL, owner/repo, package, or executable name) to a canonical catalog id, or return it unchanged if there is no known alias. */
+function resolveCatalogAlias(rawName) {
+  const key = String(rawName).trim().replace(/\/+$/, '').toLowerCase();
+  return Object.hasOwn(CATALOG_ALIASES, key) ? CATALOG_ALIASES[key] : rawName;
+}
+
 function suggestTier(findings) {
   if (findings.some((f) => f.severity === 'critical')) return 'Blocked';
   if (findings.some((f) => f.severity === 'high')) return 'B';
@@ -172,7 +199,7 @@ function main() {
 
   const catalog = loadCatalog(catalogDir);
   const isPath = fs.existsSync(target);
-  const name = isPath ? path.basename(path.resolve(target)) : target;
+  const name = isPath ? path.basename(path.resolve(target)) : resolveCatalogAlias(target);
 
   const scan = isPath ? scanPath(path.resolve(target)) : { findings: [], domains: [], filesScanned: 0 };
   const registry = catalogVerdict(catalog, name, version);
