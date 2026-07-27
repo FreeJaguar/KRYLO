@@ -485,7 +485,18 @@ function main() {
     runId = pointer.value.runId;
   }
 
-  const result = loadApplySave(runId, ops);
+  let result;
+  try {
+    result = loadApplySave(runId, ops);
+  } catch (err) {
+    // withFileLock throws (never rejects) when its retry budget is exhausted
+    // under heavy concurrent contention for the same run's lock. Report it
+    // the same way every other failure here is reported -- a clean JSON
+    // error on stdout with exit 1 -- instead of an unhandled-exception stack
+    // dump, so a caller (or a concurrency test) gets a diagnosable result.
+    fail('lock-timeout', { details: err instanceof Error ? err.message : String(err) });
+    return;
+  }
   if (!result.ok) {
     fail(result.error, { op: result.op, details: result.details });
     return;

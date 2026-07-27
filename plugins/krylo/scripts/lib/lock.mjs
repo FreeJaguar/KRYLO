@@ -9,7 +9,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const LOCK_RETRY_ATTEMPTS = 200;
+// 600 * 10ms = 6s worst-case wait. Observed a real failure at the prior
+// 200*10ms (2s) budget under heavier contention on a shared CI Windows
+// runner (12 processes racing for one run's lock) that never reproduced on
+// a local dev machine -- 2s was adequate for a lightly-loaded box but not
+// for a slower/noisier shared runner. 6s stays comfortably under the 30s
+// PreToolUse hook timeout (skills/run/SKILL.md) that scripts/security/
+// risk-gate.mjs's own use of this lock must fit inside.
+const LOCK_RETRY_ATTEMPTS = 600;
 const LOCK_RETRY_DELAY_MS = 10;
 
 function sleepSync(ms) {
