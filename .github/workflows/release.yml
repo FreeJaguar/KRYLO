@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (for example v0.1.0). Must match plugin.json version."
+        description: "Release tag in the current `claude plugin tag` format (for example krylo--v0.1.1). Must match plugin.json's name and version."
         required: true
 
 permissions:
@@ -31,12 +31,13 @@ jobs:
           claude plugin validate --strict .
       - name: Run tests
         run: npm test
-      - name: Check tag matches plugin version
+      - name: Check tag matches plugin name and version (claude plugin tag format)
         env:
           TAG: ${{ github.event.inputs.tag }}
         run: |
+          name=$(node -p "JSON.parse(require('fs').readFileSync('plugins/krylo/.claude-plugin/plugin.json','utf8')).name")
           v=$(node -p "JSON.parse(require('fs').readFileSync('plugins/krylo/.claude-plugin/plugin.json','utf8')).version")
-          test "v$v" = "$TAG"
+          test "$name--v$v" = "$TAG"
 
   release:
     needs: verify
@@ -53,11 +54,11 @@ jobs:
         env:
           TAG: ${{ github.event.inputs.tag }}
         run: |
-          git archive --format=zip --output "krylo-$TAG.zip" HEAD
-          sha256sum "krylo-$TAG.zip" > "krylo-$TAG.zip.sha256"
+          git archive --format=zip --output "$TAG.zip" HEAD
+          sha256sum "$TAG.zip" > "$TAG.zip.sha256"
       - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
-          subject-path: krylo-${{ github.event.inputs.tag }}.zip
+          subject-path: ${{ github.event.inputs.tag }}.zip
       - name: Create GitHub release (draft)
         env:
           GH_TOKEN: ${{ github.token }}
@@ -67,4 +68,4 @@ jobs:
             --draft \
             --title "KRYLO $TAG" \
             --notes "See CHANGELOG.md." \
-            "krylo-$TAG.zip" "krylo-$TAG.zip.sha256"
+            "$TAG.zip" "$TAG.zip.sha256"
