@@ -1,82 +1,82 @@
-# KRYLO 0.1.0 Release-Readiness Report
+# KRYLO 0.1.1 Release-Readiness Report
 
 Persistent implementation progress record. Every `done` entry cites evidence that was actually produced; nothing here is written ahead of execution.
 
-Status legend: `done` (locally verified with evidence), `static` (statically inspected only), `ci-pending` (configured, awaiting GitHub-hosted execution), `open`.
+Status legend: `done` (locally verified with evidence), `static` (statically inspected only), `ci-pending` (configured, awaiting GitHub-hosted execution on this branch), `open`.
+
+## Repository reality (as of 2026-07-20)
+
+- **Repository**: public — `https://github.com/FreeJaguar/KRYLO` (confirmed via the public GitHub API: `private: false`, `visibility: "public"`).
+- **Default branch**: `main`, HEAD `c86c4fd2c8162df334efca56dabcba062169afd9` (last push `2026-07-20T08:12:34Z`, content = the `0.1.0` release).
+- **This hardening work**: branch `hardening/v0.1.1`, based on `main` at the same commit. Not yet pushed; exists only as local commits in this working copy.
+- **Tags / GitHub Releases**: none exist yet (confirmed via the GitHub API: zero tags, empty releases list).
+- **Marketplace publication**: this repository IS the marketplace (`.claude-plugin/marketplace.json` at the repo root, self-hosted); it has not been submitted to or listed in any third-party/official Claude Code marketplace index.
+- **CI status on `main` @ `c86c4fd` (the `0.1.0` content currently public)**: all 9 configured workflows green — `test`, `validate-plugin`, `codeql`, `semgrep`, `dependency-security`, `secret-scan`, `actions-security`, `sbom`, plus Dependabot's own update workflow — verified via the GitHub Actions API (`conclusion: "success"` for each, at `c86c4fd`). The `release` workflow has never run (manual `workflow_dispatch` only; correct, since no release has been cut).
+- **`hardening/v0.1.1` CI status**: not yet available — GitHub-hosted CI only runs once this branch is pushed. Every check below was run locally.
 
 ## Environment (preflight evidence)
 
-- OS: Windows 11 (MINGW64), x86_64. Target support: Windows, macOS, Linux.
-- Git 2.54.0.windows.1, Node v24.17.0, npm 11.5.2, Claude Code 2.1.197.
-- Blueprint integrity: `BLUEPRINT_MANIFEST.json` verified 2026-07-19 — 108/108 files, all sizes and SHA-256 hashes match. The original blueprint is preserved in the baseline commit (b6818a5); post-baseline documentation updates (README, CHANGELOG, CLAUDE.md, FILE_MANIFEST) are implementation-reality updates required by Milestone 10.
-- Git repository initialized locally (`main`). No remote configured. No push occurred.
+- OS: Windows 11, x86_64. Target support: Windows, macOS, Linux (macOS not exercised by a local runner; see Known limitations).
+- Git, Node v24.17.0, npm, Claude Code CLI 2.1.197 (the pinned minimum-supported floor; see `docs/adr/0022-claude-code-compatibility-policy.md`).
 
-## Verified platform contracts
+## Current release: what changed since 0.1.0
 
-- `claude plugin validate <path> [--strict]`, `claude plugin marketplace add <local path>`, `claude plugin install|update|uninstall <plugin>@<marketplace>`, `--plugin-dir` all verified working locally.
-- Official schema check (docs fetched 2026-07-19): `plugin.json` supports `userConfig`; `${CLAUDE_PLUGIN_DATA}` is the supported persistent data directory; hook events used: `PreToolUse`, `PostToolUse`, `PostToolUseFailure`, `SubagentStart`, `SubagentStop`, `Stop`; PreToolUse decisions via `hookSpecificOutput.permissionDecision`; Stop blocking via `decision: "block"` + `reason`.
-- Plugin `settings.json` supports only `agent` and `subagentStatusLine`; `subagentStatusLine` documented as v2.1.207+ while local CLI is 2.1.197 → ADR-0016 defers the settings key; the renderer ships and is offered through setup.
+Full detail in `CHANGELOG.md` under `[0.1.1]`. Summary: MCP/external-tool write protection in the risk gate; scoped single-use expiring risk approvals; per-project-per-session concurrent-run support; hooks scoped to the `run` skill so ordinary sessions launch zero KRYLO hook processes; a separate current-Claude-Code-CLI compatibility CI check; Orbit-cap semantics made consistent everywhere; the committed local Claude Code runtime lock file removed and guarded against regression; repository-quality documentation (badges, known limitations, roadmap, rollback docs, security-sensitive-contribution guidance).
 
-## Milestones
-
-| # | Milestone | Status | Evidence |
-|---|-----------|--------|----------|
-| 1 | Repository and marketplace skeleton | done | `claude plugin validate --strict` passes for plugin and marketplace (exit 0); isolated-config marketplace add + install succeeded; `plugin details` shows 5 skills, 12 agents, 6 hook events; installed copy contains 0 `CLAUDE.md` files; root `CLAUDE.md` = 113 lines (≤130). |
-| 2 | Core skill and state model | done | 53 unit/platform tests (state, redaction, atomic writes, telemetry whitelist, cleanup/retention, CLI, resume-after-restart); secret-bearing goal never persisted; corrupted state preserved as `state.corrupt-*` with recovery; `validate-runtime.mjs` full mode passes incl. schema/validator consistency. |
-| 3 | Agent system | done | 12 agents discovered by `plugin details`; structural tests: only Builder holds Write/Edit, portable aliases only, no unsupported frontmatter; reviewer flow receives diff+evidence per run skill; agent-result schema shipped. |
-| 4 | Orbit loop | done | stop-gate fixture tests: block-with-delta, budget consumption per block, exhaustion → ITERATION_LIMIT_REACHED with pointer cleared, stagnation → SAFE_BLOCKED, `stop_hook_active` respected, bounded-loop proof (blocks ≤ budget); fingerprint repeat → requiredStrategyChange; six terminal states in schema and gate. |
-| 5 | Question and risk gates | done | Fixture tests: routine AskUserQuestion denied; granted exceptional token allowed exactly once then denied; budget refusal; git push/force, npm publish, gh release, terraform apply, kubectl delete, DROP TABLE, supabase db reset, git reset --hard, gh pr merge, gh secret set all denied pending approval; sensitive paths (.env, id_rsa, secrets.yaml) denied incl. token-level Bash matching; approved override allows only its class; no-active-run pass-through (ADR-0009); injection fixtures never executed and never echoed. |
-| 6 | Observability | done | statusline tests: renders from state only, resolved model only when present, minimal/detailed modes, truncation, secret-bearing labels redacted, empty when no run; agent-events start/stop capture with whitelist extraction (canary fields never persisted); wrapper preserves original status line and degrades gracefully. |
-| 7 | Tool governance and adapters | done | Catalog/policy consistency tests; audit-tool tests: malicious fixture → critical findings + refuse verdict + canary never executed; benign unlisted → unreviewed-no-automatic-use; version drift → not auto-trusted; blocked version → refuse; KRYLO Core runs with zero adapters (fixture run used none). |
-| 8 | Setup, doctor, and alias | done | doctor healthy-path exit 0 with correct inventory and read-only guarantee (directory snapshot identical); unwritable storage → exit 1 with remediation; foreign alias reported; alias dry-run changes nothing; apply installs marked wrapper; re-apply backs up; foreign skill refused in all modes; remove restricted to krylo-owned files; --restore-backup roundtrip verified. |
-| 9 | Test and evaluation suite | done (local) / ci-pending (hosted) | Full suite `node --test`: **120 pass, 0 fail, 0 skipped** on Windows/node 24; syntax check 25/25 scripts; evals.json (12 scenarios) validated against state enums; 9 CI workflows with all actions pinned to full commit SHAs (verified by local pin-check) and least-privilege permissions; Linux/matrix execution awaits GitHub. |
-| 10 | Release and public pilot preparation | done (local) | RELEASE_MANIFEST.json generated with per-file SHA-256 (235 files, regenerated after the review fix cycle); isolated-config install/update/uninstall/reinstall cycle verified; smoke tests via `--plugin-dir`: `/krylo:doctor` (exit 0), `/krylo:status` (renders fixture state exactly), `/krylo:run` read-only fixture ended VERIFIED_COMPLETE through the completion gate (2 criteria proven with passing evidence, 0 questions, 0 cycles, no file modified, no subagents); publication steps remain approval-gated and were not executed. |
-
-## Independent review and fix loop
-
-Two independent reviewers (fresh context, no access to implementer conclusions) reviewed the full diff since baseline `b6818a5`.
-
-**code-reviewer (opus):** verdict no blockers. One HIGH should-fix confirmed: risk-gate patterns for kubectl/helm/terraform/pulumi/aws/gcloud/az/docker/gh/supabase/prisma/stripe/messaging matched only the immediate `tool verb` shape, so the normal flag-before-verb form (`kubectl -n prod delete`, `aws --profile p iam delete-user`) silently bypassed the gate for exactly the production/IAM/publish/release/merge/payment classes it exists to protect. Two LOW notes accepted as designed (safe-direction over-matching on git keyword mentions in commit messages; unlocked read-modify-write on non-critical telemetry-only state fields, no corruption risk, terminal-state writes don't race with tool hooks).
-
-**security-reviewer (opus):** verdict no blockers. Three MEDIUM findings fixed: (1) the same git flag-prefix bypass for push/force/release classes, (2) the KRYLO data root, current-run pointer, and wrapper-config were not protected against direct Write/Edit/Bash mutation by the model itself, allowing a prompt-injected model to self-approve gated actions or disable gates by deleting the pointer, (3) the status-line wrapper executed a stored `originalCommand` string with `shell:true`, a code-execution surface if that config file were ever planted. Two LOW findings fixed (redaction gaps for prefixed key=value secrets, Stripe/Google key formats, and `safeJoin` failing closed on a symlinked data root). Two LOW findings accepted (`KRYLO_TEST_HOME` is a test-only override that stays confined to the alias directory in every code path; agents documented as read-only still carry Bash per the architecture, enforced by convention plus the risk gate rather than tool-list absence).
-
-**Fix loop:** all HIGH/MEDIUM findings addressed in commits `9ca2c91` and `6352864`, both LOW-severity path/redaction fixes included. Regression tests added for every fixed bypass (git `-C`/`-c`/`--git-dir`/`+refspec`, kubectl/aws/helm/terraform/docker flag-prefix forms, data-root self-approval attempts, string-config wrapper canary). Re-ran full suite after each fix: 122 pass, 0 fail throughout. No re-review cycle was required beyond this pass — both reviewers' verdicts were "no blockers" before and after the fixes narrowed only the should-fix items.
-
-## Local validation matrix
+## Validation matrix (this branch, local)
 
 | Check | Command | Status | Result |
 |---|---|---|---|
-| Blueprint integrity | node SHA-256 verification | done | 108/108 match |
+| Full test suite | `npm test` | done | **177 pass, 0 fail, 0 skipped** |
+| Node syntax | `npm run syntax` | done | 28/28 scripts pass |
+| Runtime self-validation | `npm run validate:runtime` | done | `ok:true` (syntax + schema consistency + runtime smoke) |
 | Plugin manifest strict | `claude plugin validate --strict plugins/krylo` | done | pass, exit 0 |
 | Marketplace manifest strict | `claude plugin validate --strict .` | done | pass, exit 0 |
-| Node syntax | `npm run syntax` | done | 25/25 scripts pass |
-| Runtime self-validation | `npm run validate:runtime` | done | ok:true (syntax + schema consistency + runtime smoke), exit 0 |
-| Full test suite | `node --test "plugins/krylo/tests/**/*.test.mjs"` | done | 120 pass, 0 fail, 0 skipped |
-| Local plugin load | `claude --plugin-dir plugins/krylo -p` | done | skills resolve and execute (doctor, status, run) |
-| Isolated marketplace lifecycle | temp `CLAUDE_CONFIG_DIR`: add, install, update, uninstall, reinstall | done | all exit 0; 5 skills + 12 agents + 6 hook events discovered |
-| Doctor smoke | `/krylo:doctor` via --plugin-dir | done | exit 0, read-only report |
-| Status smoke | `/krylo:status` via --plugin-dir | done | renders fixture run state (AC-1 pending, budget 3, phase INITIALIZING) |
-| Run fixture (read-only) | `/krylo:run` audit fixture via --plugin-dir | done | terminal VERIFIED_COMPLETE via completion gate; no writes; no subagents |
-| Alias dry-run/rollback | isolated `KRYLO_TEST_HOME` tests | done | 6/6 alias tests pass |
-| Data hygiene | inspect `~/.claude/plugins/data/krylo` | done | does not exist — no stray writes to real user data |
-| Action pinning | local pin-check grep | done | all `uses:` references pinned to full 40-hex SHAs |
+| Isolated marketplace lifecycle | temp `CLAUDE_CONFIG_DIR`: `marketplace add` (local path) → `install` → `details` → `update` → `uninstall` | done | all exit 0; component inventory: 5 skills, 12 agents, **0 plugin-wide hooks** (all six now scoped to the `run` skill's own frontmatter — live-CLI confirmation of the item-4 hook-scoping design, not just static inspection), 0 MCP servers; always-on token cost ~696 (down from ~940 in 0.1.0, reflecting the removed plugin-wide hooks) |
+| Repo hygiene | `tests/governance/repo-hygiene.test.mjs` | done | no Claude Code local-runtime/lock/session file tracked by git; `.gitignore` declares the patterns |
+| MCP gate fixtures | `tests/security/mcp-classifier.test.mjs`, `tests/hooks/risk-gate-mcp.test.mjs` | done | malicious/benign/read-only/unknown-server/approved-write fixtures pass, including regression fixtures for two bypasses found and fixed during review (below) |
+| Approval scoping fixtures | `tests/hooks/risk-gate-approvals.test.mjs` | done | exact-match, different-target, modified-command, expired, reused, concurrent-consumption, wrong-project, wrong-run, wrong-environment all pass |
+| Concurrency fixtures | `tests/platform/concurrency.test.mjs` | done | two projects, two sessions in one project, one run finishing while another is active, concurrent init, stale-pointer cleanup, corrupted-pointer recovery, legacy-pointer migration, Windows/POSIX path equivalence, and a 12-way concurrent-mutation lock-race regression all pass |
+| Hook-scoping wiring | `tests/governance/hook-scoping.test.mjs` | done | `hooks/hooks.json` registers nothing; the `run` skill's frontmatter declares all six required events against real scripts; no other skill declares an interception hook |
+| Orbit-cap consistency | `tests/governance/policy-consistency.test.mjs`, `tests/unit/cli.test.mjs` | done | plugin.json/risk-policy.md/orbit-policy.md agree on low=3/medium=5/high=7 + cap semantics; `doctor.mjs` reports the real configured cap; functional cap-clamping test (cap can only lower a run's budget, never raise it) passes |
+| Live doctor/status/run smoke | `/krylo:doctor`, `/krylo:status`, `/krylo:run` via `--plugin-dir` | not re-run this cycle | requires an authenticated Claude Code session, unavailable in this non-interactive isolated-config environment; the same code paths are covered by the automated fixture suite above (doctor, alias, statusline tests) plus the real isolated install/uninstall lifecycle |
+| Data hygiene | inspect `~/.claude/plugins/data/krylo` | done | isolated `CLAUDE_PLUGIN_DATA`/`KRYLO_TEST_HOME` used for every test and lifecycle check; no stray writes to real user data |
+| Action pinning | inspection of `.github/workflows/*.yml` | done | all `uses:` references pinned to full 40-hex commit SHAs, including the new `claude-code-compat.yml` |
 
-Note: an interim commit message stated "126 pass"; the correct verified count at that point was 120 (a governance-only run of 16 tests overlapped 6 already-counted audit tests). The authoritative numbers are in this table.
+## Independent review and fix loop (this hardening pass)
 
-## Deviations from blueprint (each covered by an ADR)
+Two independent reviewers (fresh context, no access to each other's or the implementer's conclusions), each given the goal, acceptance criteria, base SHA `c86c4fd`, the actual working-tree diff, and prior test evidence.
 
-- ADR-0016: no plugin `settings.json` with `subagentStatusLine` in 0.1.0 (CLI floor 2.1.197 < 2.1.207). Renderer ships; setup offers a user-level wrapper with dry run + backup.
-- ADR-0017: hand-written structural state validator (zero dependencies); tests and validate-runtime cross-check it against the JSON Schemas.
-- `plugins/krylo/monitors/monitors.json` not shipped: optional per blueprint, "should not require a monitor" (docs/07). No monitor was needed.
-- Additional runtime files beyond FILE_MANIFEST's plan: `scripts/lib/*` (paths, atomic, redact, state, telemetry, hook-utils), `scripts/runtime/posttool-telemetry.mjs`, `scripts/status/agent-events.mjs` — implementation reality, documented in FILE_MANIFEST.md.
+**Reviewer (krylo:reviewer, correctness/regressions):** confirmed the concurrency, approval-scoping, and hook-scoping designs sound. One MEDIUM finding: `doctor.mjs`'s hook-health check read the now-intentionally-empty `hooks/hooks.json` and so could never detect a broken install — fixed to read the `run` skill's frontmatter instead. Several LOW notes accepted or fixed alongside the security review below.
+
+**Reviewer (krylo:security-reviewer):** two HIGH findings in the new MCP classifier (`scripts/security/mcp-classifier.mjs`): (1) `writeVerbPattern` required a `_`/`-` delimiter around the verb, so camelCase operation names (`mergePullRequest`, `createRefund`, a common MCP naming convention) bypassed gating entirely; (2) server-name recognition used bidirectional substring matching, so an attacker-chosen server name merely containing a short catalog id (`digitalocean` contains `git`) or prefixed with a real one (`context7-writer`) inherited that server's trust and bypassed gating for every operation. Both fixed: operation names are now delimited at camelCase boundaries before verb matching; server recognition now requires exact (or `-mcp`/`-cli`-stripped) equality to a catalog id.
+
+**Cross-cutting finding surfaced while fixing the above:** `update-state.mjs` mutated run state without the same per-run file lock the risk gate holds while consuming an approval, so a concurrent mutation could race an approval consumption and lose an update. Fixing this (wrapping `update-state.mjs`'s load-modify-save in the shared lock) exposed a genuine pre-existing TOCTOU race in `scripts/lib/paths.mjs`'s path-resolution helper — a separate `existsSync` check followed by `realpathSync` let a concurrent process delete the file being checked in between, crashing with ENOENT/EPERM on Windows under load. Fixed by collapsing to a single `try/catch` around `realpathSync` (one syscall, no window).
+
+**Verification pass:** both reviewers re-read the fixed code and independently re-ran `npm test` themselves (177 pass, 0 fail) rather than trusting the implementer's report. Both confirmed every finding resolved. The security reviewer's adversarial re-probing surfaced one additional LOW finding (a bare `git` MCP server, catalog-known but matching no `serverActionClasses` rule, passed through ungated for push/force/reset/merge) — fixed with a dedicated `git` rule and a regression test, and reconfirmed by a final `npm test` run (177 pass, 0 fail).
+
+No unresolved Critical, High, or valid Medium finding remains open.
+
+## Deviations from blueprint / prior release (each covered by an ADR)
+
+- ADR-0016: no plugin `settings.json` with `subagentStatusLine` (CLI floor 2.1.197 < 2.1.207 requirement). Unchanged in 0.1.1.
+- ADR-0017: hand-written structural state validator (zero dependencies), cross-checked against the JSON Schemas by `validate-runtime.mjs`. Unchanged.
+- ADR-0018: MCP and external-tool write protection (item 2).
+- ADR-0019: scoped, single-use, expiring risk approvals (item 3).
+- ADR-0020: concurrent-run support via per-project-per-session pointers (item 5).
+- ADR-0021: hook-scoping to the `run` skill (item 4), verified against the official Claude Code hooks documentation before implementation.
+- ADR-0022: Claude Code compatibility policy — pinned floor plus a separate, never-release-blocking current-version check (item 7).
+
+## Known limitations
+
+See `README.md`'s "Known limitations" section (kept in sync with this document): MCP classification is name/pattern-based, not semantic; risk-approval TTL is a fixed 15 minutes; `subagentStatusLine` remains deferred; hook-scoping relies on documented (and now live-CLI-confirmed) Claude Code skill-frontmatter behavior; no macOS CI runner.
 
 ## Release items requiring GitHub-hosted execution or approval
 
-- GitHub-hosted CI runs (all 9 workflows `ci-pending`): validate-plugin, test (ubuntu+windows × node 20/24), codeql, semgrep, dependency-security (OSV + dependency-review), secret-scan (TruffleHog), actions-security (zizmor + pin-check), sbom (Syft), release (manual dispatch, draft release + attestation).
-- CODEOWNERS `@OWNER` placeholders must be replaced with the real account/team before first push.
-- Repository creation, first push, GitHub release, marketplace publication: require explicit user approval. Exact command sequence is in the final report.
-- macOS execution: covered by portable code and POSIX path tests; no macOS runner exercised locally.
+- Pushing `hardening/v0.1.1` (or merging it to `main`) and observing all 9 workflows (plus the new `claude-code-compat.yml`, on its own schedule) run against the real content of this branch — not done in this pass; requires explicit approval per the task's safety boundaries.
+- Creating a `v0.1.1` git tag and GitHub Release — not done; requires explicit approval.
+- Marketplace/official-listing submission — not done; requires explicit approval.
 
 ## Prohibited actions confirmed absent
 
-No remote created, no push, no release, no publication, no deployment, no production change, no `git reset --hard`, no stash of user work, no global CLI update, no user-settings mutation (isolated `CLAUDE_CONFIG_DIR`/`KRYLO_TEST_HOME`/`CLAUDE_PLUGIN_DATA` used for all install and alias tests).
+No push, no merge, no tag, no GitHub Release, no marketplace publication, no deployment, no production change, no `git reset --hard`, no stash or discard of unrelated work, no global CLI update, no real user-settings mutation (isolated `CLAUDE_CONFIG_DIR`/`KRYLO_TEST_HOME`/`CLAUDE_PLUGIN_DATA` used for every install, lifecycle, and alias check in this pass).

@@ -4,7 +4,8 @@
 //   runs/<runId>/state.json
 //   runs/<runId>/artifacts/
 //   telemetry/<runId>.jsonl
-//   current-run.json
+//   active-runs/<projectRootHash>/<sessionSegment>.json  (per-project, per-session pointer)
+//   current-run.json  (legacy single pointer; read once for migration, then removed)
 //
 // Every path used by the runtime must be produced through safeJoin() so a
 // malformed or malicious runId/segment can never escape the data root.
@@ -12,6 +13,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import crypto from 'node:crypto';
 
 /**
  * Resolve the KRYLO plugin data root.
@@ -35,22 +37,34 @@ export function ensureDir(dirPath) {
  * Resolve the real path of the nearest existing ancestor of targetPath and
  * reattach the non-existing suffix. Used to detect symlink escapes even when
  * the final path component does not exist yet (e.g. before writing a new file).
+ *
+ * Deliberately does not pre-check `fs.existsSync` and then call
+ * `fs.realpathSync` as two separate steps: that window lets a concurrent
+ * process delete or rename the very path being checked in between (observed
+ * under concurrent lock-file creation/removal, scripts/lib/lock.mjs, on
+ * Windows: ENOENT/EPERM from `realpathSync` for a path `existsSync` had just
+ * reported present). `realpathSync` alone is a single syscall with no such
+ * gap; any failure — not found, or vanished between an earlier check and now
+ * — is treated identically: walk up to the parent and retry.
  */
 function resolveRealOrNearestExisting(targetPath) {
   const suffixParts = [];
   let current = targetPath;
   // eslint-disable-next-line no-constant-condition
-  while (!fs.existsSync(current)) {
-    const parent = path.dirname(current);
-    if (parent === current) {
-      // Reached filesystem root without finding an existing ancestor.
-      break;
+  while (true) {
+    try {
+      const real = fs.realpathSync(current);
+      return suffixParts.length > 0 ? path.join(real, ...suffixParts) : real;
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) {
+        // Reached filesystem root without finding a resolvable ancestor.
+        return suffixParts.length > 0 ? path.join(current, ...suffixParts) : current;
+      }
+      suffixParts.unshift(path.basename(current));
+      current = parent;
     }
-    suffixParts.unshift(path.basename(current));
-    current = parent;
   }
-  const real = fs.existsSync(current) ? fs.realpathSync(current) : current;
-  return suffixParts.length > 0 ? path.join(real, ...suffixParts) : real;
 }
 
 function assertWithinRoot(root, target) {
@@ -68,7 +82,7 @@ function assertWithinRoot(root, target) {
  */
 export function safeJoin(root, ...segments) {
   const resolvedRoot = path.resolve(root);
-  const rootReal = fs.existsSync(resolvedRoot) ? fs.realpathSync(resolvedRoot) : resolvedRoot;
+  const rootReal = resolveRealOrNearestExisting(resolvedRoot);
 
   // Build the candidate from the REAL root so a data root that is itself
   // reached through a symlink (e.g. macOS /tmp) does not fail-closed on
@@ -100,6 +114,11 @@ export function runStatePath(runId) {
   return safeJoin(getDataRoot(), 'runs', runId, 'state.json');
 }
 
+/** Exclusive-lock marker for one run's state (serializes risk-approval consumption). */
+export function runLockPath(runId) {
+  return safeJoin(getDataRoot(), 'runs', runId, '.state.lock');
+}
+
 export function runArtifactsDir(runId) {
   return safeJoin(getDataRoot(), 'runs', runId, 'artifacts');
 }
@@ -108,6 +127,34 @@ export function telemetryPath(runId) {
   return safeJoin(getDataRoot(), 'telemetry', `${runId}.jsonl`);
 }
 
+/** Legacy (pre-0.1.1) single global pointer. Read only, for one-time migration. */
 export function currentRunPointerPath() {
   return safeJoin(getDataRoot(), 'current-run.json');
+}
+
+/**
+ * A session identifier becomes a filesystem path segment. Claude Code session
+ * ids are UUIDs and pass through unchanged; anything else (or anything
+ * containing characters unsafe for a path segment) is hashed instead, so a
+ * malformed or adversarial session id can never be used for traversal.
+ */
+function safeSessionSegment(sessionId) {
+  if (typeof sessionId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) {
+    return sessionId;
+  }
+  return crypto.createHash('sha256').update(String(sessionId ?? ''), 'utf8').digest('hex');
+}
+
+export function activeRunsRootDir() {
+  return safeJoin(getDataRoot(), 'active-runs');
+}
+
+/** Directory holding every session pointer for one project. */
+export function activeRunsProjectDir(projectRootHash) {
+  return safeJoin(getDataRoot(), 'active-runs', projectRootHash);
+}
+
+/** Path to the pointer file for one project + session pair. */
+export function activeRunPointerPath(projectRootHash, sessionId) {
+  return safeJoin(getDataRoot(), 'active-runs', projectRootHash, `${safeSessionSegment(sessionId)}.json`);
 }

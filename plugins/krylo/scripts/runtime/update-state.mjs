@@ -3,17 +3,35 @@
 // atomically save. Every mutation refreshes updatedAt (via saveState).
 // Unknown operations abort before anything is applied.
 
+import path from 'node:path';
+
 import {
   loadState,
   saveState,
-  readCurrentRunPointer,
-  clearCurrentRunPointer,
+  readActiveRunPointer,
+  clearActiveRunPointerForState,
   completionEval,
+  computeProjectRootHash,
   ENUMS,
   validateEvidence,
 } from '../lib/state.mjs';
-import { deepRedact, redactText } from '../lib/redact.mjs';
+import { deepRedact, redactText, redactAndTruncate } from '../lib/redact.mjs';
+import { fingerprintText } from '../lib/action-fingerprint.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
+import { withFileLock } from '../lib/lock.mjs';
+import { runLockPath } from '../lib/paths.mjs';
+
+// How long an approved (but not yet consumed) risk approval remains usable.
+// Long enough for the model to retry the approved action within the same
+// working session; short enough that an approval granted for one task
+// cannot linger and silently authorize an unrelated later action.
+const APPROVAL_TTL_MS = 15 * 60 * 1000;
+
+function resolveSessionId(explicit) {
+  if (typeof explicit === 'string' && explicit.trim() !== '') return explicit;
+  const env = process.env.CLAUDE_SESSION_ID;
+  return typeof env === 'string' && env.trim() !== '' ? env : undefined;
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -36,6 +54,8 @@ function fail(error, extra = {}) {
 
 function parseArgv(argv) {
   let runId;
+  let session;
+  let projectDir;
   const ops = [];
 
   for (let i = 0; i < argv.length; i++) {
@@ -43,6 +63,12 @@ function parseArgv(argv) {
     switch (a) {
       case '--run':
         runId = argv[++i];
+        break;
+      case '--session':
+        session = argv[++i];
+        break;
+      case '--project-dir':
+        projectDir = argv[++i];
         break;
       case '--phase':
         ops.push({ op: 'phase', value: argv[++i] });
@@ -102,11 +128,13 @@ function parseArgv(argv) {
       case '--request-approval': {
         const actionClass = argv[++i];
         let summary;
-        if (argv[i + 1] === '--summary') {
-          summary = argv[i + 2];
+        let target;
+        while (argv[i + 1] === '--summary' || argv[i + 1] === '--target') {
+          if (argv[i + 1] === '--summary') summary = argv[i + 2];
+          else target = argv[i + 2];
           i += 2;
         }
-        ops.push({ op: 'request-approval', actionClass, summary });
+        ops.push({ op: 'request-approval', actionClass, summary, target });
         break;
       }
       case '--resolve-approval':
@@ -130,17 +158,10 @@ function parseArgv(argv) {
     }
   }
 
-  return { runId, ops };
+  return { runId, session, projectDir, ops };
 }
 
-function clearCurrentRunPointerIfMatches(runId) {
-  const pointer = readCurrentRunPointer();
-  if (pointer.ok && pointer.value && pointer.value.runId === runId) {
-    clearCurrentRunPointer();
-  }
-}
-
-function applyOp(state, op, runId) {
+function applyOp(state, op) {
   switch (op.op) {
     case 'phase': {
       if (!ENUMS.phase.includes(op.value)) return { error: 'invalid-phase' };
@@ -319,14 +340,30 @@ function applyOp(state, op, runId) {
     case 'request-approval': {
       if (!ENUMS.actionClass.includes(op.actionClass)) return { error: 'invalid-action-class' };
       const id = nextNumericId(state.riskApprovals, 'ra');
-      state.riskApprovals.push(deepRedact({
+      const environment = process.env.CLAUDE_PLUGIN_OPTION_SECURITY_PROFILE || null;
+      // Only `summary`/`target` are free text a caller could embed a secret
+      // in; the rest are structural identifiers (a 64-hex project hash would
+      // itself be mistaken for an opaque token and mangled by deepRedact).
+      // An optional --target pre-binds this approval to the exact action:
+      // the risk gate only lets a retry whose own fingerprint matches spend
+      // it (scripts/lib/action-fingerprint.mjs). Without --target, any
+      // action in this actionClass may consume it once (untargeted, still
+      // single-use).
+      state.riskApprovals.push({
         id,
         actionClass: op.actionClass,
         status: 'pending',
         requestedAt: nowIso(),
         resolvedAt: null,
-        ...(op.summary ? { summary: op.summary.slice(0, 200) } : {}),
-      }));
+        projectRootHash: state.project.rootHash,
+        runId: state.runId,
+        environment,
+        expiresAt: null,
+        consumedAt: null,
+        fingerprint: op.target ? fingerprintText(op.target) : null,
+        target: op.target ? redactAndTruncate(op.target, 300) : null,
+        ...(op.summary ? { summary: redactText(op.summary).slice(0, 200) } : {}),
+      });
       return {};
     }
 
@@ -337,6 +374,11 @@ function applyOp(state, op, runId) {
       if (!approval) return { error: 'approval-not-found' };
       approval.status = status;
       approval.resolvedAt = nowIso();
+      // The expiry clock starts at approval, not at request: a request that
+      // sits unreviewed for a while must not burn down its usable window.
+      if (status === 'approved') {
+        approval.expiresAt = new Date(Date.now() + APPROVAL_TTL_MS).toISOString();
+      }
       return {};
     }
 
@@ -388,7 +430,7 @@ function applyOp(state, op, runId) {
         ITERATION_LIMIT_REACHED: 'ITERATION_LIMIT',
       };
       state.phase = phaseByTerminal[op.value] || state.phase;
-      clearCurrentRunPointerIfMatches(runId);
+      clearActiveRunPointerForState(state);
       return {};
     }
 
@@ -397,12 +439,45 @@ function applyOp(state, op, runId) {
   }
 }
 
+/**
+ * Load, apply every op, and save, all under the run's exclusive file lock
+ * (the same lock scripts/security/risk-gate.mjs holds while consuming a
+ * risk approval). Without this, a concurrent CLI mutation and an in-flight
+ * approval consumption could both load-modify-save the same state.json and
+ * lose one side's update (e.g. a resolved approval reverting to "pending").
+ * Returns a plain result object instead of exiting, so the lock is always
+ * released (via withFileLock's finally) before the process reports and exits.
+ */
+function loadApplySave(runId, ops) {
+  return withFileLock(runLockPath(runId), () => {
+    const loaded = loadState(runId);
+    if (!loaded.ok) return { ok: false, error: 'load-failed', details: loaded.error };
+    const state = loaded.value;
+
+    const applied = [];
+    for (const op of ops) {
+      const result = applyOp(state, op);
+      if (result && result.error) {
+        return { ok: false, error: result.error, op: op.op, details: result.details };
+      }
+      applied.push(op.op);
+    }
+
+    const saveResult = saveState(state);
+    if (!saveResult.ok) return { ok: false, error: 'invalid-state', details: saveResult.errors };
+
+    return { ok: true, applied };
+  });
+}
+
 function main() {
-  const { runId: explicitRunId, ops } = parseArgv(process.argv.slice(2));
+  const { runId: explicitRunId, session, projectDir, ops } = parseArgv(process.argv.slice(2));
 
   let runId = explicitRunId;
   if (!runId) {
-    const pointer = readCurrentRunPointer();
+    const projectRootHash = computeProjectRootHash(path.resolve(projectDir || process.cwd()));
+    const sessionId = resolveSessionId(session);
+    const pointer = readActiveRunPointer({ projectRootHash, sessionId });
     if (!pointer.ok || !pointer.value || !pointer.value.runId) {
       fail('no-current-run');
       return;
@@ -410,30 +485,13 @@ function main() {
     runId = pointer.value.runId;
   }
 
-  const loaded = loadState(runId);
-  if (!loaded.ok) {
-    fail('load-failed', { details: loaded.error });
-    return;
-  }
-  const state = loaded.value;
-
-  const applied = [];
-  for (const op of ops) {
-    const result = applyOp(state, op, runId);
-    if (result && result.error) {
-      fail(result.error, { op: op.op, details: result.details });
-      return;
-    }
-    applied.push(op.op);
-  }
-
-  const saveResult = saveState(state);
-  if (!saveResult.ok) {
-    fail('invalid-state', { details: saveResult.errors });
+  const result = loadApplySave(runId, ops);
+  if (!result.ok) {
+    fail(result.error, { op: result.op, details: result.details });
     return;
   }
 
-  console.log(JSON.stringify({ ok: true, runId, applied }));
+  console.log(JSON.stringify({ ok: true, runId, applied: result.applied }));
   process.exit(0);
 }
 

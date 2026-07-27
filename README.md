@@ -1,8 +1,14 @@
 # KRYLO
 
+[![test](https://github.com/FreeJaguar/KRYLO/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/FreeJaguar/KRYLO/actions/workflows/test.yml)
+[![validate-plugin](https://github.com/FreeJaguar/KRYLO/actions/workflows/validate-plugin.yml/badge.svg?branch=main)](https://github.com/FreeJaguar/KRYLO/actions/workflows/validate-plugin.yml)
+[![codeql](https://github.com/FreeJaguar/KRYLO/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/FreeJaguar/KRYLO/actions/workflows/codeql.yml)
+[![secret-scan](https://github.com/FreeJaguar/KRYLO/actions/workflows/secret-scan.yml/badge.svg?branch=main)](https://github.com/FreeJaguar/KRYLO/actions/workflows/secret-scan.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+
 KRYLO is a public Claude Code plugin and marketplace for autonomous, evidence-driven software development. One explicit command turns a task into a controlled run: acceptance criteria, a minimal agent team, deterministic verification, independent review, a bounded correction loop (Orbit), and an evidence-backed final report.
 
-Current release: `0.1.0`.
+Current release: `0.1.1`. Not yet submitted to the official Claude Code marketplace; install directly from this repository (below).
 
 ## Installation
 
@@ -28,6 +34,28 @@ claude plugin update krylo@krylo-marketplace
 claude plugin uninstall krylo@krylo-marketplace
 ```
 
+### Rollback
+
+The CLI installs the marketplace's current version; there is no version-pinned install flag. To roll back to a previous release:
+
+```bash
+claude plugin uninstall krylo@krylo-marketplace
+git clone --branch <previous-tag> https://github.com/FreeJaguar/KRYLO /path/to/krylo-<previous-tag>
+claude --plugin-dir /path/to/krylo-<previous-tag>/plugins/krylo   # use that version for the session, or
+claude plugin marketplace add /path/to/krylo-<previous-tag> --scope user
+claude plugin install krylo@krylo-marketplace                     # re-adds the marketplace at the older tag
+```
+
+Uninstalling never deletes KRYLO's own run/telemetry data; see `RELEASE_READINESS.md` for the data-directory location.
+
+## Quick example
+
+```text
+/krylo:run Add a rate limiter to the /api/upload endpoint, with tests
+```
+
+KRYLO reads the repository, classifies the task (lane, risk, complexity), compiles observable acceptance criteria, implements with the smallest effective agent team, runs deterministic verification, gets an independent review, and stops in an explicit terminal state (e.g. `VERIFIED_COMPLETE` with evidence, or `RISK_APPROVAL_REQUIRED` if the task turns out to need a production/destructive/external-write action). Use `/krylo:status` any time to see the current run's criteria, evidence, and Orbit budget without interrupting it.
+
 ## Commands
 
 | Command | Purpose |
@@ -52,6 +80,23 @@ An optional setup step may install a personal wrapper so `/krylo <task>` works a
 - Six explicit terminal states; a model-generated phrase is never sufficient evidence of completion.
 - Windows, macOS, and Linux support.
 
+The Risk Gate is **defense in depth, not an operating-system sandbox**: it is a policy layer over the tool calls Claude Code reports to it, not process/filesystem/network confinement. Pair it with least-privileged credentials and an isolated environment for anything genuinely high-stakes; see [SECURITY.md](SECURITY.md).
+
+## Known limitations
+
+- MCP/external-tool classification (`plugins/krylo/scripts/security/mcp-classifier.mjs`) matches server and operation names against policy patterns; it is not a semantic analysis of what an operation actually does. Unknown MCP servers are always gated for every operation, but a known server's operation whose name does not match any configured write pattern passes through ungated.
+- Risk-approval expiry is a fixed 15 minutes and is not currently user-configurable.
+- The plugin `settings.json` `subagentStatusLine` key is deferred until the minimum supported Claude Code version reaches 2.1.207 or later (`docs/adr/0016-subagent-statusline-deferred.md`); the renderer itself ships and is offered through `/krylo:setup`.
+- Hook-scoping to the `run` skill (`docs/adr/0021-hook-scoping-to-run-skill.md`) relies on documented Claude Code skill-frontmatter behavior; it has been verified against the current official schema and an isolated real-CLI install/uninstall lifecycle, not fuzzed across every CLI patch release.
+- No macOS runner is exercised in CI (the test matrix covers `ubuntu-latest` and `windows-latest`); macOS support relies on portable Node.js and POSIX-path test coverage.
+
+## Roadmap (v0.2, indicative)
+
+- Plugin `settings.json` with `subagentStatusLine` once the minimum supported CLI reaches 2.1.207+.
+- User-configurable risk-approval TTL.
+- Broaden MCP operation classification beyond name/pattern matching where the platform exposes richer tool metadata.
+- Official Claude Code marketplace submission, pending community feedback on 0.1.x.
+
 ## Repository layout
 
 ```text
@@ -59,8 +104,10 @@ An optional setup step may install a personal wrapper so `/krylo <task>` works a
 plugins/krylo/                    The KRYLO plugin (manifest, skills, agents,
                                    hooks, scripts, schemas, policies, catalog,
                                    adapters, references, tests, evals)
-docs/                             Architecture documents and ADRs
-plugin/                           Immutable v0.1.2 blueprint record (drafts)
+docs/                             Architecture documents, ADRs, and docs/process/
+                                   (implementation plan, review checklist,
+                                   file manifest, license decision)
+archive/blueprint-v0.1.2/          Immutable v0.1.2 blueprint record (drafts)
 .github/workflows/                CI: validation, tests, security scans
 ```
 

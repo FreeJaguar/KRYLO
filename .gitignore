@@ -1,5 +1,7 @@
-# Local Claude Code state
+# Local Claude Code state (never commit local runtime, lock, or session files)
 .claude/agent-memory/
+.claude/*.lock
+.claude/settings.local.json
 
 # Node
 node_modules/

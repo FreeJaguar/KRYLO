@@ -15,10 +15,16 @@ export function mkTempDataDir(prefix = 'krylo-hook-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
 }
 
-/** Spawn a runtime CLI (init-run, update-state, ...) against a data dir. */
+/**
+ * Spawn a runtime CLI (init-run, update-state, ...) against a data dir.
+ * Runs with cwd = dataDir so a call that omits --run/--project-dir resolves
+ * the active-run pointer the same way createActiveRun()'s default project
+ * dir (also dataDir) was recorded.
+ */
 export function runCli(scriptRelPath, args, dataDir) {
   const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath), ...args], {
     encoding: 'utf8',
+    cwd: dataDir,
     env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir },
   });
   let json;
@@ -31,12 +37,12 @@ export function runCli(scriptRelPath, args, dataDir) {
 }
 
 /** Pipe a hook payload into a hook script. Returns status/stdout/parsed JSON. */
-export function runHook(scriptRelPath, payload, dataDir, { rawInput } = {}) {
+export function runHook(scriptRelPath, payload, dataDir, { rawInput, env } = {}) {
   const input = rawInput !== undefined ? rawInput : JSON.stringify(payload);
   const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath)], {
     encoding: 'utf8',
     input,
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir },
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, ...env },
   });
   let json = null;
   try {

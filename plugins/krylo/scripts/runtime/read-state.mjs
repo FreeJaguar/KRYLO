@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // Print (deep-redacted) run state, or a single dotted field from it.
 
-import { loadState, readCurrentRunPointer } from '../lib/state.mjs';
+import path from 'node:path';
+
+import { loadState, readActiveRunPointer, computeProjectRootHash } from '../lib/state.mjs';
 import { deepRedact } from '../lib/redact.mjs';
 
 function parseArgs(argv) {
@@ -9,12 +11,20 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     switch (argv[i]) {
       case '--run': args.run = argv[++i]; break;
+      case '--session': args.session = argv[++i]; break;
+      case '--project-dir': args.projectDir = argv[++i]; break;
       case '--field': args.field = argv[++i]; break;
       case '--raw': args.raw = true; break;
       default: break;
     }
   }
   return args;
+}
+
+function resolveSessionId(explicit) {
+  if (typeof explicit === 'string' && explicit.trim() !== '') return explicit;
+  const env = process.env.CLAUDE_SESSION_ID;
+  return typeof env === 'string' && env.trim() !== '' ? env : undefined;
 }
 
 function getByPath(obj, dotPath) {
@@ -26,7 +36,9 @@ function main() {
 
   let runId = args.run;
   if (!runId) {
-    const pointer = readCurrentRunPointer();
+    const projectRootHash = computeProjectRootHash(path.resolve(args.projectDir || process.cwd()));
+    const sessionId = resolveSessionId(args.session);
+    const pointer = readActiveRunPointer({ projectRootHash, sessionId });
     if (!pointer.ok || !pointer.value || !pointer.value.runId) {
       console.log(JSON.stringify({ ok: false, error: 'no-current-run' }));
       process.exit(1);

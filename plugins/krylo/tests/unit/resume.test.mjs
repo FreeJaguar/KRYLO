@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { loadState, readCurrentRunPointer } from '../../scripts/lib/state.mjs';
+import { loadState, readActiveRunPointer, computeProjectRootHash } from '../../scripts/lib/state.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPTS_ROOT = path.resolve(__dirname, '..', '..', 'scripts');
@@ -37,7 +37,8 @@ test('state resumes after a simulated process restart', () => {
     // In the current (test) process, point at the same data dir and read
     // the pointer + state that process A wrote.
     process.env.CLAUDE_PLUGIN_DATA = dataDir;
-    const pointer = readCurrentRunPointer();
+    const projectRootHash = computeProjectRootHash(dataDir);
+    const pointer = readActiveRunPointer({ projectRootHash, sessionId: 'session-resume-1' });
     assert.equal(pointer.ok, true);
     assert.equal(pointer.value.runId, runId);
 

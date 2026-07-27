@@ -2,6 +2,10 @@
 
 Orbit is a bounded correction loop.
 
+## Budget and the `max_orbit_cycles` cap
+
+Every run starts from a risk-based Orbit budget: low=3, medium=5, high=7 (`docs/../references/risk-policy.md`). The user-facing `max_orbit_cycles` setting (default 7, range 1-10) is a cap, not a target: it can only lower a run's budget further, never raise it above its risk-based value, and never above the platform-safe maximum of 10. A high-risk run with `max_orbit_cycles=10` still starts at budget 7; a low-risk run with `max_orbit_cycles=10` still starts at budget 3. Setting `max_orbit_cycles=2` lowers every run's budget to at most 2 regardless of risk.
+
 Each cycle receives only:
 
 - Unmet criteria.

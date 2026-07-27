@@ -1,19 +1,14 @@
 {
   "name": "krylo-release",
-  "version": "0.1.0",
-  "generatedAt": "2026-07-20T08:12:24.295Z",
-  "note": "Per-file SHA-256 of the implemented 0.1.0 repository tree (git-tracked files at generation time, excluding this manifest). BLUEPRINT_MANIFEST.json remains the immutable record of blueprint 0.1.2 as delivered in the baseline commit.",
-  "fileCount": 236,
+  "version": "0.1.1",
+  "generatedAt": "2026-07-22T12:54:25.316Z",
+  "note": "Per-file SHA-256 of the implemented repository tree (git-tracked files at generation time, excluding this manifest). BLUEPRINT_MANIFEST.json remains the immutable record of blueprint 0.1.2 as delivered in the baseline commit.",
+  "fileCount": 250,
   "files": [
     {
       "path": ".claude-plugin/marketplace.json",
       "bytes": 734,
-      "sha256": "e3792d08151fefa0c4cefa80de4b6b73d8b87fd5586991f49adc210f4fcd75c2"
-    },
-    {
-      "path": ".claude/scheduled_tasks.lock",
-      "bytes": 124,
-      "sha256": "e60d417895e68907cebb9d84db67975fb1323f573e09a0f85f7ac0627bdd0f73"
+      "sha256": "0f792013cbdfa64f58e2f5c00378623d1af8f04fca7848bf14487e1a1eb8d120"
     },
     {
       "path": ".gitattributes",
@@ -61,6 +56,11 @@
       "sha256": "d0029078165ebe0ac16f313d18be4ef368ffa4d616b37b7b1c52b815c605f0d5"
     },
     {
+      "path": ".github/workflows/claude-code-compat.yml",
+      "bytes": 1491,
+      "sha256": "c5f6d18368bae5e40d764cd6f0b732d58f8d63bee616953faa9291b2fa4f2097"
+    },
+    {
       "path": ".github/workflows/codeql.yml",
       "bytes": 720,
       "sha256": "9ec00230f06dddf6d0fbed03a59b9c4b863cc1d92b27f4142f9843815b692279"
@@ -102,8 +102,8 @@
     },
     {
       "path": ".gitignore",
-      "bytes": 132,
-      "sha256": "5687caf6d6e96316925e18ac9da0e180145f2d4e908aa2c24439cc397248ad1e"
+      "bytes": 228,
+      "sha256": "772cf40637a8bb54b03878c6a7924eb04225a85836d178afcd32f703fa6a889e"
     },
     {
       "path": "ARCHITECTURE.md",
@@ -112,18 +112,18 @@
     },
     {
       "path": "BLUEPRINT_MANIFEST.json",
-      "bytes": 17849,
-      "sha256": "5c9301a0c77abe06c9bedd6f87e364a2f6619f5c2c5ca74aacc67399a72a4b33"
+      "bytes": 18551,
+      "sha256": "6d5f2a1fa958fb4a15b82d16f0651ba82af8d90e631f248e09f35b660b9d5f32"
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 2723,
-      "sha256": "33d974414cd408232f3a99231dd5d35b13fffe8a9fce31c4c5ed51258618570a"
+      "bytes": 6961,
+      "sha256": "9d2c511ab7c4ce48e78d577e36b69527ee52d3d8f5c0063a14ed691af100dee3"
     },
     {
       "path": "CLAUDE.md",
-      "bytes": 6354,
-      "sha256": "648859d27c625d0c875b3d111950da8f850196f1805a25b2569c8054a85a637b"
+      "bytes": 6551,
+      "sha256": "bebd1ea13e38da3dd930682681e600b06b36cd1cf69eadee4af5f4aa16de8479"
     },
     {
       "path": "CODE_OF_CONDUCT.md",
@@ -132,18 +132,8 @@
     },
     {
       "path": "CONTRIBUTING.md",
-      "bytes": 1579,
-      "sha256": "266aa5cff76693efd21b3ab3313491021c0139ab716ba032c92d17eae769ebab"
-    },
-    {
-      "path": "FILE_MANIFEST.md",
-      "bytes": 5845,
-      "sha256": "54828688f511fec60a701575800bbc35a783426498f671f7b2b4eec3bd169fb6"
-    },
-    {
-      "path": "IMPLEMENTATION_PLAN.md",
-      "bytes": 4652,
-      "sha256": "e65feab40e6ea1f6a9b514c38fdaabaef56fcff8d7a134dd567a0470c1bbaef0"
+      "bytes": 2956,
+      "sha256": "09bd1496bc3f7c66c6b65c8713ffc8096c68c05f1510c5ed2ce20b66240e4329"
     },
     {
       "path": "LICENSE",
@@ -151,39 +141,24 @@
       "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30"
     },
     {
-      "path": "LICENSE_DECISION.md",
-      "bytes": 645,
-      "sha256": "5d6e92596ee12a3cfad7ad4bcef11fc56c8fc25f11f5db3b209ebf2f3b57db8c"
-    },
-    {
       "path": "PRODUCT_SPEC.md",
       "bytes": 3167,
       "sha256": "7c48866124fa289f73ead8b258c2f6edd59cca1f93980b0e019d258e4e09f804"
     },
     {
-      "path": "PROMPT_INPUT_CONTRACT.md",
-      "bytes": 2625,
-      "sha256": "4d6c2b156c7f39fb0aae7749493a4c0d41d00a709ce32423ca481de09faa4352"
-    },
-    {
       "path": "README.md",
-      "bytes": 4086,
-      "sha256": "13d67d5cb25c1716226391553cfab03abfcbc44b440aaf81f3803d026f63389d"
+      "bytes": 8399,
+      "sha256": "c70233f18102a305bcbf195a0c3c4d2a371c81890f69acf79a946f8199a962d4"
     },
     {
       "path": "RELEASE_READINESS.md",
-      "bytes": 11950,
-      "sha256": "a9e94d1379e699253d2d32f31c713ddc14e058de4318d3ba8c42f08c295c09e6"
-    },
-    {
-      "path": "REVIEW_CHECKLIST.md",
-      "bytes": 2929,
-      "sha256": "51db6a4e42c026b7e0e5a848abdf5bcf9f9d54370d7233d13c6e41318301229b"
+      "bytes": 11106,
+      "sha256": "54013dfe2ae68b177094cb65a8291869bc000660213686c795118ffdc3271a95"
     },
     {
       "path": "SECURITY.md",
-      "bytes": 2487,
-      "sha256": "a7ecb2895db691ed54a88d0eff874c0fc80d0e367a7157b940eef18d37055a35"
+      "bytes": 3427,
+      "sha256": "58b1e937f5c741732d14ffeec14ad6089dc6972182ea74acd95dcf5bb963cdcf"
     },
     {
       "path": "SOURCES.md",
@@ -199,6 +174,201 @@
       "path": "THREAT_MODEL.md",
       "bytes": 3499,
       "sha256": "6dad2c5bec08159c8a4a2f93365dc1e42b97c8d9a7f07ea385c34ebb4fdcbf33"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/README.md",
+      "bytes": 890,
+      "sha256": "55b161238340589792eecaab1d6ae7a15c7971c2e6bf9f82dcf50bf2a5c5c758"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/adapters/README.md",
+      "bytes": 517,
+      "sha256": "868c7d8582176c5bf55b8fb9ded476f74c9236f4bcb25bcda0c944106f7ce456"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/README.md",
+      "bytes": 729,
+      "sha256": "9155ac6d49230b13da011ab285160d659ebb994ec9a6865494bb631f7f95e86e"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/ai-eval-engineer.md",
+      "bytes": 928,
+      "sha256": "6e38342a9b6ad8ba89fe7abad10383615e5a8d8fe8d385f717038fcaaa0d59d3"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/architect.md",
+      "bytes": 847,
+      "sha256": "b380f2b3830e6372d9d91953d7d8ec63facd129dc0c2ac52fe789dbfd2162f98"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/builder.md",
+      "bytes": 948,
+      "sha256": "b7cecfe4d7336cb0e9f9787d9683048ed0bd20fd5ef209f55ed8b86bdbc02da5"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/deep-debugger.md",
+      "bytes": 1013,
+      "sha256": "b0cf8f279f847894deb95656f79d2c967d187b0691dc4ebba77205192f3dda0c"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/design-reviewer.md",
+      "bytes": 938,
+      "sha256": "33071a1a68832f30405d8fa9f69e48fd10e55e9b002d6bf7020723492e7442ad"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/migration-reviewer.md",
+      "bytes": 794,
+      "sha256": "11ef2addaccfe3652013cddc0fe0e03cc380897ed719924474ccc4f2e4752622"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/performance-reviewer.md",
+      "bytes": 791,
+      "sha256": "25b8287b7693d2a1d4200444c227c06504229958b2e6782a73ceae4499140bcf"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/product-strategist.md",
+      "bytes": 855,
+      "sha256": "b4821fd0db42bd4cc0bbef370e452bdef3fa2d3f86dae192204cf89664643ba6"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/reviewer.md",
+      "bytes": 981,
+      "sha256": "e2ed3eb0d46bb903de15a9a5479de6372c3b69e290c32e43677e6de4664d005a"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/scout.md",
+      "bytes": 817,
+      "sha256": "619eb320041f0cdd39e9e09c2098231199fcf5bf3a0e79ec1f1c6e1e7ae626cc"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/security-reviewer.md",
+      "bytes": 978,
+      "sha256": "50d1bbb28571d94452c04be26d634fe60c3a243535f79df526a5e88aa098e5d1"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/agents/verifier.md",
+      "bytes": 916,
+      "sha256": "bf8ce2c234b2536ef05b6e65177a72f09f41ec3c0ccdde625720a86d17d78abe"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/catalog/README.md",
+      "bytes": 443,
+      "sha256": "f3bed80f9d946ec6b4f91ec30c9c3a11ef77fb3afe291fc1e9231478ab88d6f1"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/evals/README.md",
+      "bytes": 469,
+      "sha256": "1ea07c745ff7bd4575ae20d6417a85a36d88816c0b97b8e985aadfb9db9c04ed"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/evals/expected-behaviors.md",
+      "bytes": 1064,
+      "sha256": "eabee742de3063e64603ba918743900cd6a0fdca1b405b50c668369e5b622ab0"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/policies/README.md",
+      "bytes": 310,
+      "sha256": "aa458d6f0fbccf8f60b68bfb4bfd973c5bfa35cf9a18ed65e21dee3204102be2"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/adapter-policy.md",
+      "bytes": 588,
+      "sha256": "dfc0118728a7e1d4373a403b1500768d95f1bd69568096d4c8ce18b969861ad8"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/completion-contract.md",
+      "bytes": 703,
+      "sha256": "fca9c24fe8cac35a12cf992b27414ca42b5bb14ab873c8e963e75654ddb2fd41"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/design-policy.md",
+      "bytes": 574,
+      "sha256": "e68137280073efc6c89534b9462061aff2ea147ba8e7f6a768a046bcadd822b8"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/final-report-template.md",
+      "bytes": 1003,
+      "sha256": "73dc031446a2dbdba305eacaff776da79adf73feece5ae3fd6325ab93eba8287"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/lane-policy.md",
+      "bytes": 1333,
+      "sha256": "d8cf047be19cd584d5734f06537590fc3f89b963ccd620c6e27933dfb9482a5b"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/operating-principles.md",
+      "bytes": 823,
+      "sha256": "0001ddab6fa13708adc99dd9f5ab695eb2fbf726361ecf6bc31baf59d3b59a09"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/orbit-policy.md",
+      "bytes": 718,
+      "sha256": "dbbcbb43166ce6784f760c10d7dfb56de403b6210705faf1c90d55f29a17c9ec"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/question-policy.md",
+      "bytes": 824,
+      "sha256": "274d52ff12496aa0eefae0cac642d048e52f286403eeb86000dd47325ffca901"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/risk-policy.md",
+      "bytes": 1049,
+      "sha256": "c2f9a93badb863d9ba6f5d7adaa90edd82b500a6fdd41f6872b64fb6d6383508"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/security-policy.md",
+      "bytes": 716,
+      "sha256": "b8f7070b0d1556ae377029015efc0f8d682f8933493ddca2093529bbee71b90c"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/testing-policy.md",
+      "bytes": 838,
+      "sha256": "b402094442033c92fb1e6805513985d93b0861546129d4a87a43a4638fdd40fb"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/references/tool-policy.md",
+      "bytes": 771,
+      "sha256": "8f4a354b1e19cf9a7469a683b157bcedff1fe143839ff13bf0964d27c9d1e3e7"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/scripts/README.md",
+      "bytes": 558,
+      "sha256": "ae0dffe9bbf04e0bdffc0225b8308ee8d36655ad807bacdf28060fcb89614b21"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/skills/README.md",
+      "bytes": 538,
+      "sha256": "cdff262924f564d351e20d232b9aeb67ec06bb1451990a6e91595af8c5c06238"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/skills/audit-tool/SKILL.md",
+      "bytes": 1165,
+      "sha256": "c2bcf93577015a11e1539723b59dcdaa901acba37479cf5e337a019e814cba1e"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/skills/doctor/SKILL.md",
+      "bytes": 886,
+      "sha256": "832fa34e575bae48b2e199b65788229b9fb4c4fad2cecc5951512dc8ef53056b"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/skills/run/SKILL.md",
+      "bytes": 1760,
+      "sha256": "050214cdc94bdd685db35f91b690092785ca7fefd9f619e3de0cb8f435172a8b"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/skills/setup/SKILL.md",
+      "bytes": 1108,
+      "sha256": "82295d23d4116337483aca4a91624e3c156d88541fa9e30e969f4b12de6df63c"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/skills/status/SKILL.md",
+      "bytes": 730,
+      "sha256": "d53ed64deeaadf9b69cc46cfee42080afc161ede361ffca33484fc9c5e0c3909"
+    },
+    {
+      "path": "archive/blueprint-v0.1.2/tests/README.md",
+      "bytes": 468,
+      "sha256": "6ddc1fb4c69b8ff0c872f8bb2f3225d262ff2b3847dc57fd9ca4612566eb0441"
     },
     {
       "path": "docs/01-command-surface.md",
@@ -282,8 +452,8 @@
     },
     {
       "path": "docs/17-distribution-and-release.md",
-      "bytes": 1147,
-      "sha256": "9e8136b74a337e0a93c7ceef758d3dc41e03eb049e2a2071aa92a32329407685"
+      "bytes": 1853,
+      "sha256": "4eb6376c7f2c998afb5b3a1d972ef354cf03cf8336edcc0254d0681b8c54ce90"
     },
     {
       "path": "docs/18-setup-and-alias.md",
@@ -416,9 +586,59 @@
       "sha256": "7f01e82aaf85ba0b999383e25459b47342baac55c9f436e90572393c6ce79aa7"
     },
     {
+      "path": "docs/adr/0018-mcp-and-external-tool-gating.md",
+      "bytes": 2756,
+      "sha256": "d339f959272f32a9c57f10b05826b3a3f062e52446f2ba03aa895817ea787ee9"
+    },
+    {
+      "path": "docs/adr/0019-scoped-single-use-approvals.md",
+      "bytes": 2827,
+      "sha256": "b43f8623fe23b412319c5fd8b86cec4d61533adc3a795ea6dc99d0060d610928"
+    },
+    {
+      "path": "docs/adr/0020-concurrent-runs.md",
+      "bytes": 2830,
+      "sha256": "15d099dfb0f12dfb38d1c70c0c27fa59571d8f426235fae27efb4a8361a85485"
+    },
+    {
+      "path": "docs/adr/0021-hook-scoping-to-run-skill.md",
+      "bytes": 2517,
+      "sha256": "c810d838c6343a663e615401d57bca7ae4f71db8cd77fa972bc38d2910e734cf"
+    },
+    {
+      "path": "docs/adr/0022-claude-code-compatibility-policy.md",
+      "bytes": 3747,
+      "sha256": "0e0dce36d280af51e6dc274def6e97d319e015ebcd1bccfb6f2160576dd4c335"
+    },
+    {
       "path": "docs/adr/README.md",
       "bytes": 451,
       "sha256": "8da79a6ef78e8f2cda90a7cc8e9109b5b4592cc68b2e42751b2b5b026de7a207"
+    },
+    {
+      "path": "docs/process/FILE_MANIFEST.md",
+      "bytes": 6349,
+      "sha256": "7e9b8160cc6bfbc64839374e81b362b89fa649e3ca124c561f6636c825fd6215"
+    },
+    {
+      "path": "docs/process/IMPLEMENTATION_PLAN.md",
+      "bytes": 4652,
+      "sha256": "e65feab40e6ea1f6a9b514c38fdaabaef56fcff8d7a134dd567a0470c1bbaef0"
+    },
+    {
+      "path": "docs/process/LICENSE_DECISION.md",
+      "bytes": 645,
+      "sha256": "5d6e92596ee12a3cfad7ad4bcef11fc56c8fc25f11f5db3b209ebf2f3b57db8c"
+    },
+    {
+      "path": "docs/process/PROMPT_INPUT_CONTRACT.md",
+      "bytes": 2625,
+      "sha256": "4d6c2b156c7f39fb0aae7749493a4c0d41d00a709ce32423ca481de09faa4352"
+    },
+    {
+      "path": "docs/process/REVIEW_CHECKLIST.md",
+      "bytes": 2947,
+      "sha256": "8e567f8aaf5a34954eef1d2e46ada2b89d90c80b3d5614753af40c5ad8851264"
     },
     {
       "path": "docs/templates/adr-template.md",
@@ -458,212 +678,17 @@
     {
       "path": "package-lock.json",
       "bytes": 283,
-      "sha256": "560c5c5b92cb7a879dd1326fd1c6bef612efa69eb818c86deabcd0ddbdd6800a"
+      "sha256": "3471593b2f427c7cfe09ba758c7f9a7b0c4829a051043f87f5087070649950f2"
     },
     {
       "path": "package.json",
       "bytes": 1149,
-      "sha256": "afbaec063cefe61e9935db3dd8fce28a3d4eca97cc7aa01f88a7855d3b0a3ef1"
-    },
-    {
-      "path": "plugin/README.md",
-      "bytes": 890,
-      "sha256": "55b161238340589792eecaab1d6ae7a15c7971c2e6bf9f82dcf50bf2a5c5c758"
-    },
-    {
-      "path": "plugin/adapters/README.md",
-      "bytes": 517,
-      "sha256": "868c7d8582176c5bf55b8fb9ded476f74c9236f4bcb25bcda0c944106f7ce456"
-    },
-    {
-      "path": "plugin/agents/README.md",
-      "bytes": 729,
-      "sha256": "9155ac6d49230b13da011ab285160d659ebb994ec9a6865494bb631f7f95e86e"
-    },
-    {
-      "path": "plugin/agents/ai-eval-engineer.md",
-      "bytes": 928,
-      "sha256": "6e38342a9b6ad8ba89fe7abad10383615e5a8d8fe8d385f717038fcaaa0d59d3"
-    },
-    {
-      "path": "plugin/agents/architect.md",
-      "bytes": 847,
-      "sha256": "b380f2b3830e6372d9d91953d7d8ec63facd129dc0c2ac52fe789dbfd2162f98"
-    },
-    {
-      "path": "plugin/agents/builder.md",
-      "bytes": 948,
-      "sha256": "b7cecfe4d7336cb0e9f9787d9683048ed0bd20fd5ef209f55ed8b86bdbc02da5"
-    },
-    {
-      "path": "plugin/agents/deep-debugger.md",
-      "bytes": 1013,
-      "sha256": "b0cf8f279f847894deb95656f79d2c967d187b0691dc4ebba77205192f3dda0c"
-    },
-    {
-      "path": "plugin/agents/design-reviewer.md",
-      "bytes": 938,
-      "sha256": "33071a1a68832f30405d8fa9f69e48fd10e55e9b002d6bf7020723492e7442ad"
-    },
-    {
-      "path": "plugin/agents/migration-reviewer.md",
-      "bytes": 794,
-      "sha256": "11ef2addaccfe3652013cddc0fe0e03cc380897ed719924474ccc4f2e4752622"
-    },
-    {
-      "path": "plugin/agents/performance-reviewer.md",
-      "bytes": 791,
-      "sha256": "25b8287b7693d2a1d4200444c227c06504229958b2e6782a73ceae4499140bcf"
-    },
-    {
-      "path": "plugin/agents/product-strategist.md",
-      "bytes": 855,
-      "sha256": "b4821fd0db42bd4cc0bbef370e452bdef3fa2d3f86dae192204cf89664643ba6"
-    },
-    {
-      "path": "plugin/agents/reviewer.md",
-      "bytes": 981,
-      "sha256": "e2ed3eb0d46bb903de15a9a5479de6372c3b69e290c32e43677e6de4664d005a"
-    },
-    {
-      "path": "plugin/agents/scout.md",
-      "bytes": 817,
-      "sha256": "619eb320041f0cdd39e9e09c2098231199fcf5bf3a0e79ec1f1c6e1e7ae626cc"
-    },
-    {
-      "path": "plugin/agents/security-reviewer.md",
-      "bytes": 978,
-      "sha256": "50d1bbb28571d94452c04be26d634fe60c3a243535f79df526a5e88aa098e5d1"
-    },
-    {
-      "path": "plugin/agents/verifier.md",
-      "bytes": 916,
-      "sha256": "bf8ce2c234b2536ef05b6e65177a72f09f41ec3c0ccdde625720a86d17d78abe"
-    },
-    {
-      "path": "plugin/catalog/README.md",
-      "bytes": 443,
-      "sha256": "f3bed80f9d946ec6b4f91ec30c9c3a11ef77fb3afe291fc1e9231478ab88d6f1"
-    },
-    {
-      "path": "plugin/evals/README.md",
-      "bytes": 469,
-      "sha256": "1ea07c745ff7bd4575ae20d6417a85a36d88816c0b97b8e985aadfb9db9c04ed"
-    },
-    {
-      "path": "plugin/evals/expected-behaviors.md",
-      "bytes": 1064,
-      "sha256": "eabee742de3063e64603ba918743900cd6a0fdca1b405b50c668369e5b622ab0"
-    },
-    {
-      "path": "plugin/policies/README.md",
-      "bytes": 310,
-      "sha256": "aa458d6f0fbccf8f60b68bfb4bfd973c5bfa35cf9a18ed65e21dee3204102be2"
-    },
-    {
-      "path": "plugin/references/adapter-policy.md",
-      "bytes": 588,
-      "sha256": "dfc0118728a7e1d4373a403b1500768d95f1bd69568096d4c8ce18b969861ad8"
-    },
-    {
-      "path": "plugin/references/completion-contract.md",
-      "bytes": 703,
-      "sha256": "fca9c24fe8cac35a12cf992b27414ca42b5bb14ab873c8e963e75654ddb2fd41"
-    },
-    {
-      "path": "plugin/references/design-policy.md",
-      "bytes": 574,
-      "sha256": "e68137280073efc6c89534b9462061aff2ea147ba8e7f6a768a046bcadd822b8"
-    },
-    {
-      "path": "plugin/references/final-report-template.md",
-      "bytes": 1003,
-      "sha256": "73dc031446a2dbdba305eacaff776da79adf73feece5ae3fd6325ab93eba8287"
-    },
-    {
-      "path": "plugin/references/lane-policy.md",
-      "bytes": 1333,
-      "sha256": "d8cf047be19cd584d5734f06537590fc3f89b963ccd620c6e27933dfb9482a5b"
-    },
-    {
-      "path": "plugin/references/operating-principles.md",
-      "bytes": 823,
-      "sha256": "0001ddab6fa13708adc99dd9f5ab695eb2fbf726361ecf6bc31baf59d3b59a09"
-    },
-    {
-      "path": "plugin/references/orbit-policy.md",
-      "bytes": 718,
-      "sha256": "dbbcbb43166ce6784f760c10d7dfb56de403b6210705faf1c90d55f29a17c9ec"
-    },
-    {
-      "path": "plugin/references/question-policy.md",
-      "bytes": 824,
-      "sha256": "274d52ff12496aa0eefae0cac642d048e52f286403eeb86000dd47325ffca901"
-    },
-    {
-      "path": "plugin/references/risk-policy.md",
-      "bytes": 1049,
-      "sha256": "c2f9a93badb863d9ba6f5d7adaa90edd82b500a6fdd41f6872b64fb6d6383508"
-    },
-    {
-      "path": "plugin/references/security-policy.md",
-      "bytes": 716,
-      "sha256": "b8f7070b0d1556ae377029015efc0f8d682f8933493ddca2093529bbee71b90c"
-    },
-    {
-      "path": "plugin/references/testing-policy.md",
-      "bytes": 838,
-      "sha256": "b402094442033c92fb1e6805513985d93b0861546129d4a87a43a4638fdd40fb"
-    },
-    {
-      "path": "plugin/references/tool-policy.md",
-      "bytes": 771,
-      "sha256": "8f4a354b1e19cf9a7469a683b157bcedff1fe143839ff13bf0964d27c9d1e3e7"
-    },
-    {
-      "path": "plugin/scripts/README.md",
-      "bytes": 558,
-      "sha256": "ae0dffe9bbf04e0bdffc0225b8308ee8d36655ad807bacdf28060fcb89614b21"
-    },
-    {
-      "path": "plugin/skills/README.md",
-      "bytes": 538,
-      "sha256": "cdff262924f564d351e20d232b9aeb67ec06bb1451990a6e91595af8c5c06238"
-    },
-    {
-      "path": "plugin/skills/audit-tool/SKILL.md",
-      "bytes": 1165,
-      "sha256": "c2bcf93577015a11e1539723b59dcdaa901acba37479cf5e337a019e814cba1e"
-    },
-    {
-      "path": "plugin/skills/doctor/SKILL.md",
-      "bytes": 886,
-      "sha256": "832fa34e575bae48b2e199b65788229b9fb4c4fad2cecc5951512dc8ef53056b"
-    },
-    {
-      "path": "plugin/skills/run/SKILL.md",
-      "bytes": 1760,
-      "sha256": "050214cdc94bdd685db35f91b690092785ca7fefd9f619e3de0cb8f435172a8b"
-    },
-    {
-      "path": "plugin/skills/setup/SKILL.md",
-      "bytes": 1108,
-      "sha256": "82295d23d4116337483aca4a91624e3c156d88541fa9e30e969f4b12de6df63c"
-    },
-    {
-      "path": "plugin/skills/status/SKILL.md",
-      "bytes": 730,
-      "sha256": "d53ed64deeaadf9b69cc46cfee42080afc161ede361ffca33484fc9c5e0c3909"
-    },
-    {
-      "path": "plugin/tests/README.md",
-      "bytes": 468,
-      "sha256": "6ddc1fb4c69b8ff0c872f8bb2f3225d262ff2b3847dc57fd9ca4612566eb0441"
+      "sha256": "8b03d073b6c5c108dab7a343395c7113cdc58ab9c8257e4163539dc1ef506fec"
     },
     {
       "path": "plugins/krylo/.claude-plugin/plugin.json",
-      "bytes": 2157,
-      "sha256": "049a55e2ba232c3e0c7ae28213912e6cf29ba402b872153fb38fd47ef227fe00"
+      "bytes": 2263,
+      "sha256": "d39a842599ddd6ce56fc5a75564025a7698de9e4c1ad44a875db1cad73f15362"
     },
     {
       "path": "plugins/krylo/LICENSE",
@@ -817,8 +842,8 @@
     },
     {
       "path": "plugins/krylo/hooks/hooks.json",
-      "bytes": 1788,
-      "sha256": "e007ba2f378f38da77158682a380eb059aa35818a38acd5646109f957f8809ae"
+      "bytes": 662,
+      "sha256": "767562d5f1b98cb9c1ad00b5654436cfb5f7ad26a1b537358f3c0b9e0779c96e"
     },
     {
       "path": "plugins/krylo/policies/data-egress.json",
@@ -832,8 +857,8 @@
     },
     {
       "path": "plugins/krylo/policies/mcp-policy.json",
-      "bytes": 1425,
-      "sha256": "c6d4b61f2b6dfa8aa828c7dad03982f1357c0022f47034b62e1eb9b23f9bf6d8"
+      "bytes": 5114,
+      "sha256": "aa2eec4f756a74a55194bd810490a8703b69fa2c65f2da2ca68e531a8f390cb0"
     },
     {
       "path": "plugins/krylo/policies/production-policy.json",
@@ -872,8 +897,8 @@
     },
     {
       "path": "plugins/krylo/references/orbit-policy.md",
-      "bytes": 718,
-      "sha256": "dbbcbb43166ce6784f760c10d7dfb56de403b6210705faf1c90d55f29a17c9ec"
+      "bytes": 1323,
+      "sha256": "eaa46ad1faefaf5c09dda3b5da3a62428e98557be9d15d90e1bdac4a751e42b8"
     },
     {
       "path": "plugins/krylo/references/question-policy.md",
@@ -912,8 +937,8 @@
     },
     {
       "path": "plugins/krylo/schemas/run-state.schema.json",
-      "bytes": 10019,
-      "sha256": "411c4dc2c013d80058388bb1ffe4e1769ddd28e9d44b226015454043c5bc1277"
+      "bytes": 11680,
+      "sha256": "3ea234299a2e568e314a5a3ca6eeb37c9719f6734f83e3efd4dd021a4aa5cf10"
     },
     {
       "path": "plugins/krylo/schemas/tool-record.schema.json",
@@ -926,19 +951,29 @@
       "sha256": "a7dd790c1da6d332a2bdee962bc2f836ab4b69635c2251f983732cab20af6b95"
     },
     {
+      "path": "plugins/krylo/scripts/lib/action-fingerprint.mjs",
+      "bytes": 892,
+      "sha256": "3537c7bf7f6bf2c96148361fc35258d23fcbbf6837f2bbebaa2254666f64e3e9"
+    },
+    {
       "path": "plugins/krylo/scripts/lib/atomic.mjs",
       "bytes": 3285,
       "sha256": "138bd6b9db98188d3bada2e49c8b55d1f0d7f5bb2cd081dae1aa5deb759ae8a6"
     },
     {
       "path": "plugins/krylo/scripts/lib/hook-utils.mjs",
-      "bytes": 2514,
-      "sha256": "d7647b92254eb4052fc963180a2cd05f3a60a4b1e2c63dc97ad177a0da067399"
+      "bytes": 2706,
+      "sha256": "e6b5846f6ec32b0a3498e8ff41e4d711147004b7832df4d57d4eac0bd92cc690"
+    },
+    {
+      "path": "plugins/krylo/scripts/lib/lock.mjs",
+      "bytes": 1776,
+      "sha256": "ef9f899b5bd218060e1cf964d9bb20ad3e5c0e3c916bee9504946b25694fd0e8"
     },
     {
       "path": "plugins/krylo/scripts/lib/paths.mjs",
-      "bytes": 3738,
-      "sha256": "c4c6d6e99ad8cda83f24967246de70c0fbca50c56ee9b01dc7e71e6c20cbf545"
+      "bytes": 5906,
+      "sha256": "30cc732b72f2f65124fab89713e9e58b4282837cfdbd75338ff6b6308263b060"
     },
     {
       "path": "plugins/krylo/scripts/lib/redact.mjs",
@@ -947,8 +982,8 @@
     },
     {
       "path": "plugins/krylo/scripts/lib/state.mjs",
-      "bytes": 27141,
-      "sha256": "59b962c73dd166faa81deb0b663da6091c3f5515e23a4681891af6053a2acfbc"
+      "bytes": 34377,
+      "sha256": "cc4b51d15a481c9849ebd7e0aee0a58d984f34714fc48fad50417ef6b4286941"
     },
     {
       "path": "plugins/krylo/scripts/lib/telemetry.mjs",
@@ -962,23 +997,23 @@
     },
     {
       "path": "plugins/krylo/scripts/orbit/stagnation.mjs",
-      "bytes": 1961,
-      "sha256": "bc3a39ed974722569eab33bce6a64e2f3d9a36f69c03b75cffd6dae99ef70cc8"
+      "bytes": 1971,
+      "sha256": "daf5b6dd40b337d2f06aa0e36d726ffad8ee5bfb0c518dca9282ca3aa0bee12b"
     },
     {
       "path": "plugins/krylo/scripts/orbit/stop-gate.mjs",
-      "bytes": 4068,
-      "sha256": "181c358296eec787c106c000c146235d0be5e8d0a348386cc454a57d0c00b956"
+      "bytes": 4087,
+      "sha256": "f6e249d54efdba67fa4ec5b8f9a90c46bf839052381533b2a092fd345bc4d55e"
     },
     {
       "path": "plugins/krylo/scripts/runtime/cleanup.mjs",
-      "bytes": 3395,
-      "sha256": "18196b64f3a2ebb15bf27c46ff555f10cae66ef303c3433b123217b8a738c887"
+      "bytes": 3791,
+      "sha256": "cdb1a05250d5461ce311e5a06111295e3bd087634ab79961260ffda92152190b"
     },
     {
       "path": "plugins/krylo/scripts/runtime/init-run.mjs",
-      "bytes": 3586,
-      "sha256": "e82448a01059654bf31b713a4dd86e09833ff627007e9b4b3618eb90302b3ec4"
+      "bytes": 3584,
+      "sha256": "d073140010e8454851dbb162ee09e5cf7b411faeee863da222f6f911e071638e"
     },
     {
       "path": "plugins/krylo/scripts/runtime/posttool-telemetry.mjs",
@@ -987,13 +1022,18 @@
     },
     {
       "path": "plugins/krylo/scripts/runtime/read-state.mjs",
-      "bytes": 1614,
-      "sha256": "7d97ac644518c2d9bdb9f753d1d578e975914f63a6a3d3c160988dee1f268488"
+      "bytes": 2210,
+      "sha256": "5b1855744fa1c45fbd76eefe36a1cb64f00faa2d14dbecdf9de39628c240d865"
     },
     {
       "path": "plugins/krylo/scripts/runtime/update-state.mjs",
-      "bytes": 13953,
-      "sha256": "a10dd142343fd657fcc428a4e9ae382ed82b6ed488284a7a6aae6d65e424e87b"
+      "bytes": 17131,
+      "sha256": "64cbf18ed47c3ba13cd2490a99ad0617e86b63187c8a86bdb936d01fad6ae2df"
+    },
+    {
+      "path": "plugins/krylo/scripts/security/mcp-classifier.mjs",
+      "bytes": 6289,
+      "sha256": "eaedc15d0ac2cd500d18de14f4feda4b004b692c86ba186c6b637b150f045fe4"
     },
     {
       "path": "plugins/krylo/scripts/security/question-gate.mjs",
@@ -1007,18 +1047,18 @@
     },
     {
       "path": "plugins/krylo/scripts/security/risk-gate.mjs",
-      "bytes": 7512,
-      "sha256": "afa48c94eb4c9c80f2ef63cf3d4801a15cf9e66f66555920241e3d173f759150"
+      "bytes": 12265,
+      "sha256": "6d512a4236671ccc1722744f94bfb07c547dd0bcd5c39ad03c4f7a5634a2e693"
     },
     {
       "path": "plugins/krylo/scripts/setup/doctor.mjs",
-      "bytes": 8806,
-      "sha256": "8e6af325be40371cc12c65c381dceb546414be2d3ad1c0edf8433dc03144e56b"
+      "bytes": 9459,
+      "sha256": "ab2949ad923ccbe8276eba48139387fd0da5ac34a2d8d355b43d64b051e11093"
     },
     {
       "path": "plugins/krylo/scripts/setup/install-alias.mjs",
       "bytes": 3266,
-      "sha256": "04d0e1da80abeae2ca3fa4b41675b0c01c76d196ac85475a71ae3e93b30f47fe"
+      "sha256": "b53fc4877a141f03b33df061a60b4e91d348628b8b20ef0c499ddda9a3f5c5ff"
     },
     {
       "path": "plugins/krylo/scripts/setup/remove-alias.mjs",
@@ -1032,13 +1072,13 @@
     },
     {
       "path": "plugins/krylo/scripts/status/statusline-wrapper.mjs",
-      "bytes": 2659,
-      "sha256": "ed2319f4bc9d7c72528cdac8383e6ee6451e89d6d19f03ca3ce660b2497d26cf"
+      "bytes": 2669,
+      "sha256": "201c4d191d8289b810adacb338cf176bd7a98e883b4e7b96a86fd46bee8121a4"
     },
     {
       "path": "plugins/krylo/scripts/status/subagent-statusline.mjs",
-      "bytes": 3361,
-      "sha256": "b97d86b0c8b15944da588752a2113d1fe765bf1e2b6e98fc974d49f44a154cbf"
+      "bytes": 3371,
+      "sha256": "ca6ae6bb998f60c6257a99eee6efb38495663c22be00ca3f67293b9445dc3fe6"
     },
     {
       "path": "plugins/krylo/scripts/validation/validate-runtime.mjs",
@@ -1057,8 +1097,8 @@
     },
     {
       "path": "plugins/krylo/skills/run/SKILL.md",
-      "bytes": 4661,
-      "sha256": "c92774ece0247bb91f60b88323df2ce5c2a922c4bdf34b21e3b351af2e71069a"
+      "bytes": 6290,
+      "sha256": "33a3596037d207a4c65341a2525750de863d7d236085b3606a71926a9a15bb75"
     },
     {
       "path": "plugins/krylo/skills/setup/SKILL.md",
@@ -1081,9 +1121,19 @@
       "sha256": "e4f0900ef922dc581f70b002ff8005d90efc553121f8f02561ac37d0cd4c3c9f"
     },
     {
+      "path": "plugins/krylo/tests/governance/hook-scoping.test.mjs",
+      "bytes": 3709,
+      "sha256": "861eef7fbc80a4ba4d3493c42fea5c64d9a731cc5d592fd67cc24f286d6a81cc"
+    },
+    {
       "path": "plugins/krylo/tests/governance/policy-consistency.test.mjs",
-      "bytes": 4224,
-      "sha256": "889757d5b6774142e48f1f2e2b920f283aed3f60b78b30f51deb1ec33012f071"
+      "bytes": 6771,
+      "sha256": "93641b291f08dc4ba0cacd914642e6de7922a04b9e1bd4e1a6bdd7462be47843"
+    },
+    {
+      "path": "plugins/krylo/tests/governance/repo-hygiene.test.mjs",
+      "bytes": 1985,
+      "sha256": "4f53b7e56c83e9e7f190f04b9c55df47ef5852047520d65dd308722972e50221"
     },
     {
       "path": "plugins/krylo/tests/hooks/fingerprint.test.mjs",
@@ -1092,8 +1142,8 @@
     },
     {
       "path": "plugins/krylo/tests/hooks/helpers.mjs",
-      "bytes": 3417,
-      "sha256": "992a6ad27e73a51798d4f7d303870c4014b211259a1ae8b2cff9f8b2ff8a3f32"
+      "bytes": 3640,
+      "sha256": "f1ef0b09f33e8fd68ccd1174009dbdc601d02e7e8c00f747305ca469f4417146"
     },
     {
       "path": "plugins/krylo/tests/hooks/posttool.test.mjs",
@@ -1106,6 +1156,16 @@
       "sha256": "a6a261903ef9e9d386289d577412711e21e071b99aaa2339d9fec4d3aed08286"
     },
     {
+      "path": "plugins/krylo/tests/hooks/risk-gate-approvals.test.mjs",
+      "bytes": 8392,
+      "sha256": "c138275bb8665165ca98fb6f14d826b142ec161cb5d93e60fb98616cbeaf1bc7"
+    },
+    {
+      "path": "plugins/krylo/tests/hooks/risk-gate-mcp.test.mjs",
+      "bytes": 4163,
+      "sha256": "535b2691f9573a7230023e9436f973fa48a48754736bd7223362393f4ff9db1c"
+    },
+    {
       "path": "plugins/krylo/tests/hooks/risk-gate.test.mjs",
       "bytes": 7111,
       "sha256": "33ddbefca237f1bbacc89c9c2c19315c58ff26b861e910f04b94f78a852f3ccd"
@@ -1114,6 +1174,11 @@
       "path": "plugins/krylo/tests/hooks/stop-gate.test.mjs",
       "bytes": 6094,
       "sha256": "bd4c5638ce7141d003a8e3b7efff2eb6bf72d8ec500187b94244d97fd018896d"
+    },
+    {
+      "path": "plugins/krylo/tests/platform/concurrency.test.mjs",
+      "bytes": 13561,
+      "sha256": "7f92bb61ce05a9cd59e7661abb43bbd5203c033a67bb5c5b86f41c0ef8b89ed1"
     },
     {
       "path": "plugins/krylo/tests/platform/paths.test.mjs",
@@ -1126,14 +1191,19 @@
       "sha256": "5298bea8f8943b653b8622ee7c5a78b239bc5b5a853abc8bda6a6193c1e0b74b"
     },
     {
+      "path": "plugins/krylo/tests/security/mcp-classifier.test.mjs",
+      "bytes": 8343,
+      "sha256": "19ba11eba70460a25bc0dd3fb6acec80b3ad46e393998809b06d2aeb358184c2"
+    },
+    {
       "path": "plugins/krylo/tests/setup/alias.test.mjs",
       "bytes": 4515,
-      "sha256": "4aaf911ab586bcc6555f74cf118372ab330395d8668734d9180d9aa5446dd6dc"
+      "sha256": "50651dc141c16e87e65c7ec011b49e7acc2d613c24bdab10547ce5cef705e87c"
     },
     {
       "path": "plugins/krylo/tests/setup/doctor.test.mjs",
       "bytes": 3685,
-      "sha256": "aa4dc41bc89c27c416f068b53e18a3f50293fd9413bc1246a11cce3377e34860"
+      "sha256": "7523d2ab376ed202cf560faf109aff49d73de29918c180b3baa3ba43b1b71707"
     },
     {
       "path": "plugins/krylo/tests/status/agent-events.test.mjs",
@@ -1142,13 +1212,13 @@
     },
     {
       "path": "plugins/krylo/tests/status/statusline.test.mjs",
-      "bytes": 3862,
-      "sha256": "ce39824d0a3b78648da31879f993b0294064160f74479bd097fc11164584f2df"
+      "bytes": 4102,
+      "sha256": "22e99c4bbb0da5f8f8fd8cae499732b561a205d8fd6a68901d4b145e92ef7e2d"
     },
     {
       "path": "plugins/krylo/tests/status/wrapper.test.mjs",
-      "bytes": 2823,
-      "sha256": "898596831c7a6b16b74b0f07e4423410558ba5dc4c1cd5bf00452b88f28fde03"
+      "bytes": 3060,
+      "sha256": "6ce5eb67cefdf2e2bbdf6be2a5b44ce124d49388374cb32fd9e9dd5b0790fd7b"
     },
     {
       "path": "plugins/krylo/tests/unit/atomic.test.mjs",
@@ -1162,8 +1232,8 @@
     },
     {
       "path": "plugins/krylo/tests/unit/cli.test.mjs",
-      "bytes": 9247,
-      "sha256": "c2a44ab2d90d03eec46da7afa581614ebaff66f8db3d3d6590f412f767077def"
+      "bytes": 11204,
+      "sha256": "92db3f7677732bc71ee54fe88a5f53bfb528526b389606e72da805067f435b3d"
     },
     {
       "path": "plugins/krylo/tests/unit/redact.test.mjs",
@@ -1172,8 +1242,8 @@
     },
     {
       "path": "plugins/krylo/tests/unit/resume.test.mjs",
-      "bytes": 2515,
-      "sha256": "880a47a75c1ec0cdba7067bb1f7e9f7c3be74bab1dee27f45a1cfa2fcaafad71"
+      "bytes": 2648,
+      "sha256": "c1b920bfc05e2b1e54005cd00dc408e3aa57013be0d5dabd5c62659854466a2c"
     },
     {
       "path": "plugins/krylo/tests/unit/state.test.mjs",

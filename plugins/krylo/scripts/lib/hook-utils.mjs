@@ -4,7 +4,7 @@
 // project (ADR-0009). Ordinary Claude Code sessions are never intercepted:
 // when there is no active run the gate exits 0 silently.
 
-import { readCurrentRunPointer, loadState, computeProjectRootHash } from './state.mjs';
+import { readActiveRunPointer, loadState, computeProjectRootHash } from './state.mjs';
 
 const STDIN_LIMIT = 1024 * 1024; // 1 MB guard against unbounded input
 
@@ -36,14 +36,18 @@ export function eventName(payload) {
  */
 export function resolveActiveRun(payload) {
   try {
-    const pointer = readCurrentRunPointer();
-    if (!pointer.ok || !pointer.value || typeof pointer.value.runId !== 'string') {
-      return { active: false };
-    }
     const cwd = payload && typeof payload.cwd === 'string' && payload.cwd.trim() !== ''
       ? payload.cwd
       : process.cwd();
     const cwdHash = computeProjectRootHash(cwd);
+    const sessionId = payload && typeof payload.session_id === 'string' && payload.session_id.trim() !== ''
+      ? payload.session_id
+      : undefined;
+
+    const pointer = readActiveRunPointer({ projectRootHash: cwdHash, sessionId });
+    if (!pointer.ok || !pointer.value || typeof pointer.value.runId !== 'string') {
+      return { active: false };
+    }
     if (pointer.value.projectRootHash && pointer.value.projectRootHash !== cwdHash) {
       return { active: false };
     }

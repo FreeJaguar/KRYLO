@@ -15,7 +15,7 @@ import { fileURLToPath } from 'node:url';
 
 import { getDataRoot, ensureDir } from '../lib/paths.mjs';
 import { readJson } from '../lib/atomic.mjs';
-import { readCurrentRunPointer, loadState } from '../lib/state.mjs';
+import { readActiveRunPointerForCwd, loadState } from '../lib/state.mjs';
 import { redactText } from '../lib/redact.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -49,27 +49,35 @@ function checkComponents(problems) {
     ? fs.readdirSync(agentsDir).filter((f) => f.endsWith('.md')).length
     : 0;
 
+  // Since docs/adr/0021-hook-scoping-to-run-skill.md, KRYLO's gate/telemetry
+  // hooks live in the `run` skill's own frontmatter, not in hooks/hooks.json
+  // (which now intentionally registers nothing plugin-wide). Checking
+  // hooks.json here would always report "healthy" vacuously, even with every
+  // hook script missing, so this reads the actual source of truth instead.
   let hooksHealthy = true;
   const missingHookScripts = [];
   try {
-    const hooksConfig = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, 'hooks', 'hooks.json'), 'utf8'));
-    for (const entries of Object.values(hooksConfig.hooks ?? {})) {
-      for (const entry of entries) {
-        for (const hook of entry.hooks ?? []) {
-          const match = /\$\{CLAUDE_PLUGIN_ROOT\}\/([^"']+\.mjs)/.exec(hook.command ?? '');
-          if (match) {
-            const scriptPath = path.join(PLUGIN_ROOT, ...match[1].split('/'));
-            if (!fs.existsSync(scriptPath)) {
-              hooksHealthy = false;
-              missingHookScripts.push(match[1]);
-            }
-          }
-        }
+    const skillPath = path.join(PLUGIN_ROOT, 'skills', 'run', 'SKILL.md');
+    const skillText = fs.readFileSync(skillPath, 'utf8');
+    const frontmatterMatch = /^---\r?\n([\s\S]*?)\r?\n---/.exec(skillText);
+    if (!frontmatterMatch) throw new Error('run skill has no frontmatter');
+    const scriptRefs = frontmatterMatch[1].matchAll(/\$\{CLAUDE_PLUGIN_ROOT\}\/([^"'\s]+\.mjs)/g);
+    let sawAny = false;
+    for (const match of scriptRefs) {
+      sawAny = true;
+      const scriptPath = path.join(PLUGIN_ROOT, ...match[1].split('/'));
+      if (!fs.existsSync(scriptPath)) {
+        hooksHealthy = false;
+        missingHookScripts.push(match[1]);
       }
+    }
+    if (!sawAny) {
+      hooksHealthy = false;
+      missingHookScripts.push('run skill declares no hook scripts');
     }
   } catch {
     hooksHealthy = false;
-    missingHookScripts.push('hooks.json unreadable');
+    missingHookScripts.push('skills/run/SKILL.md unreadable');
   }
   if (!hooksHealthy) {
     problems.push({
@@ -104,7 +112,7 @@ function checkStorage(problems) {
     report.runCount = fs.existsSync(runsDir) ? fs.readdirSync(runsDir).length : 0;
     const telemetryDir = path.join(dataRoot, 'telemetry');
     report.telemetryFiles = fs.existsSync(telemetryDir) ? fs.readdirSync(telemetryDir).length : 0;
-    const pointer = readCurrentRunPointer();
+    const pointer = readActiveRunPointerForCwd();
     if (pointer.ok && pointer.value?.runId) {
       report.pointerValid = loadState(pointer.value.runId).ok;
     }
@@ -155,7 +163,15 @@ function checkCatalog() {
 }
 
 function userConfigReport() {
-  const nonSensitive = ['LANGUAGE', 'STATUS_DETAIL', 'SECURITY_PROFILE', 'AUTONOMY_LEVEL'];
+  const nonSensitive = [
+    'LANGUAGE',
+    'STATUS_DETAIL',
+    'SECURITY_PROFILE',
+    'AUTONOMY_LEVEL',
+    'MAX_ORBIT_CYCLES',
+    'LOCAL_TELEMETRY',
+    'TELEMETRY_RETENTION_DAYS',
+  ];
   const report = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (!key.startsWith('CLAUDE_PLUGIN_OPTION_')) continue;

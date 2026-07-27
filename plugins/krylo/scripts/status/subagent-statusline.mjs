@@ -5,7 +5,7 @@
 // displays prompts, commands, tool arguments, source code, secrets, or
 // external content. Prints nothing when no KRYLO run is active.
 
-import { readCurrentRunPointer, loadState } from '../lib/state.mjs';
+import { readActiveRunPointerForCwd, loadState } from '../lib/state.mjs';
 
 function elapsedSeconds(fromIso, toIso) {
   const from = Date.parse(fromIso);
@@ -74,7 +74,7 @@ async function main() {
     // ignore
   }
 
-  const pointer = readCurrentRunPointer();
+  const pointer = readActiveRunPointerForCwd();
   if (!pointer.ok || !pointer.value?.runId) process.exit(0);
   const loaded = loadState(pointer.value.runId);
   if (!loaded.ok) process.exit(0);

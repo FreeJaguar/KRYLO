@@ -33,6 +33,21 @@ test('production-policy approval classes are valid state actionClass values with
   assert.equal(policy.inactiveRunBehavior, 'allow');
 });
 
+test('mcp-policy serverActionClasses reference valid actionClass values with compiling patterns', () => {
+  const policy = readJson('policies/mcp-policy.json');
+  assert.ok(ENUMS.actionClass.includes(policy.unknownServerClass), 'unknownServerClass must be a valid actionClass');
+  assert.doesNotThrow(() => new RegExp(policy.writeVerbPattern, 'i'));
+  assert.doesNotThrow(() => new RegExp(policy.sqlLikeOperationPattern, 'i'));
+  for (const rule of policy.serverActionClasses) {
+    assert.doesNotThrow(() => new RegExp(rule.match, 'i'), `server match pattern does not compile: ${rule.match}`);
+    assert.ok(ENUMS.actionClass.includes(rule.writeClass), `${rule.match}: writeClass ${rule.writeClass} is not a valid actionClass`);
+    for (const override of rule.operationOverrides ?? []) {
+      assert.doesNotThrow(() => new RegExp(override.pattern, 'i'), `operation override pattern does not compile: ${override.pattern}`);
+      assert.ok(ENUMS.actionClass.includes(override.class), `${rule.match}/${override.pattern}: class ${override.class} is not a valid actionClass`);
+    }
+  }
+});
+
 test('environment profiles and catalog allowedProfiles agree', () => {
   const profiles = Object.keys(readJson('policies/environment-profiles.json').profiles);
   assert.deepEqual(profiles.sort(), ['local-only', 'private-approved', 'production-read-only', 'public-repository']);
@@ -74,6 +89,34 @@ test('evals.json parses and references only known lanes and terminal states', ()
     const terminals = [].concat(s.expected.terminalState ?? []);
     for (const t of terminals) assert.ok(ENUMS.terminalState.includes(t), `${s.id}: unknown terminal state ${t}`);
   }
+});
+
+test('Orbit cap semantics agree across plugin.json, risk-policy.md, and orbit-policy.md (Item 8)', () => {
+  const manifest = readJson('.claude-plugin/plugin.json');
+  const cfg = manifest.userConfig.max_orbit_cycles;
+  assert.equal(cfg.default, 7);
+  assert.equal(cfg.min, 1);
+  assert.equal(cfg.max, 10);
+  assert.match(cfg.description, /cap, not a target/);
+  assert.match(cfg.description, /low=3, medium=5, high=7/);
+  assert.match(cfg.description, /platform-safe maximum of 10/);
+
+  const riskPolicy = fs.readFileSync(path.join(PLUGIN_ROOT, 'references', 'risk-policy.md'), 'utf8');
+  assert.match(riskPolicy, /Default Orbit budget: 3\./m);
+  assert.match(riskPolicy, /Default Orbit budget: 5\./m);
+  assert.match(riskPolicy, /Default Orbit budget: 7 or the platform-safe maximum/m);
+
+  const orbitPolicy = fs.readFileSync(path.join(PLUGIN_ROOT, 'references', 'orbit-policy.md'), 'utf8');
+  assert.match(orbitPolicy, /low=3, medium=5, high=7/);
+  assert.match(orbitPolicy, /cap, not a target/);
+  assert.match(orbitPolicy, /platform-safe maximum of 10/);
+});
+
+test('doctor reports max_orbit_cycles as a real value, not masked as sensitive', () => {
+  const doctorSrc = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'setup', 'doctor.mjs'), 'utf8');
+  const match = /const nonSensitive = \[([\s\S]*?)\];/.exec(doctorSrc);
+  assert.ok(match, 'doctor.mjs must define nonSensitive user-config keys');
+  assert.match(match[1], /MAX_ORBIT_CYCLES/);
 });
 
 test('hooks.json references only scripts that exist', () => {

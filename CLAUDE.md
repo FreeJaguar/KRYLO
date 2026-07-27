@@ -17,10 +17,10 @@ Read these sources in order:
 2. `ARCHITECTURE.md`
 3. `docs/adr/README.md` and all accepted ADRs
 4. `SECURITY.md` and `THREAT_MODEL.md`
-5. `PROMPT_INPUT_CONTRACT.md`
-6. `IMPLEMENTATION_PLAN.md`
-7. `REVIEW_CHECKLIST.md`
-8. `FILE_MANIFEST.md`
+5. `docs/process/PROMPT_INPUT_CONTRACT.md`
+6. `docs/process/IMPLEMENTATION_PLAN.md`
+7. `docs/process/REVIEW_CHECKLIST.md`
+8. `docs/process/FILE_MANIFEST.md`
 
 Load detailed references only for the active task:
 
@@ -31,10 +31,10 @@ Load detailed references only for the active task:
 - Testing, design, product, and infrastructure: `docs/12-testing-and-evals.md` to `docs/15-database-and-infrastructure.md`
 - OpenWiki, distribution, setup, and compatibility: `docs/16-openwiki-policy.md` to `docs/19-backward-compatibility.md`
 - Completion, schemas, privacy, governance, and roadmap: `docs/20-definition-of-done.md` to `docs/24-implementation-roadmap.md`
-- Draft runtime policies: `plugin/references/` (immutable blueprint record)
-- Draft commands and agents: `plugin/skills/` and `plugin/agents/` (immutable blueprint record)
+- Draft runtime policies: `archive/blueprint-v0.1.2/references/` (immutable blueprint record)
+- Draft commands and agents: `archive/blueprint-v0.1.2/skills/` and `archive/blueprint-v0.1.2/agents/` (immutable blueprint record)
 - Implemented plugin: `plugins/krylo/` (manifests, skills, agents, scripts, schemas, policies, tests)
-- Licensing, provenance, and notices: `SOURCES.md`, `LICENSE_DECISION.md`, and `THIRD_PARTY_NOTICES.md`
+- Licensing, provenance, and notices: `SOURCES.md`, `docs/process/LICENSE_DECISION.md`, and `THIRD_PARTY_NOTICES.md`
 
 Do not load the entire blueprint into every subagent context.
 
@@ -75,7 +75,7 @@ For a real compatibility conflict, verify the official source, write or supersed
 
 ## Implementation rules
 
-- Follow `IMPLEMENTATION_PLAN.md` one independently testable milestone at a time.
+- Follow `docs/process/IMPLEMENTATION_PLAN.md` one independently testable milestone at a time.
 - Preserve unrelated user work; never use `git reset --hard` or silently stash changes.
 - Keep detailed policy in references, not in one giant `SKILL.md` or this file.
 - Use only current supported plugin schemas, Hook contracts, model aliases, and agent frontmatter.
@@ -95,8 +95,8 @@ Use the applicable requirements in:
 - `docs/12-testing-and-evals.md`
 - `docs/17-distribution-and-release.md`
 - `docs/20-definition-of-done.md`
-- `IMPLEMENTATION_PLAN.md`
-- `REVIEW_CHECKLIST.md`
+- `docs/process/IMPLEMENTATION_PLAN.md`
+- `docs/process/REVIEW_CHECKLIST.md`
 
 At milestone boundaries, run focused tests, broader regression checks, strict plugin validation, and a final diff review. Never report a validation result that was not actually run.
 
@@ -106,7 +106,7 @@ When the approved contract changes:
 
 - Add or supersede an ADR when architecture changes.
 - Update the affected root and numbered documents.
-- Update `README.md`, `FILE_MANIFEST.md`, `PROMPT_INPUT_CONTRACT.md`, `REVIEW_CHECKLIST.md`, and `CHANGELOG.md` when relevant.
+- Update `README.md`, `docs/process/FILE_MANIFEST.md`, `docs/process/PROMPT_INPUT_CONTRACT.md`, `docs/process/REVIEW_CHECKLIST.md`, and `CHANGELOG.md` when relevant.
 - Keep `BLUEPRINT_MANIFEST.json` immutable as the blueprint record; regenerate `RELEASE_MANIFEST.json` for the implemented repository.
 - Rebuild and verify the distribution archive when one is published.
 

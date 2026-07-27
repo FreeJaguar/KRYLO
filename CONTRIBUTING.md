@@ -34,6 +34,23 @@ A pull request must include:
 - Documentation changes.
 - Rollback plan for high-risk changes.
 
+## Security-sensitive changes
+
+A change to any of the following requires a security-focused review before merge, not just a normal code review:
+
+- `plugins/krylo/scripts/security/*.mjs` (risk gate, MCP classifier, question gate).
+- `plugins/krylo/policies/*.json` (production policy, MCP policy, environment profiles) and `plugins/krylo/catalog/*.json` (Tool Trust Registry).
+- `plugins/krylo/scripts/lib/state.mjs` risk-approval handling, `plugins/krylo/scripts/lib/action-fingerprint.mjs`, `plugins/krylo/scripts/lib/lock.mjs`.
+- Anything touching the KRYLO data root, active-run pointers, or path resolution (`plugins/krylo/scripts/lib/paths.mjs`).
+- Hook wiring (`plugins/krylo/hooks/hooks.json`, any Skill frontmatter `hooks:` block).
+
+For these, a pull request must additionally include:
+
+- The specific bypass or abuse scenario the change closes or could newly open (a new gated action class, a new approval-matching dimension, a new path-traversal vector, etc.).
+- A regression test that fails against the pre-change code and passes after it.
+- Confirmation that `SECURITY.md` and `THREAT_MODEL.md` still match the resulting behavior, updating them in the same PR if not.
+- An ADR when the change alters an existing security decision (approval scoping, gated action classes, hook-scoping, environment profiles) rather than adding a new pattern within an existing one.
+
 ## Prohibited contribution patterns
 
 - Unpinned remote installation commands.
