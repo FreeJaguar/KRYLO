@@ -228,8 +228,8 @@
       "sourceType": "github",
       "source": "https://github.com/mattpocock/skills",
       "trustTier": "B",
-      "reviewedVersion": "ed37663cc5fbef691ddfecd080dff42f7e7e350d",
-      "lastReviewDate": "2026-07-27",
+      "reviewedVersion": "2ab958093e83e0ec752e6c1c5932da465bf23e0c",
+      "lastReviewDate": "2026-07-30",
       "reviewer": "krylo-implementation",
       "installationPolicy": "user-approved",
       "capabilities": ["workflow-skills"],
@@ -239,7 +239,7 @@
       "dataEgress": { "sourceCode": false, "prompts": false, "logs": false, "repositoryMetadata": false, "testOutput": false, "personalData": false, "productionData": false },
       "allowedProfiles": ["local-only", "private-approved", "public-repository"],
       "reReviewTriggers": ["version-or-commit-change", "hooks-added", "skill-list-changed"],
-      "notes": "MIT. Optional Claude Code Skill/Plugin compatibility only (docs/11-integration-adapters.md, adapters/mattpocock-skills.md). No hooks.json, no MCP server, no install-lifecycle scripts in package.json at the reviewed commit. KRYLO remains the only orchestrator; setup/triage/ticket/handoff-shaped skills are never auto-invoked. Only selected advisory-discipline skills (tdd, diagnosing-bugs, codebase-design, domain-modeling, research, code-review) inform existing KRYLO agents."
+      "notes": "MIT. Optional Claude Code Skill/Plugin compatibility only (docs/11-integration-adapters.md, adapters/mattpocock-skills.md). No hooks.json, no MCP server, no install-lifecycle scripts in package.json at the reviewed commit. KRYLO remains the only orchestrator; setup/triage/ticket/handoff-shaped skills are never auto-invoked. Selected advisory-discipline skills (tdd, diagnosing-bugs, codebase-design, domain-modeling, research, code-review, grilling) inform existing KRYLO agents. git-guardrails-claude-code and setup-pre-commit are model-invokable upstream but are excluded by KRYLO policy as Hook/config-mutating (docs/external-adapter-audit-2026-07-27.md re-review)."
     },
     {
       "id": "omniroute",
