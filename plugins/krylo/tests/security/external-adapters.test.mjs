@@ -21,7 +21,7 @@ const AUDIT_TOOL = path.join(SCRIPTS_ROOT, 'audit', 'audit-tool.mjs');
 const DOCTOR = path.join(SCRIPTS_ROOT, 'setup', 'doctor.mjs');
 
 const REVIEWED = {
-  'mattpocock-skills': 'ed37663cc5fbef691ddfecd080dff42f7e7e350d',
+  'mattpocock-skills': '2ab958093e83e0ec752e6c1c5932da465bf23e0c',
   omniroute: '3.8.49',
   'code-review-graph': '9445a1a086a6e827b404e0c91309ced780fbd627',
 };

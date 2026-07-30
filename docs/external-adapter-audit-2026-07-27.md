@@ -25,6 +25,28 @@ Read-only audit of three external repositories evaluated for optional, adapter-f
 - **Tests/CI:** `.github/workflows/release.yml` (Changesets release automation) — not inspected further; irrelevant to KRYLO's own use of this repository as Skills content.
 - **Overlap with KRYLO orchestration:** `setup-matt-pocock-skills`, `triage`, `to-tickets`, `to-spec`, `wayfinder`, and `handoff` are conflicting-or-manual-only per `adapters/mattpocock-skills.md`'s compatibility matrix; the remaining engineering disciplines (`tdd`, `diagnosing-bugs`, `codebase-design`, `domain-modeling`, `research`, `code-review`) are optional advisory input mapped onto existing KRYLO agents, never a competing lifecycle.
 
+### Re-review — 2026-07-30
+
+The upstream `main` branch moved to a new commit since the initial review above, and the prior pass classified everything outside the six advisory disciplines as a single "out of scope" bucket without individually inspecting each Skill's `SKILL.md` frontmatter. This re-review inspects every Skill in `skills/engineering/` and `skills/productivity/` individually, at the new commit, before the catalog record or adapter doc are updated.
+
+- **New reviewed commit:** `2ab958093e83e0ec752e6c1c5932da465bf23e0c` (default branch `main`).
+- **Manifests re-checked:** `.claude-plugin/plugin.json` is still version `1.2.0` and still lists exactly 22 Skills (17 `engineering/`, 5 `productivity/`); `package.json` is still version `1.1.0`, still private, and still declares only `changeset`/`version` scripts (no `preinstall`/`install`/`postinstall`). No `hooks.json` anywhere in the tree (confirmed via a recursive tree listing at the pinned commit). Conclusion unchanged from the original review: no hooks, no MCP server, no install-lifecycle script.
+- **Full per-Skill findings** (frontmatter `disable-model-invocation` and observed behavior, verified against each `SKILL.md` at the pinned commit):
+
+| Skill | `disable-model-invocation` | Behavior | Disposition |
+|---|---|---|---|
+| `grilling` (productivity) | absent (model-invokable) | Read-only Socratic interview; asks questions, writes nothing | **New**: added as an optional advisory discipline (mapped in `adapters/mattpocock-skills.md`) |
+| `prototype` (engineering) | absent (model-invokable) | Writes throwaway exploratory code/branches | Stays excluded: overlaps with the Builder's own worktree lifecycle |
+| `resolving-merge-conflicts` (engineering) | absent (model-invokable) | Edits files to complete a merge/rebase | Stays excluded: overlaps with the Builder/incident-lane's own conflict resolution |
+| `tdd`, `diagnosing-bugs`, `codebase-design`, `domain-modeling`, `research`, `code-review` | absent (re-confirmed) | Advisory/research; no forced writes | Existing advisory mapping re-confirmed unchanged |
+| `setup-matt-pocock-skills`, `ask-matt`, `grill-with-docs`, `implement`, `improve-codebase-architecture`, `grill-me`, `handoff`, `teach`, `writing-great-skills`, `triage`, `to-tickets`, `to-spec`, `wayfinder` | `true` on every one (re-confirmed) | Mixed: some read-only (`ask-matt`, `grill-me`), some state-changing (`implement`, `grill-with-docs` writes ADR/glossary files) | User-invoked-only by Claude Code's own gate; never auto-relied-on by KRYLO regardless |
+| `git-guardrails-claude-code`, `setup-pre-commit` (misc) | absent (model-invokable, unlike the other `misc/` Skills) | Both configure Claude Code Hooks or git hooks (Husky pre-commit, PreToolUse guardrails) | Explicitly excluded by KRYLO policy as hook/config-mutating — Claude Code's own frontmatter gate does **not** cover these two, so this is the one place KRYLO's own classification does real work rather than restating an upstream gate |
+| `migrate-to-shoehorn`, `scaffold-exercises` (misc) | absent | Narrow, single-purpose project tooling; no config/hook mutation | Out of scope, low-risk, noted for completeness |
+| `in-progress/*` (9), `deprecated/*` (4), `personal/*` (2) | not individually inspected | — | Excluded wholesale — upstream's own folder naming signals not-supported/not-general-purpose; a category-level decision, not a per-Skill one |
+
+- **Why `prototype`, `resolving-merge-conflicts`, `git-guardrails-claude-code`, and `setup-pre-commit` stay excluded despite being model-invokable:** being model-invokable only means Claude Code itself will not stop the model from bringing the Skill up; it says nothing about whether KRYLO should treat that Skill's output as trusted advisory input. `prototype` and `resolving-merge-conflicts` are excluded because they perform the same class of work KRYLO's own Builder and incident lane already own — treating a second, uncoordinated Skill as authoritative for that work would be a second orchestration layer. `git-guardrails-claude-code` and `setup-pre-commit` are excluded because they mutate Hooks, git hooks, or Claude Code configuration — exactly the class of change `production-policy.json` gates regardless of which tool proposes it, and upstream provides no frontmatter signal here for KRYLO to defer to.
+- **No change to license, network, secret, or data-egress conclusions**: MIT, no network capability, no secrets, no data egress at this commit, consistent with the original review.
+
 ## 2. OmniRoute
 
 - **Repository:** `https://github.com/diegosouzapw/OmniRoute`
