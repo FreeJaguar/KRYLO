@@ -21,9 +21,13 @@ BLUEPRINT_MANIFEST.json                     # immutable blueprint record (paths 
                                              # archive/ move below; content and hashes unchanged)
 archive/blueprint-v0.1.2/                   # immutable blueprint drafts (unchanged content; moved
                                              # from root-level plugin/ during the v0.1.1 repo cleanup)
-docs/process/                               # this file, IMPLEMENTATION_PLAN.md,
-                                             # PROMPT_INPUT_CONTRACT.md, REVIEW_CHECKLIST.md, and
-                                             # LICENSE_DECISION.md (moved from root during v0.1.1)
+docs/process/                               # this file, IMPLEMENTATION_PLAN.md (historical v0.1.0
+                                             # plan, unchanged), PROMPT_INPUT_CONTRACT.md,
+                                             # REVIEW_CHECKLIST.md, LICENSE_DECISION.md (moved from
+                                             # root during v0.1.1), MULTI_HOST_CODEX_MAINTENANCE_DESIGN.md
+                                             # and MULTI_HOST_FOUNDATION_IMPLEMENTATION_PLAN.md
+                                             # (approved 0.2 multi-host design and Foundation plan)
+docs/adr/0023-multi-host-product-and-shared-core.md   # accepted: two first-class hosts, one Shared Core
 ```
 
 ## Plugin root
