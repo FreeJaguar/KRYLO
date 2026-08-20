@@ -38,7 +38,10 @@ function main() {
   if (!runId) {
     const projectRootHash = computeProjectRootHash(path.resolve(args.projectDir || process.cwd()));
     const sessionId = resolveSessionId(args.session);
-    const pointer = readActiveRunPointer({ projectRootHash, sessionId });
+    // TODO(multi-host Task 5): normalize through resolveClaudeSessionId
+    // instead of this literal 'claude' host once this entrypoint is wired to
+    // the Claude host adapter.
+    const pointer = readActiveRunPointer({ projectRootHash, host: 'claude', hostSessionId: sessionId });
     if (!pointer.ok || !pointer.value || !pointer.value.runId) {
       console.log(JSON.stringify({ ok: false, error: 'no-current-run' }));
       process.exit(1);

@@ -40,11 +40,15 @@ export function resolveActiveRun(payload) {
       ? payload.cwd
       : process.cwd();
     const cwdHash = computeProjectRootHash(cwd);
-    const sessionId = payload && typeof payload.session_id === 'string' && payload.session_id.trim() !== ''
+    const hostSessionId = payload && typeof payload.session_id === 'string' && payload.session_id.trim() !== ''
       ? payload.session_id
       : undefined;
 
-    const pointer = readActiveRunPointer({ projectRootHash: cwdHash, sessionId });
+    // TODO(multi-host Task 6): normalize through
+    // normalizeClaudeHookPayload/resolveActiveRun({ projectRoot, host,
+    // hostSessionId }) instead of this literal 'claude' host once every Hook
+    // entrypoint is wired to the Claude Hook transport adapter.
+    const pointer = readActiveRunPointer({ projectRootHash: cwdHash, host: 'claude', hostSessionId });
     if (!pointer.ok || !pointer.value || typeof pointer.value.runId !== 'string') {
       return { active: false };
     }

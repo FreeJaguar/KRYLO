@@ -15,11 +15,13 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 
+import { HOST_NAMES } from './host-context.mjs';
+
 /**
  * Resolve the KRYLO plugin data root.
  * Honors KRYLO_DATA_ROOT (host-neutral) so tests, and any host adapter, can
  * point at a temp or host-specific directory. Claude-facing entrypoints
- * bootstrap KRYLO_DATA_ROOT from CLAUDE_PLUGIN_DATA via
+ * bootstrap KRYLO_DATA_ROOT from the Claude-specific plugin data location via
  * scripts/host/claude/context.mjs before this is read, so existing Claude
  * users keep using the same physical 0.1.1 data root.
  */
@@ -153,12 +155,35 @@ export function activeRunsRootDir() {
   return safeJoin(getDataRoot(), 'active-runs');
 }
 
-/** Directory holding every session pointer for one project. */
+/** Directory holding every host's pointer subdirectory for one project. */
 export function activeRunsProjectDir(projectRootHash) {
   return safeJoin(getDataRoot(), 'active-runs', projectRootHash);
 }
 
-/** Path to the pointer file for one project + session pair. */
-export function activeRunPointerPath(projectRootHash, sessionId) {
+/** A host name becomes a filesystem path segment: refuse anything not a known host. */
+function assertValidHost(host) {
+  if (!HOST_NAMES.includes(host)) {
+    throw new Error(`Refusing unsupported host as path segment: ${JSON.stringify(host)}`);
+  }
+}
+
+/** Directory holding every session pointer for one project, scoped to one host. */
+export function activeRunsHostDir(projectRootHash, host) {
+  assertValidHost(host);
+  return safeJoin(getDataRoot(), 'active-runs', projectRootHash, host);
+}
+
+/** Path to the pointer file for one project + host + host-session-id triple. */
+export function activeRunPointerPath(projectRootHash, host, hostSessionId) {
+  assertValidHost(host);
+  return safeJoin(getDataRoot(), 'active-runs', projectRootHash, host, `${safeSessionSegment(hostSessionId)}.json`);
+}
+
+/**
+ * Path to the pre-0.2.0 flat pointer layout (`active-runs/<project>/<session>.json`,
+ * no host segment). Read-only: used only to detect and lazily migrate a
+ * still-active 0.1.1 pointer into the new host-scoped layout.
+ */
+export function legacyActiveRunPointerPath(projectRootHash, sessionId) {
   return safeJoin(getDataRoot(), 'active-runs', projectRootHash, `${safeSessionSegment(sessionId)}.json`);
 }

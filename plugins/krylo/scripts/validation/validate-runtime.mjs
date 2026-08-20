@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process';
 
 import { getDataRoot, ensureDir } from '../lib/paths.mjs';
 import { createInitialState, validateState, saveState, loadState, ENUMS, REQUIRED_TOP_LEVEL } from '../lib/state.mjs';
+import { createHostIdentity } from '../lib/host-context.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPTS_ROOT = path.resolve(__dirname, '..');
@@ -116,14 +117,22 @@ function checkHostIsolation() {
 function runtimeSmokeTest() {
   const errors = [];
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-validate-'));
-  const prevDataRoot = process.env.CLAUDE_PLUGIN_DATA;
-  process.env.CLAUDE_PLUGIN_DATA = tempRoot;
+  const prevDataRoot = process.env.KRYLO_DATA_ROOT;
+  process.env.KRYLO_DATA_ROOT = tempRoot;
   try {
     ensureDir(getDataRoot());
 
+    const hostIdentity = createHostIdentity({
+      host: 'claude',
+      hostSessionId: 'validate-session',
+      projectRoot: tempRoot,
+      pluginRoot: path.resolve(__dirname, '..', '..'),
+      dataRoot: tempRoot,
+    });
+
     const state = createInitialState({
       goalText: 'validation smoke test goal',
-      sessionId: 'validate-session',
+      hostIdentity,
       projectDir: tempRoot,
       lane: 'BUILD',
       risk: 'low',
@@ -143,8 +152,8 @@ function runtimeSmokeTest() {
   } catch (err) {
     errors.push(`runtime smoke test threw: ${err && err.message}`);
   } finally {
-    if (prevDataRoot === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
-    else process.env.CLAUDE_PLUGIN_DATA = prevDataRoot;
+    if (prevDataRoot === undefined) delete process.env.KRYLO_DATA_ROOT;
+    else process.env.KRYLO_DATA_ROOT = prevDataRoot;
     try {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     } catch {

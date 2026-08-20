@@ -14,14 +14,14 @@ const SCRIPTS_ROOT = path.resolve(__dirname, '..', '..', 'scripts');
 function runCli(scriptRelPath, args, dataDir) {
   const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath), ...args], {
     encoding: 'utf8',
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir },
+    env: { ...process.env, KRYLO_DATA_ROOT: dataDir },
   });
   return { status: res.status, json: JSON.parse(res.stdout.trim()) };
 }
 
 test('state resumes after a simulated process restart', () => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-resume-'));
-  const prevDataRoot = process.env.CLAUDE_PLUGIN_DATA;
+  const prevDataRoot = process.env.KRYLO_DATA_ROOT;
   try {
     // Process A: spawn init-run.mjs as a fully separate process.
     const init = runCli('runtime/init-run.mjs', [
@@ -36,9 +36,9 @@ test('state resumes after a simulated process restart', () => {
 
     // In the current (test) process, point at the same data dir and read
     // the pointer + state that process A wrote.
-    process.env.CLAUDE_PLUGIN_DATA = dataDir;
+    process.env.KRYLO_DATA_ROOT = dataDir;
     const projectRootHash = computeProjectRootHash(dataDir);
-    const pointer = readActiveRunPointer({ projectRootHash, sessionId: 'session-resume-1' });
+    const pointer = readActiveRunPointer({ projectRootHash, host: 'claude', hostSessionId: 'session-resume-1' });
     assert.equal(pointer.ok, true);
     assert.equal(pointer.value.runId, runId);
 
@@ -58,8 +58,8 @@ test('state resumes after a simulated process restart', () => {
     assert.equal(reloaded.value.phase, 'EXECUTING');
     assert.equal(typeof reloaded.value.updatedAt, 'string');
   } finally {
-    if (prevDataRoot === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
-    else process.env.CLAUDE_PLUGIN_DATA = prevDataRoot;
+    if (prevDataRoot === undefined) delete process.env.KRYLO_DATA_ROOT;
+    else process.env.KRYLO_DATA_ROOT = prevDataRoot;
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
 });

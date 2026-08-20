@@ -11,13 +11,16 @@ import {
   ensureDir,
   runStatePath,
   currentRunPointerPath,
+  legacyActiveRunPointerPath,
   activeRunPointerPath,
-  activeRunsProjectDir,
+  activeRunsHostDir,
 } from './paths.mjs';
 import { writeJsonAtomic, readJson } from './atomic.mjs';
 import { redactText } from './redact.mjs';
+import { HOST_NAMES } from './host-context.mjs';
+import { CURRENT_STATE_SCHEMA_VERSION, migrateStateDocument } from './state-migrations.mjs';
 
-export const SCHEMA_VERSION = '1.0.0';
+export const SCHEMA_VERSION = CURRENT_STATE_SCHEMA_VERSION;
 
 export const ENUMS = {
   lane: ['PATCH', 'BUILD', 'DESIGN', 'PRODUCT', 'INCIDENT', 'MIGRATION', 'AUDIT', 'AI', 'PERFORMANCE'],
@@ -101,7 +104,8 @@ export const ENUMS = {
 export const REQUIRED_TOP_LEVEL = [
   'schemaVersion',
   'kryloVersion',
-  'sessionId',
+  'host',
+  'delegation',
   'runId',
   'project',
   'goal',
@@ -180,7 +184,7 @@ function normalizeGoalText(goalText) {
  */
 export function createInitialState({
   goalText,
-  sessionId,
+  hostIdentity,
   projectDir,
   lane,
   risk,
@@ -205,7 +209,15 @@ export function createInitialState({
   return {
     schemaVersion: SCHEMA_VERSION,
     kryloVersion: kryloVersion || 'unknown',
-    sessionId,
+    host: {
+      name: hostIdentity.host,
+      sessionId: hostIdentity.hostSessionId,
+      ...(hostIdentity.hostTurnId ? { turnId: hostIdentity.hostTurnId } : {}),
+    },
+    delegation: {
+      externalWorker: false,
+      depth: 0,
+    },
     runId: resolvedRunId,
     project,
     goal: {
@@ -291,8 +303,35 @@ export function validateState(state) {
     push('schemaVersion must match ^\\d+\\.\\d+\\.\\d+$');
   }
   if ('kryloVersion' in state && !isString(state.kryloVersion)) push('kryloVersion must be a string');
-  if ('sessionId' in state && (!isString(state.sessionId) || state.sessionId.length < 1)) push('sessionId must be a non-empty string');
   if ('runId' in state && (!isString(state.runId) || !/^[A-Za-z0-9_-]{4,64}$/.test(state.runId))) push('runId must match ^[A-Za-z0-9_-]{4,64}$');
+
+  if ('host' in state) {
+    const h = state.host;
+    if (!isObject(h)) {
+      push('host must be an object');
+    } else {
+      for (const req of ['name', 'sessionId']) if (!(req in h)) push(`host.${req} is required`);
+      const allowed = new Set(['name', 'sessionId', 'turnId']);
+      for (const k of Object.keys(h)) if (!allowed.has(k)) push(`unexpected field host.${k}`);
+      if ('name' in h && !HOST_NAMES.includes(h.name)) push('host.name is not a supported host');
+      if ('sessionId' in h && (!isString(h.sessionId) || h.sessionId.length < 1 || h.sessionId.length > 256)) push('host.sessionId must be a non-empty string with maxLength 256');
+      if ('turnId' in h && (!isString(h.turnId) || h.turnId.length < 1 || h.turnId.length > 256)) push('host.turnId must be a non-empty string with maxLength 256');
+    }
+  }
+
+  if ('delegation' in state) {
+    const d = state.delegation;
+    if (!isObject(d)) {
+      push('delegation must be an object');
+    } else {
+      for (const req of ['externalWorker', 'depth']) if (!(req in d)) push(`delegation.${req} is required`);
+      const allowed = new Set(['externalWorker', 'depth', 'parentRunId']);
+      for (const k of Object.keys(d)) if (!allowed.has(k)) push(`unexpected field delegation.${k}`);
+      if ('externalWorker' in d && !isBoolean(d.externalWorker)) push('delegation.externalWorker must be a boolean');
+      if ('depth' in d && (!isInteger(d.depth) || d.depth < 0 || d.depth > 1)) push('delegation.depth must be an integer between 0 and 1');
+      if ('parentRunId' in d && (!isString(d.parentRunId) || !/^[A-Za-z0-9_-]{4,64}$/.test(d.parentRunId))) push('delegation.parentRunId must match ^[A-Za-z0-9_-]{4,64}$');
+    }
+  }
 
   if ('project' in state) {
     const p = state.project;
@@ -606,6 +645,13 @@ function preserveCorruptState(statePath, failure) {
  * Load a run's state. Never throws. Corrupted or schema-invalid state is
  * preserved as state.corrupt-<epoch>.json beside the original and reported
  * via a recovery indicator instead of being trusted.
+ *
+ * Version-aware: a real prior-schema document is migrated in memory first,
+ * validated against the CURRENT validator, backed up (the original bytes,
+ * untouched, alongside the run) and only then atomically persisted. A
+ * schema version this build does not know how to migrate is refused
+ * (a distinct, non-'corrupted' error) and the original file is left exactly
+ * as it was -- never renamed away, never guessed at, never overwritten.
  */
 export function loadState(runId) {
   const statePath = runStatePath(runId);
@@ -618,12 +664,37 @@ export function loadState(runId) {
     return preserveCorruptState(statePath, result);
   }
 
-  const { valid, errors } = validateState(result.value);
-  if (!valid) {
-    return preserveCorruptState(statePath, { error: 'invalid-schema', raw: JSON.stringify(result.value), validationErrors: errors });
+  const migration = migrateStateDocument(result.value);
+  if (!migration.ok) {
+    // Not corruption: either an already-invalid document shape, or a schema
+    // version this build has no migration for. Either way, leave state.json
+    // on disk exactly as it is and report a distinct, safe error instead of
+    // destructively renaming/overwriting it.
+    return { ok: false, error: migration.error, fromVersion: migration.fromVersion ?? null };
   }
 
-  return { ok: true, value: result.value };
+  const { valid, errors } = validateState(migration.value);
+  if (!valid) {
+    return preserveCorruptState(statePath, { error: 'invalid-schema', raw: JSON.stringify(migration.value), validationErrors: errors });
+  }
+
+  if (migration.migrated) {
+    const backupPath = path.join(path.dirname(statePath), `state.pre-migration-${migration.fromVersion}-${Date.now()}.json`);
+    try {
+      // Copy the ORIGINAL on-disk bytes (pre-migration), not the migrated
+      // value, so the backup is a faithful record of what was actually there.
+      fs.copyFileSync(statePath, backupPath);
+    } catch (err) {
+      return { ok: false, error: 'migration-backup-failed', details: err && err.message };
+    }
+    try {
+      writeJsonAtomic(statePath, migration.value);
+    } catch (err) {
+      return { ok: false, error: 'migration-persist-failed', details: err && err.message };
+    }
+  }
+
+  return { ok: true, value: migration.value };
 }
 
 /**
@@ -642,21 +713,23 @@ export function saveState(state) {
 }
 
 /**
- * Persist the pointer for one project + session pair. Two projects never
- * share a path (projectRootHash segment) and two sessions in the same
+ * Persist the pointer for one project + host + host-session triple. Two
+ * projects never share a path (projectRootHash segment), two hosts never
+ * share a path (host segment), and two sessions on the same host in the same
  * project never share a path (session segment), so concurrent runs cannot
  * overwrite each other. The write is atomic (temp file + rename).
  */
-export function writeActiveRunPointer({ runId, projectRootHash, sessionId }) {
-  const value = { runId, projectRootHash, sessionId, updatedAt: nowIso() };
-  const pointerPath = activeRunPointerPath(projectRootHash, sessionId);
+export function writeActiveRunPointer({ runId, projectRootHash, host, hostSessionId }) {
+  const value = { runId, projectRootHash, host, hostSessionId, updatedAt: nowIso() };
+  const pointerPath = activeRunPointerPath(projectRootHash, host, hostSessionId);
   ensureDir(path.dirname(pointerPath));
   writeJsonAtomic(pointerPath, value);
   return value;
 }
 
-function listProjectPointers(projectRootHash) {
-  const dir = activeRunsProjectDir(projectRootHash);
+/** Read every pointer file directly under one project's one host directory. Never scans another host. */
+function listHostPointers(projectRootHash, host) {
+  const dir = activeRunsHostDir(projectRootHash, host);
   let entries;
   try {
     entries = fs.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith('.json'));
@@ -676,46 +749,99 @@ function listProjectPointers(projectRootHash) {
 }
 
 /**
- * One legacy migration attempt: a pre-0.1.1 install may still have a single
- * global current-run.json. If it matches this project, adopt it into the new
- * per-session layout and remove the legacy file. Best-effort; never throws.
+ * Lazy migration, Claude only: a pre-0.2.0 install may still have the flat
+ * 0.1.1 pointer `active-runs/<project>/<session>.json` (no host segment). If
+ * it exists, matches this project, and a hostSessionId is known, adopt it
+ * into the new `active-runs/<project>/claude/<session>.json` layout and
+ * remove the legacy file only once the new pointer is safely written.
+ * Best-effort; never throws.
  */
-function migrateLegacyPointer(projectRootHash, sessionId) {
+function migrateLegacyFlatPointer(projectRootHash, hostSessionId) {
+  if (!hostSessionId) return null;
+  const legacyPath = legacyActiveRunPointerPath(projectRootHash, hostSessionId);
+  const legacy = readJson(legacyPath);
+  if (!legacy.ok || !legacy.value || typeof legacy.value.runId !== 'string') return null;
+  if (legacy.value.projectRootHash && legacy.value.projectRootHash !== projectRootHash) return null;
+
+  const value = {
+    runId: legacy.value.runId,
+    projectRootHash,
+    host: 'claude',
+    hostSessionId,
+    updatedAt: isString(legacy.value.updatedAt) ? legacy.value.updatedAt : nowIso(),
+  };
+  try {
+    const newPointerPath = activeRunPointerPath(projectRootHash, 'claude', hostSessionId);
+    ensureDir(path.dirname(newPointerPath));
+    writeJsonAtomic(newPointerPath, value);
+    fs.rmSync(legacyPath, { force: true });
+  } catch {
+    // Migration is best-effort: the legacy pointer is still returned below
+    // even if adopting it into the new layout did not succeed.
+  }
+  return value;
+}
+
+/**
+ * One-time legacy migration attempt: a pre-0.1.1 install may still have a
+ * single global current-run.json. If it matches this project, adopt it into
+ * the claude host directory and remove the legacy file. Best-effort; never
+ * throws.
+ */
+function migrateLegacyGlobalPointer(projectRootHash, hostSessionId) {
   const legacy = readJson(currentRunPointerPath());
   if (!legacy.ok || !legacy.value || legacy.value.projectRootHash !== projectRootHash) {
     return null;
   }
-  const adoptedSessionId = sessionId || legacy.value.sessionId || 'legacy';
+  const adoptedSessionId = hostSessionId || legacy.value.sessionId || 'legacy';
+  const value = {
+    runId: legacy.value.runId,
+    projectRootHash,
+    host: 'claude',
+    hostSessionId: adoptedSessionId,
+    updatedAt: isString(legacy.value.updatedAt) ? legacy.value.updatedAt : nowIso(),
+  };
   try {
-    writeActiveRunPointer({ runId: legacy.value.runId, projectRootHash, sessionId: adoptedSessionId });
+    const newPointerPath = activeRunPointerPath(projectRootHash, 'claude', adoptedSessionId);
+    ensureDir(path.dirname(newPointerPath));
+    writeJsonAtomic(newPointerPath, value);
     fs.rmSync(currentRunPointerPath(), { force: true });
   } catch {
     // Migration is best-effort: the legacy pointer is still returned below
     // even if adopting it into the new layout did not succeed.
   }
-  return legacy.value;
+  return value;
 }
 
 /**
- * Resolve the active run pointer for a project, preferring the exact session
- * pointer when a sessionId is known. Falls back to the most recently updated
- * pointer for the project (pre-concurrency behavior, and a safe default when
- * the caller has no session context), then to one-time legacy migration.
+ * Resolve the active run pointer for a project + host, preferring the exact
+ * host-session pointer when a hostSessionId is known. Falls back to the most
+ * recently updated pointer inside that host's directory only (never another
+ * host's), then to one-time lazy migration of a pre-existing Claude pointer.
+ * `host` is required: a caller with no known host must not silently assume
+ * Claude.
  */
-export function readActiveRunPointer({ projectRootHash, sessionId } = {}) {
-  if (sessionId) {
-    const direct = readJson(activeRunPointerPath(projectRootHash, sessionId));
+export function readActiveRunPointer({ projectRootHash, host, hostSessionId } = {}) {
+  if (!host) return { ok: false, error: 'host-required' };
+
+  if (hostSessionId) {
+    const direct = readJson(activeRunPointerPath(projectRootHash, host, hostSessionId));
     if (direct.ok) return direct;
   }
 
-  const pointers = listProjectPointers(projectRootHash);
+  const pointers = listHostPointers(projectRootHash, host);
   if (pointers.length > 0) {
     const best = pointers.reduce((a, b) => (String(b.updatedAt) > String(a.updatedAt) ? b : a));
     return { ok: true, value: best };
   }
 
-  const migrated = migrateLegacyPointer(projectRootHash, sessionId);
-  if (migrated) return { ok: true, value: migrated };
+  if (host === 'claude') {
+    const migratedFlat = migrateLegacyFlatPointer(projectRootHash, hostSessionId);
+    if (migratedFlat) return { ok: true, value: migratedFlat };
+
+    const migratedGlobal = migrateLegacyGlobalPointer(projectRootHash, hostSessionId);
+    if (migratedGlobal) return { ok: true, value: migratedGlobal };
+  }
 
   return { ok: false, error: 'not-found' };
 }
@@ -723,21 +849,22 @@ export function readActiveRunPointer({ projectRootHash, sessionId } = {}) {
 /**
  * Convenience wrapper for callers (statusline, doctor, stagnation CLI) that
  * only know a working directory, not a structured project/session pair.
- * sessionId defaults to CLAUDE_SESSION_ID when the host sets it; otherwise
- * the most recently updated pointer for the project is used.
+ * `host` is required; a caller that knows no host must not silently assume
+ * Claude inside Shared Core.
  */
-export function readActiveRunPointerForCwd(cwd = process.cwd(), sessionId) {
-  const resolvedSessionId = sessionId
-    || (typeof process.env.CLAUDE_SESSION_ID === 'string' && process.env.CLAUDE_SESSION_ID.trim() !== ''
-      ? process.env.CLAUDE_SESSION_ID
-      : undefined);
-  return readActiveRunPointer({ projectRootHash: computeProjectRootHash(cwd), sessionId: resolvedSessionId });
+export function readActiveRunPointerForCwd(cwd = process.cwd(), { host, hostSessionId } = {}) {
+  if (!host) return { ok: false, error: 'host-required' };
+  return readActiveRunPointer({
+    projectRootHash: computeProjectRootHash(cwd),
+    host,
+    hostSessionId,
+  });
 }
 
-/** Clear the pointer for a project + session pair, but only if it still names `runId`. */
-export function clearActiveRunPointer({ projectRootHash, sessionId, runId }) {
+/** Clear the pointer for a project + host + host-session triple, but only if it still names `runId`. */
+export function clearActiveRunPointer({ projectRootHash, host, hostSessionId, runId }) {
   try {
-    const pointerPath = activeRunPointerPath(projectRootHash, sessionId);
+    const pointerPath = activeRunPointerPath(projectRootHash, host, hostSessionId);
     const current = readJson(pointerPath);
     if (current.ok && current.value && (!runId || current.value.runId === runId)) {
       fs.rmSync(pointerPath, { force: true });
@@ -751,40 +878,101 @@ export function clearActiveRunPointer({ projectRootHash, sessionId, runId }) {
 export function clearActiveRunPointerForState(state) {
   clearActiveRunPointer({
     projectRootHash: state.project.rootHash,
-    sessionId: state.sessionId,
+    host: state.host.name,
+    hostSessionId: state.host.sessionId,
     runId: state.runId,
   });
 }
 
-/** Remove pointer files whose run no longer exists or has reached a terminal state. Best-effort. */
+/**
+ * Remove pointer files whose run no longer exists or has reached a terminal
+ * state. Best-effort; never throws. Traverses the nested
+ * `active-runs/<project>/<host>/*.json` layout, one host directory at a
+ * time, so pruning one host's stale pointers can never touch (let alone
+ * remove) another host's active pointer -- each host directory is examined
+ * in complete isolation from every other. Never follows a symlinked
+ * directory (Dirent entries reflect lstat, so a symlinked directory already
+ * fails `isDirectory()`; `!isSymbolicLink()` is kept as an explicit,
+ * self-documenting guard). Also detects and safely handles stale pre-host-
+ * scoping (0.1.1) flat pointer files sitting directly under a project
+ * directory: a still-active one is migrated into the `claude` host
+ * directory rather than discarded; a genuinely stale one is removed.
+ */
 export function pruneStaleActiveRunPointers(activeRunsRoot) {
   const removed = [];
   let projectDirs;
   try {
-    projectDirs = fs.readdirSync(activeRunsRoot, { withFileTypes: true }).filter((e) => e.isDirectory());
+    projectDirs = fs.readdirSync(activeRunsRoot, { withFileTypes: true }).filter((e) => e.isDirectory() && !e.isSymbolicLink());
   } catch {
     return removed;
   }
   for (const projectEntry of projectDirs) {
     const projectDir = path.join(activeRunsRoot, projectEntry.name);
-    let pointerFiles;
+    let projectEntries;
     try {
-      pointerFiles = fs.readdirSync(projectDir, { withFileTypes: true }).filter((e) => e.isFile() && e.name.endsWith('.json'));
+      projectEntries = fs.readdirSync(projectDir, { withFileTypes: true });
     } catch {
       continue;
     }
-    for (const fileEntry of pointerFiles) {
+
+    const legacyFiles = projectEntries.filter((e) => e.isFile() && !e.isSymbolicLink() && e.name.endsWith('.json'));
+    for (const fileEntry of legacyFiles) {
       const pointerPath = path.join(projectDir, fileEntry.name);
       const pointer = readJson(pointerPath);
       const runId = pointer.ok && pointer.value ? pointer.value.runId : null;
       const loaded = typeof runId === 'string' ? loadState(runId) : { ok: false };
-      const isStale = !pointer.ok || !runId || !loaded.ok || loaded.value.terminalState !== null;
-      if (isStale) {
+      const isActive = Boolean(pointer.ok && runId && loaded.ok && loaded.value.terminalState === null);
+      if (isActive) {
+        const sessionId = typeof pointer.value.sessionId === 'string' && pointer.value.sessionId.trim() !== ''
+          ? pointer.value.sessionId
+          : path.basename(fileEntry.name, '.json');
+        try {
+          const newPointerPath = activeRunPointerPath(projectEntry.name, 'claude', sessionId);
+          ensureDir(path.dirname(newPointerPath));
+          writeJsonAtomic(newPointerPath, {
+            runId,
+            projectRootHash: projectEntry.name,
+            host: 'claude',
+            hostSessionId: sessionId,
+            updatedAt: isString(pointer.value.updatedAt) ? pointer.value.updatedAt : nowIso(),
+          });
+          fs.rmSync(pointerPath, { force: true });
+        } catch {
+          // best-effort: if migration fails, leave the legacy pointer in
+          // place rather than losing track of a still-active run.
+        }
+      } else {
         try {
           fs.rmSync(pointerPath, { force: true });
           removed.push(path.join(projectEntry.name, fileEntry.name));
         } catch {
           // best-effort
+        }
+      }
+    }
+
+    const hostDirs = projectEntries.filter((e) => e.isDirectory() && !e.isSymbolicLink());
+    for (const hostEntry of hostDirs) {
+      const hostDir = path.join(projectDir, hostEntry.name);
+      let pointerFiles;
+      try {
+        pointerFiles = fs.readdirSync(hostDir, { withFileTypes: true }).filter((e) => e.isFile() && !e.isSymbolicLink() && e.name.endsWith('.json'));
+      } catch {
+        continue;
+      }
+      for (const fileEntry of pointerFiles) {
+        const pointerPath = path.join(hostDir, fileEntry.name);
+        const pointer = readJson(pointerPath);
+        const runId = pointer.ok && pointer.value ? pointer.value.runId : null;
+        const loaded = typeof runId === 'string' ? loadState(runId) : { ok: false };
+        const isStale = !pointer.ok || !runId || !loaded.ok || loaded.value.terminalState !== null;
+        if (isStale) {
+          try {
+            fs.rmSync(pointerPath, { force: true });
+            removed.push(path.join(projectEntry.name, hostEntry.name, fileEntry.name));
+          } catch {
+            // best-effort
+          }
         }
       }
     }

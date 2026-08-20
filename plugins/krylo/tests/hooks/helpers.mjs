@@ -25,7 +25,7 @@ export function runCli(scriptRelPath, args, dataDir) {
   const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath), ...args], {
     encoding: 'utf8',
     cwd: dataDir,
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir },
+    env: { ...process.env, KRYLO_DATA_ROOT: dataDir },
   });
   let json;
   try {
@@ -42,7 +42,7 @@ export function runHook(scriptRelPath, payload, dataDir, { rawInput, env } = {})
   const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath)], {
     encoding: 'utf8',
     input,
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, ...env },
+    env: { ...process.env, KRYLO_DATA_ROOT: dataDir, ...env },
   });
   let json = null;
   try {

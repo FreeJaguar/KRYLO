@@ -76,9 +76,14 @@ function main() {
   const git = detectGit(projectDir);
   const runId = `run-${crypto.randomBytes(6).toString('hex')}`;
 
+  // TODO(multi-host Task 5): normalize through bootstrapClaudeRuntimeEnvironment /
+  // createClaudeHostIdentity instead of this literal 'claude' identity once
+  // this entrypoint is wired to the Claude host adapter.
+  const hostIdentity = { host: 'claude', hostSessionId: args.session };
+
   const state = createInitialState({
     goalText: args.goal,
-    sessionId: args.session,
+    hostIdentity,
     projectDir,
     lane,
     risk,
@@ -96,7 +101,12 @@ function main() {
     return;
   }
 
-  writeActiveRunPointer({ runId, projectRootHash: state.project.rootHash, sessionId: args.session });
+  writeActiveRunPointer({
+    runId,
+    projectRootHash: state.project.rootHash,
+    host: 'claude',
+    hostSessionId: args.session,
+  });
 
   const statePath = path.join(getDataRoot(), 'runs', runId, 'state.json');
   console.log(JSON.stringify({
