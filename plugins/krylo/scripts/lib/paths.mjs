@@ -17,14 +17,18 @@ import crypto from 'node:crypto';
 
 /**
  * Resolve the KRYLO plugin data root.
- * Honors CLAUDE_PLUGIN_DATA so tests can point at a temp directory.
+ * Honors KRYLO_DATA_ROOT (host-neutral) so tests, and any host adapter, can
+ * point at a temp or host-specific directory. Claude-facing entrypoints
+ * bootstrap KRYLO_DATA_ROOT from CLAUDE_PLUGIN_DATA via
+ * scripts/host/claude/context.mjs before this is read, so existing Claude
+ * users keep using the same physical 0.1.1 data root.
  */
 export function getDataRoot() {
-  const envRoot = process.env.CLAUDE_PLUGIN_DATA;
+  const envRoot = process.env.KRYLO_DATA_ROOT;
   if (typeof envRoot === 'string' && envRoot.trim() !== '') {
     return path.resolve(envRoot);
   }
-  return path.join(os.homedir(), '.claude', 'plugins', 'data', 'krylo');
+  return path.join(os.homedir(), '.krylo', 'data');
 }
 
 /** Create a directory (recursively) if it does not already exist. */

@@ -32,7 +32,7 @@ function parseArgs(argv) {
 
 function computeBudget(risk) {
   let budget = RISK_BUDGETS[risk] ?? RISK_BUDGETS.medium;
-  const cap = process.env.CLAUDE_PLUGIN_OPTION_MAX_ORBIT_CYCLES;
+  const cap = process.env.KRYLO_MAX_ORBIT_CYCLES;
   if (cap !== undefined) {
     const n = Number(cap);
     if (Number.isInteger(n) && n >= 1 && n <= 10) {

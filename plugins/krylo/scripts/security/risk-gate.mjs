@@ -166,7 +166,7 @@ function tryConsumeApproval(runId, className, { toolName, toolInput, projectRoot
     const reloaded = loadState(runId);
     if (!reloaded.ok) return { consumed: false };
     const freshState = reloaded.value;
-    const environment = process.env.CLAUDE_PLUGIN_OPTION_SECURITY_PROFILE || null;
+    const environment = process.env.KRYLO_SECURITY_PROFILE || null;
     const nowMs = Date.now();
     const fingerprint = computeFingerprint(toolName, toolInput);
 

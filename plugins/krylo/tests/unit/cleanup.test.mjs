@@ -12,7 +12,7 @@ const CLEANUP_SCRIPT = path.resolve(__dirname, '..', '..', 'scripts', 'runtime',
 function runCleanup(args, dataDir) {
   const res = spawnSync(process.execPath, [CLEANUP_SCRIPT, ...args], {
     encoding: 'utf8',
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir },
+    env: { ...process.env, KRYLO_DATA_ROOT: dataDir },
   });
   return { status: res.status, json: JSON.parse(res.stdout.trim()) };
 }

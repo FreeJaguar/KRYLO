@@ -26,7 +26,7 @@ function parseArgs(argv) {
 }
 
 function defaultRetentionDays() {
-  const env = process.env.CLAUDE_PLUGIN_OPTION_TELEMETRY_RETENTION_DAYS;
+  const env = process.env.KRYLO_TELEMETRY_RETENTION_DAYS;
   if (env !== undefined) {
     const n = Number(env);
     if (Number.isFinite(n) && n >= 0) return n;

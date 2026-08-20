@@ -79,7 +79,7 @@ async function main() {
   const loaded = loadState(pointer.value.runId);
   if (!loaded.ok) process.exit(0);
 
-  const detail = process.env.CLAUDE_PLUGIN_OPTION_STATUS_DETAIL ?? 'normal';
+  const detail = process.env.KRYLO_STATUS_DETAIL ?? 'normal';
   process.stdout.write(renderStatus(loaded.value, detail));
   process.exit(0);
 }

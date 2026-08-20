@@ -92,6 +92,27 @@ function crossCheckSchema() {
   return errors;
 }
 
+// Governance guard for the multi-host foundation (ADR-0023): Shared Core
+// library modules must stay host-neutral. Only the Claude host adapter
+// (scripts/host/claude/**) may read CLAUDE_-prefixed environment or Hook
+// fields directly; everything else consumes normalized KRYLO_* values.
+const ISOLATED_SHARED_FILES = [
+  path.join(SCRIPTS_ROOT, 'lib'),
+];
+
+function checkHostIsolation() {
+  const errors = [];
+  for (const root of ISOLATED_SHARED_FILES) {
+    for (const file of listMjsFiles(root)) {
+      const contents = fs.readFileSync(file, 'utf8');
+      if (/CLAUDE_/.test(contents)) {
+        errors.push(`${path.relative(SCRIPTS_ROOT, file).split(path.sep).join('/')} must not reference CLAUDE_-prefixed identifiers; Shared Core is host-neutral`);
+      }
+    }
+  }
+  return errors;
+}
+
 function runtimeSmokeTest() {
   const errors = [];
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-validate-'));
@@ -146,14 +167,16 @@ function main() {
   }
 
   const schemaErrors = crossCheckSchema();
+  const isolationErrors = checkHostIsolation();
   const smokeErrors = runtimeSmokeTest();
-  const ok = syntaxPass && schemaErrors.length === 0 && smokeErrors.length === 0;
+  const ok = syntaxPass && schemaErrors.length === 0 && isolationErrors.length === 0 && smokeErrors.length === 0;
 
   console.log(JSON.stringify({
     ok,
     mode: 'full',
     syntax: { pass: syntaxPass, results: syntaxResults },
     schemaConsistency: { pass: schemaErrors.length === 0, errors: schemaErrors },
+    hostIsolation: { pass: isolationErrors.length === 0, errors: isolationErrors },
     runtimeSmoke: { pass: smokeErrors.length === 0, errors: smokeErrors },
   }));
   process.exit(ok ? 0 : 1);
