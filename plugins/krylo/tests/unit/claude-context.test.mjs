@@ -11,6 +11,21 @@ import {
   bootstrapClaudeStorageEnvironment,
 } from '../../scripts/host/claude/context.mjs';
 
+test('an already-set KRYLO_DATA_ROOT overrides the Claude-derived data root and is never silently recomputed', () => {
+  const isolatedRoot = path.resolve('tmp-isolated-krylo-data');
+  assert.equal(
+    resolveClaudeDataRoot({ KRYLO_DATA_ROOT: isolatedRoot }),
+    isolatedRoot,
+  );
+  assert.equal(
+    resolveClaudeDataRoot({ KRYLO_DATA_ROOT: isolatedRoot, CLAUDE_PLUGIN_DATA: path.resolve('other-root') }),
+    isolatedRoot,
+  );
+  const env = { KRYLO_DATA_ROOT: isolatedRoot };
+  bootstrapClaudeStorageEnvironment({ env });
+  assert.equal(env.KRYLO_DATA_ROOT, isolatedRoot);
+});
+
 test('explicit Claude session wins over Hook and legacy environment values', () => {
   const session = resolveClaudeSessionId({
     explicitSessionId: 'explicit',

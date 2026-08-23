@@ -5,6 +5,11 @@
 //
 // Compatibility rule: a Claude run with no explicit override must resolve to
 // the same physical data root as KRYLO 0.1.1 (~/.claude/plugins/data/krylo).
+// An already-set KRYLO_DATA_ROOT always wins: it is never populated by a real
+// Claude host before this adapter runs, so honoring it only affects callers
+// (tests, or a future non-Claude host) that deliberately set it to isolate
+// storage. Recomputing it unconditionally from CLAUDE_PLUGIN_DATA would
+// silently redirect those callers' writes into the real Claude data root.
 
 import os from 'node:os';
 import path from 'node:path';
@@ -31,6 +36,9 @@ export function resolveClaudeSessionId({ explicitSessionId, hookPayload, env = p
 }
 
 export function resolveClaudeDataRoot(env = process.env) {
+  if (typeof env.KRYLO_DATA_ROOT === 'string' && env.KRYLO_DATA_ROOT.trim() !== '') {
+    return path.resolve(env.KRYLO_DATA_ROOT);
+  }
   if (typeof env.CLAUDE_PLUGIN_DATA === 'string' && env.CLAUDE_PLUGIN_DATA.trim() !== '') {
     return path.resolve(env.CLAUDE_PLUGIN_DATA);
   }
