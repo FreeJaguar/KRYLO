@@ -17,10 +17,11 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { mkTempDataDir, createActiveRun, cleanup, SCRIPTS_ROOT } from './helpers.mjs';
+import { mkTempDataDir, createActiveRun, runCli, patchState, cleanup, SCRIPTS_ROOT } from './helpers.mjs';
 
 const RISK_GATE = path.join(SCRIPTS_ROOT, 'security', 'risk-gate.mjs');
 
@@ -135,6 +136,82 @@ test('a missing session_id never binds to a different host\'s pointer (host is s
       cwd: dataDir,
     }), dataDir);
     assert.equal(res.json.hookSpecificOutput.permissionDecision, 'deny');
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('a valid session_id is never discarded by an unrelated payload validation failure (must not spend a different run\'s approval)', () => {
+  // Independent confirmation review of the fix above found a follow-on gap:
+  // the original catch-and-degrade fallback caught ANY bootstrap failure,
+  // not only "session id unavailable" -- so an oversized permission_mode/
+  // prompt_id could silently discard a perfectly good session_id and fall
+  // back to "most recently updated pointer", which, with two concurrent
+  // runs in one project, could resolve to a DIFFERENT run and spend ITS
+  // approval instead of correctly evaluating (and denying) against the
+  // session that was actually named.
+  const dataDir = mkTempDataDir('krylo-failsafe-wrongrun-');
+  try {
+    createActiveRun(dataDir); // session 'hook-session'
+    const initB = runCli('runtime/init-run.mjs', [
+      '--goal', 'second concurrent session',
+      '--session', 'hook-session-b',
+      '--project-dir', dataDir,
+      '--lane', 'PATCH',
+      '--risk', 'low',
+    ], dataDir);
+    assert.equal(initB.status, 0);
+    const runIdB = initB.json.runId;
+    const statePathB = path.join(dataDir, 'runs', runIdB, 'state.json');
+
+    // Run B (the more recently created/updated run) holds an approved,
+    // unconsumed git-force approval. Run A (the session actually named in
+    // the payload below) holds none.
+    patchState(statePathB, (state) => {
+      state.riskApprovals.push({
+        id: 'ra-1',
+        actionClass: 'git-force',
+        status: 'approved',
+        requestedAt: new Date().toISOString(),
+        resolvedAt: new Date().toISOString(),
+        projectRootHash: state.project.rootHash,
+        runId: state.runId,
+        environment: null,
+        expiresAt: null,
+        consumedAt: null,
+        fingerprint: null,
+        target: null,
+        summary: 'pre-approved force push',
+      });
+    });
+
+    const env = { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, KRYLO_DATA_ROOT: dataDir };
+    delete env.CLAUDE_SESSION_ID;
+    const res2 = spawnSync(process.execPath, [RISK_GATE], {
+      encoding: 'utf8',
+      env,
+      cwd: dataDir, // claudeCwdFallbackIdentity() falls back to the Hook process's own cwd
+      input: JSON.stringify({
+        hook_event_name: 'PreToolUse',
+        tool_name: 'Bash',
+        tool_input: { command: 'git push --force origin main' },
+        cwd: dataDir,
+        session_id: 'hook-session', // correctly names run A, which has NO approval
+        permission_mode: 'x'.repeat(300), // exceeds host-context's 256-char limit
+      }),
+    });
+    assert.equal(res2.status, 0);
+    let json = null;
+    try { json = JSON.parse(res2.stdout.trim()); } catch { json = null; }
+    assert.ok(json, 'must not silently allow');
+    assert.notEqual(
+      json.hookSpecificOutput.permissionDecision,
+      'allow',
+      'must not fall back to a different run and spend its approval just because an unrelated field failed validation',
+    );
+
+    const stateB = JSON.parse(fs.readFileSync(statePathB, 'utf8'));
+    assert.equal(stateB.riskApprovals[0].status, 'approved', 'run B\'s approval must remain unspent');
   } finally {
     cleanup(dataDir);
   }
