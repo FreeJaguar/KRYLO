@@ -101,14 +101,24 @@ const ISOLATED_SHARED_FILES = [
   path.join(SCRIPTS_ROOT, 'lib'),
 ];
 
+// Shared Core modules that live outside scripts/lib/ but must stay just as
+// host-neutral (e.g. security/risk-policy.mjs shares its directory with the
+// Claude-facing security/risk-gate.mjs adapter, so it cannot be covered by a
+// directory-wide scan without also flagging legitimate Claude adapter code).
+const ISOLATED_SHARED_SINGLE_FILES = [
+  path.join(SCRIPTS_ROOT, 'security', 'risk-policy.mjs'),
+];
+
 function checkHostIsolation() {
   const errors = [];
-  for (const root of ISOLATED_SHARED_FILES) {
-    for (const file of listMjsFiles(root)) {
-      const contents = fs.readFileSync(file, 'utf8');
-      if (/CLAUDE_/.test(contents)) {
-        errors.push(`${path.relative(SCRIPTS_ROOT, file).split(path.sep).join('/')} must not reference CLAUDE_-prefixed identifiers; Shared Core is host-neutral`);
-      }
+  const files = [
+    ...ISOLATED_SHARED_FILES.flatMap((root) => listMjsFiles(root)),
+    ...ISOLATED_SHARED_SINGLE_FILES,
+  ];
+  for (const file of files) {
+    const contents = fs.readFileSync(file, 'utf8');
+    if (/CLAUDE_/.test(contents)) {
+      errors.push(`${path.relative(SCRIPTS_ROOT, file).split(path.sep).join('/')} must not reference CLAUDE_-prefixed identifiers; Shared Core is host-neutral`);
     }
   }
   return errors;
