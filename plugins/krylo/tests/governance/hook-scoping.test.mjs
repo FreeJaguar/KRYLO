@@ -69,3 +69,64 @@ test('no other KRYLO skill declares an interception hook', () => {
     assert.ok(!/^hooks:/m.test(block), `${skill} must not declare hooks — only the run skill gates tool use`);
   }
 });
+
+// Task 9 (docs/process/MULTI_HOST_FOUNDATION_IMPLEMENTATION_PLAN.md): Tasks 2-8
+// relocated Claude-specific interpretation into scripts/host/claude/** and
+// extracted scripts/security/risk-policy.mjs out of risk-gate.mjs. Every one
+// of the six required hook scripts must still resolve its Claude-payload
+// normalization through the same real host adapter file, and risk-gate.mjs
+// must still resolve its policy logic through the same real extracted file,
+// proving none of those refactors left a hook silently importing a
+// moved/renamed/missing module.
+test('every required hook script imports the real Claude host-transport adapter, and risk-gate imports the real extracted risk policy', () => {
+  const hostTransportRel = 'scripts/host/claude/hook-transport.mjs';
+  const hostTransportAbs = path.join(PLUGIN_ROOT, hostTransportRel);
+  assert.ok(fs.existsSync(hostTransportAbs), `${hostTransportRel} must exist`);
+
+  const riskPolicyRel = 'scripts/security/risk-policy.mjs';
+  const riskPolicyAbs = path.join(PLUGIN_ROOT, riskPolicyRel);
+  assert.ok(fs.existsSync(riskPolicyAbs), `${riskPolicyRel} must exist`);
+
+  const hostContextAbs = path.join(PLUGIN_ROOT, 'scripts', 'host', 'claude', 'context.mjs');
+  assert.ok(fs.existsSync(hostContextAbs), 'scripts/host/claude/context.mjs must exist');
+
+  const uniqueScripts = [...new Set(REQUIRED_EVENTS_AND_SCRIPTS.map(([, scriptRel]) => scriptRel))];
+  for (const scriptRel of uniqueScripts) {
+    const source = fs.readFileSync(path.join(PLUGIN_ROOT, scriptRel), 'utf8');
+    assert.match(
+      source,
+      /from ['"]\.\.\/host\/claude\/hook-transport\.mjs['"]/,
+      `${scriptRel} must import the real host/claude/hook-transport.mjs adapter, not a moved or renamed path`,
+    );
+  }
+
+  const riskGateSource = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'security', 'risk-gate.mjs'), 'utf8');
+  assert.match(
+    riskGateSource,
+    /from ['"]\.\/risk-policy\.mjs['"]/,
+    'risk-gate.mjs must import the real extracted ./risk-policy.mjs, not a moved or renamed path',
+  );
+});
+
+test('no Codex hook files were added in Foundation', () => {
+  const codexHooksDir = path.join(PLUGIN_ROOT, 'hooks', 'codex');
+  assert.ok(!fs.existsSync(codexHooksDir), 'Foundation must not add a Codex-specific hooks directory');
+
+  const hostDir = path.join(PLUGIN_ROOT, 'scripts', 'host');
+  const hostSubdirs = fs.existsSync(hostDir)
+    ? fs.readdirSync(hostDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
+    : [];
+  assert.deepEqual(hostSubdirs, ['claude'], 'Foundation only ships the Claude host adapter; no codex host adapter yet');
+
+  const hooksConfigText = fs.readFileSync(path.join(PLUGIN_ROOT, 'hooks', 'hooks.json'), 'utf8');
+  assert.doesNotMatch(hooksConfigText, /codex/i, 'hooks.json must not reference Codex');
+
+  const skillText = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', 'run', 'SKILL.md'), 'utf8');
+  assert.doesNotMatch(skillText, /codex/i, 'the run skill must not reference Codex');
+});
+
+test('/krylo:run remains user-invocable and not model-invocable', () => {
+  const block = frontmatterBlock(path.join(PLUGIN_ROOT, 'skills', 'run', 'SKILL.md'));
+  assert.match(block, /^user-invocable:\s*true\s*$/m, 'the run skill must remain user-invocable');
+  assert.match(block, /^disable-model-invocation:\s*true\s*$/m, 'the run skill must keep disable-model-invocation: true');
+});
