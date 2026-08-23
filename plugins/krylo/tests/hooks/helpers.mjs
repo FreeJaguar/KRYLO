@@ -25,7 +25,13 @@ export function runCli(scriptRelPath, args, dataDir) {
   const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath), ...args], {
     encoding: 'utf8',
     cwd: dataDir,
-    env: { ...process.env, KRYLO_DATA_ROOT: dataDir },
+    // Both are set deliberately: CLAUDE_PLUGIN_DATA is what the Claude host
+    // adapter bootstrap reads (and, once bootstrapped, KRYLO_DATA_ROOT is
+    // derived from it and overwritten to the SAME dataDir); KRYLO_DATA_ROOT
+    // is also set directly so an entrypoint that has not yet been wired to
+    // the Claude adapter still resolves to this isolated temp dir instead of
+    // falling back to a real, non-isolated data root.
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, KRYLO_DATA_ROOT: dataDir },
   });
   let json;
   try {
@@ -36,13 +42,24 @@ export function runCli(scriptRelPath, args, dataDir) {
   return { status: res.status, stdout: res.stdout, stderr: res.stderr, json };
 }
 
-/** Pipe a hook payload into a hook script. Returns status/stdout/parsed JSON. */
+/**
+ * Pipe a hook payload into a hook script. Returns status/stdout/parsed JSON.
+ *
+ * CLAUDE_SESSION_ID defaults to 'hook-session' so a fixture payload that
+ * (like real Claude PreToolUse/Stop/PostToolUse payloads normally do not)
+ * omits `session_id` still normalizes to the same host session that
+ * createActiveRun() below always registers via `--session hook-session`.
+ * Pass `env: { CLAUDE_SESSION_ID: ... }` (or unset it) to exercise a
+ * different or missing session explicitly.
+ */
 export function runHook(scriptRelPath, payload, dataDir, { rawInput, env } = {}) {
   const input = rawInput !== undefined ? rawInput : JSON.stringify(payload);
   const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath)], {
     encoding: 'utf8',
     input,
-    env: { ...process.env, KRYLO_DATA_ROOT: dataDir, ...env },
+    // See runCli() above for why CLAUDE_PLUGIN_DATA/KRYLO_DATA_ROOT are both
+    // set to the same isolated temp dataDir.
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, KRYLO_DATA_ROOT: dataDir, CLAUDE_SESSION_ID: 'hook-session', ...env },
   });
   let json = null;
   try {

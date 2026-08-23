@@ -6,7 +6,8 @@
 // only; no prompts or task content are persisted beyond a short label.
 // Fail open: always exit 0, no output.
 
-import { readStdinJson, resolveActiveRun, eventName, allowSilently } from '../lib/hook-utils.mjs';
+import { readStdinJson, resolveActiveRun, eventName } from '../lib/hook-utils.mjs';
+import { normalizeClaudeHookPayload, allowClaudeSilently } from '../host/claude/hook-transport.mjs';
 import { saveState } from '../lib/state.mjs';
 import { redactAndTruncate } from '../lib/redact.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
@@ -21,11 +22,17 @@ function pickString(payload, keys) {
 
 async function main() {
   const input = await readStdinJson();
-  if (!input.ok) allowSilently();
-  const payload = input.value;
+  if (!input.ok) allowClaudeSilently();
+  const normalized = normalizeClaudeHookPayload(input.value);
+  if (!normalized.ok) allowClaudeSilently();
+  const payload = normalized.payload;
 
-  const run = resolveActiveRun(payload);
-  if (!run.active) allowSilently();
+  const run = resolveActiveRun({
+    projectRoot: normalized.identity.projectRoot,
+    host: normalized.identity.host,
+    hostSessionId: normalized.identity.hostSessionId,
+  });
+  if (!run.active) allowClaudeSilently();
 
   const state = run.state;
   const event = eventName(payload);
@@ -62,7 +69,7 @@ async function main() {
     }
   }
 
-  allowSilently();
+  allowClaudeSilently();
 }
 
-main().catch(() => allowSilently());
+main().catch(() => allowClaudeSilently());

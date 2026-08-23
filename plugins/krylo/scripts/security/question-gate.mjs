@@ -7,7 +7,8 @@
 //
 // Fail mode: fail OPEN (allow) — asking a human is always safe.
 
-import { readStdinJson, resolveActiveRun, emitPreToolDecision, allowSilently } from '../lib/hook-utils.mjs';
+import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
+import { normalizeClaudeHookPayload, emitClaudePreToolDecision, allowClaudeSilently } from '../host/claude/hook-transport.mjs';
 import { saveState } from '../lib/state.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 
@@ -18,10 +19,15 @@ const GRANT_HINT =
 
 async function main() {
   const input = await readStdinJson();
-  const payload = input.ok ? input.value : {};
-
-  const run = resolveActiveRun(payload);
-  if (!run.active) allowSilently();
+  if (!input.ok) allowClaudeSilently();
+  const normalized = normalizeClaudeHookPayload(input.value);
+  if (!normalized.ok) allowClaudeSilently();
+  const run = resolveActiveRun({
+    projectRoot: normalized.identity.projectRoot,
+    host: normalized.identity.host,
+    hostSessionId: normalized.identity.hostSessionId,
+  });
+  if (!run.active) allowClaudeSilently();
 
   const state = run.state;
   const grants = Array.isArray(state.questionGate.grants) ? state.questionGate.grants : [];
@@ -35,16 +41,16 @@ async function main() {
     recordEvent(state.runId, { event: 'question-gate', category: available.category, status: 'allowed' });
     if (!saved.ok) {
       // State could not be persisted; still allow — the question is safe.
-      emitPreToolDecision('allow', `KRYLO exceptional question token consumed (${available.category}); state persistence failed.`);
+      emitClaudePreToolDecision('allow', `KRYLO exceptional question token consumed (${available.category}); state persistence failed.`);
     }
-    emitPreToolDecision('allow', `KRYLO exceptional question token consumed (${available.category}).`);
+    emitClaudePreToolDecision('allow', `KRYLO exceptional question token consumed (${available.category}).`);
   }
 
   recordEvent(state.runId, { event: 'question-gate', status: 'denied' });
-  emitPreToolDecision('deny', GRANT_HINT);
+  emitClaudePreToolDecision('deny', GRANT_HINT);
 }
 
 main().catch(() => {
   // Fail open: never trap the session because the gate itself failed.
-  allowSilently();
+  allowClaudeSilently();
 });

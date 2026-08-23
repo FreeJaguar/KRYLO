@@ -208,7 +208,12 @@ test('approval: concurrent consumption — exactly one of two racing attempts sp
     const gatePath = path.join(SCRIPTS_ROOT, GATE);
     const runOnce = () => new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [gatePath], {
-        env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir },
+        // CLAUDE_SESSION_ID must match createActiveRun()'s fixed
+        // '--session hook-session' so the host-neutral resolveActiveRun()
+        // binds to the run this test just created instead of treating the
+        // payload (which, like real Claude payloads, carries no session_id)
+        // as unidentifiable and failing open.
+        env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, CLAUDE_SESSION_ID: 'hook-session' },
       });
       let out = '';
       child.stdout.on('data', (c) => { out += c; });

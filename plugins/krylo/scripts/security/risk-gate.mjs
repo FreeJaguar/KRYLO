@@ -23,7 +23,8 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-import { readStdinJson, resolveActiveRun, emitPreToolDecision, allowSilently } from '../lib/hook-utils.mjs';
+import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
+import { normalizeClaudeHookPayload, emitClaudePreToolDecision, allowClaudeSilently } from '../host/claude/hook-transport.mjs';
 import { getDataRoot, runLockPath } from '../lib/paths.mjs';
 import { loadState, saveState } from '../lib/state.mjs';
 import { redactAndTruncate, deepRedact } from '../lib/redact.mjs';
@@ -190,10 +191,10 @@ function handleGatedMatch(state, match, action) {
   const result = tryConsumeApproval(state.runId, match.className, action);
   if (result.consumed) {
     recordEvent(state.runId, { event: 'risk-gate', category: match.className, status: 'approved-override' });
-    emitPreToolDecision('allow', `Action class ${match.className} was approved by the user (${result.approvalId}) and is now spent.`);
+    emitClaudePreToolDecision('allow', `Action class ${match.className} was approved by the user (${result.approvalId}) and is now spent.`);
   }
   recordEvent(state.runId, { event: 'risk-gate', category: match.className, status: 'denied' });
-  emitPreToolDecision(
+  emitClaudePreToolDecision(
     'deny',
     `${match.reason} Record it with update-state.mjs --request-approval ${match.className} --summary "<safe summary>" and stop at RISK_APPROVAL_REQUIRED.`,
   );
@@ -201,10 +202,17 @@ function handleGatedMatch(state, match, action) {
 
 async function main() {
   const input = await readStdinJson();
-  const payload = input.ok ? input.value : {};
+  if (!input.ok) allowClaudeSilently();
+  const normalized = normalizeClaudeHookPayload(input.value);
+  if (!normalized.ok) allowClaudeSilently();
+  const payload = normalized.payload;
 
-  const run = resolveActiveRun(payload);
-  if (!run.active) allowSilently();
+  const run = resolveActiveRun({
+    projectRoot: normalized.identity.projectRoot,
+    host: normalized.identity.host,
+    hostSessionId: normalized.identity.hostSessionId,
+  });
+  if (!run.active) allowClaudeSilently();
 
   const state = run.state;
 
@@ -215,16 +223,16 @@ async function main() {
 
     if (touchesDataRoot(payload, typeof payload.cwd === 'string' ? payload.cwd : '')) {
       recordEvent(state.runId, { event: 'risk-gate', category: 'data-root-protection', status: 'denied' });
-      emitPreToolDecision('deny', DATA_ROOT_REASON);
+      emitClaudePreToolDecision('deny', DATA_ROOT_REASON);
     }
 
     if (toolName === 'Bash') {
       const command = typeof toolInput.command === 'string' ? toolInput.command : '';
-      if (command === '') allowSilently();
+      if (command === '') allowClaudeSilently();
 
       if (commandTouchesSensitivePath(policy, command)) {
         recordEvent(state.runId, { event: 'risk-gate', category: 'sensitive-path', status: 'denied' });
-        emitPreToolDecision('deny', `${policy.sensitivePaths.reason} This command touches a protected secret path.`);
+        emitClaudePreToolDecision('deny', `${policy.sensitivePaths.reason} This command touches a protected secret path.`);
       }
 
       const match = firstMatchingClass(policy, command);
@@ -233,7 +241,7 @@ async function main() {
       }
 
       recordEvent(state.runId, { event: 'risk-gate', category: 'pass', status: 'allowed' });
-      allowSilently();
+      allowClaudeSilently();
     }
 
     if (toolName === 'Write' || toolName === 'Edit' || toolName === 'NotebookEdit') {
@@ -244,10 +252,10 @@ async function main() {
           : '';
       if (matchesSensitivePath(policy, target)) {
         recordEvent(state.runId, { event: 'risk-gate', category: 'sensitive-path', status: 'denied' });
-        emitPreToolDecision('deny', `${policy.sensitivePaths.reason} This file target is a protected secret path.`);
+        emitClaudePreToolDecision('deny', `${policy.sensitivePaths.reason} This file target is a protected secret path.`);
       }
       recordEvent(state.runId, { event: 'risk-gate', category: 'pass', status: 'allowed' });
-      allowSilently();
+      allowClaudeSilently();
     }
 
     if (isMcpToolName(toolName)) {
@@ -256,17 +264,17 @@ async function main() {
         handleGatedMatch(state, match, { toolName, toolInput, projectRootHash: state.project.rootHash });
       }
       recordEvent(state.runId, { event: 'risk-gate', category: 'mcp-pass', status: 'allowed' });
-      allowSilently();
+      allowClaudeSilently();
     }
 
-    allowSilently();
+    allowClaudeSilently();
   } catch {
     // Fail safe while a run is active: require the user to look at it.
-    emitPreToolDecision('ask', 'KRYLO risk gate could not evaluate this action.');
+    emitClaudePreToolDecision('ask', 'KRYLO risk gate could not evaluate this action.');
   }
 }
 
 main().catch(() => {
   // Outer failure (before active-run resolution succeeded): pass through.
-  allowSilently();
+  allowClaudeSilently();
 });

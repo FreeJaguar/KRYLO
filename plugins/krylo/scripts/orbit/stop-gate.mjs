@@ -10,7 +10,8 @@
 // Fail mode: fail SAFE for completion claims, but never trap the user — any
 // internal error allows the stop.
 
-import { readStdinJson, resolveActiveRun, allowSilently } from '../lib/hook-utils.mjs';
+import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
+import { normalizeClaudeHookPayload, emitClaudeStopBlock, allowClaudeSilently } from '../host/claude/hook-transport.mjs';
 import { saveState, clearActiveRunPointerForState, completionEval } from '../lib/state.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { assessStagnation } from './stagnation.mjs';
@@ -60,31 +61,38 @@ function finalize(state, terminalState, phase) {
 
 async function main() {
   const input = await readStdinJson();
-  const payload = input.ok ? input.value : {};
+  if (!input.ok) allowClaudeSilently();
+  const normalized = normalizeClaudeHookPayload(input.value);
+  if (!normalized.ok) allowClaudeSilently();
+  const payload = normalized.payload;
 
   // Never fight the platform's own stop-loop guard.
-  if (payload.stop_hook_active) allowSilently();
+  if (payload.stop_hook_active) allowClaudeSilently();
 
-  const run = resolveActiveRun(payload);
-  if (!run.active) allowSilently();
+  const run = resolveActiveRun({
+    projectRoot: normalized.identity.projectRoot,
+    host: normalized.identity.host,
+    hostSessionId: normalized.identity.hostSessionId,
+  });
+  if (!run.active) allowClaudeSilently();
 
   const state = run.state;
 
   // Completion gate satisfied: allow the stop. The model remains responsible
   // for setting VERIFIED_COMPLETE explicitly through update-state.mjs.
   const evalResult = completionEval(state);
-  if (evalResult.complete) allowSilently();
+  if (evalResult.complete) allowClaudeSilently();
 
   // Budget exhaustion: deterministic terminal state, allow the stop.
   if (state.orbit.cycle >= state.orbit.budget || state.orbit.stopBlocks >= state.orbit.budget) {
     finalize(state, 'ITERATION_LIMIT_REACHED', 'ITERATION_LIMIT');
-    allowSilently();
+    allowClaudeSilently();
   }
 
   // Stagnation: no useful action remains — stop safely.
   if (assessStagnation(state).recommendation === 'isolate-or-stop') {
     finalize(state, 'SAFE_BLOCKED', 'BLOCKED');
-    allowSilently();
+    allowClaudeSilently();
   }
 
   // Otherwise force continuation with the Orbit delta. Every block consumes
@@ -92,14 +100,10 @@ async function main() {
   state.orbit.stopBlocks += 1;
   state.orbit.cycle += 1;
   const saved = saveState(state);
-  if (!saved.ok) allowSilently();
+  if (!saved.ok) allowClaudeSilently();
   recordEvent(state.runId, { event: 'stop-block', cycle: state.orbit.cycle });
 
-  process.stdout.write(JSON.stringify({
-    decision: 'block',
-    reason: buildDelta(saved.value, evalResult),
-  }));
-  process.exit(0);
+  emitClaudeStopBlock(buildDelta(saved.value, evalResult));
 }
 
-main().catch(() => allowSilently());
+main().catch(() => allowClaudeSilently());
