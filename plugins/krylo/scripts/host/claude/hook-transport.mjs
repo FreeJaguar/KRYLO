@@ -5,25 +5,66 @@
 // Claude Hook stdin payload into a host-neutral identity before Shared Core
 // ever sees it.
 
-import { bootstrapClaudeRuntimeEnvironment } from './context.mjs';
+import path from 'node:path';
+
+import { bootstrapClaudeRuntimeEnvironment, bootstrapClaudeStorageEnvironment, resolveClaudeDataRoot } from './context.mjs';
 
 /**
  * Normalize a raw Claude Hook payload into a host-neutral identity.
- * Returns { ok: false } (never throws) when the payload is malformed or a
- * session id cannot be established, so a caller can fail open/safe per its
- * own documented Hook semantics instead of binding to another session's
- * most-recent pointer.
+ * Returns { ok: false } only when the payload itself is unusable (not an
+ * object). When a session id cannot be established from the payload (a
+ * missing/malformed `session_id` and no `CLAUDE_SESSION_ID` fallback), this
+ * still returns { ok: true, degraded: true, identity } with `hostSessionId`
+ * left undefined, carrying only the project/host/data-root identity that
+ * does not depend on a session id.
+ *
+ * This degraded identity is what lets resolveActiveRun() apply its
+ * ADR-0020 fallback (the single most-recently-updated pointer for this
+ * host + project) instead of the caller treating an unidentifiable session
+ * as "no run is active" and bypassing risk/completion enforcement entirely
+ * in the common single-session case. It never binds across hosts or across
+ * genuinely distinct sessions with recorded, differing session ids.
  */
 export function normalizeClaudeHookPayload(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return { ok: false, error: 'invalid-payload' };
+  const projectRoot = typeof payload.cwd === 'string' && payload.cwd.trim() !== '' ? payload.cwd : process.cwd();
   try {
-    const identity = bootstrapClaudeRuntimeEnvironment({
-      hookPayload: payload,
-      projectRoot: typeof payload.cwd === 'string' && payload.cwd.trim() !== '' ? payload.cwd : process.cwd(),
-    });
+    const identity = bootstrapClaudeRuntimeEnvironment({ hookPayload: payload, projectRoot });
     return { ok: true, identity, payload };
   } catch {
-    return { ok: false, error: 'missing-host-identity' };
+    try {
+      bootstrapClaudeStorageEnvironment();
+      return {
+        ok: true,
+        degraded: true,
+        identity: {
+          host: 'claude',
+          hostSessionId: undefined,
+          projectRoot: path.resolve(projectRoot),
+          dataRoot: resolveClaudeDataRoot(process.env),
+        },
+        payload,
+      };
+    } catch {
+      return { ok: false, error: 'missing-host-identity' };
+    }
+  }
+}
+
+/**
+ * The degraded, session-less identity used when stdin could not be parsed
+ * as JSON at all (unparseable, empty, or truncated by the size guard) --
+ * there is no payload to read `cwd` from, so this falls back to the Hook
+ * process's own working directory, which Claude Code sets to the project
+ * root. Used only by callers whose documented fail mode requires still
+ * checking for an active run before giving up (see risk-gate.mjs).
+ */
+export function claudeCwdFallbackIdentity() {
+  try {
+    bootstrapClaudeStorageEnvironment();
+    return { host: 'claude', hostSessionId: undefined, projectRoot: process.cwd(), dataRoot: resolveClaudeDataRoot(process.env) };
+  } catch {
+    return null;
   }
 }
 

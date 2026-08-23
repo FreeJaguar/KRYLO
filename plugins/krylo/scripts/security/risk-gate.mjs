@@ -12,15 +12,37 @@
 // no KRYLO run is active for this project.
 
 import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
-import { normalizeClaudeHookPayload, emitClaudePreToolDecision, allowClaudeSilently } from '../host/claude/hook-transport.mjs';
+import {
+  normalizeClaudeHookPayload,
+  emitClaudePreToolDecision,
+  allowClaudeSilently,
+  claudeCwdFallbackIdentity,
+} from '../host/claude/hook-transport.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { classifyRiskAction, consumeMatchingApproval } from './risk-policy.mjs';
 
+/**
+ * The stdin payload could not be read or normalized at all, so the tool
+ * call itself cannot be classified. Per this module's fail-safe contract,
+ * that is not license to silently allow: still check (via the Hook
+ * process's own cwd, since there is no parsed payload to read `cwd` from)
+ * whether a KRYLO run is active, and ask a human rather than pass through
+ * silently if so.
+ */
+function failSafeOnUnreadablePayload() {
+  const identity = claudeCwdFallbackIdentity();
+  if (identity) {
+    const run = resolveActiveRun({ projectRoot: identity.projectRoot, host: identity.host, hostSessionId: identity.hostSessionId });
+    if (run.active) emitClaudePreToolDecision('ask', 'KRYLO risk gate could not read this action; review it manually.');
+  }
+  allowClaudeSilently();
+}
+
 async function main() {
   const input = await readStdinJson();
-  if (!input.ok) allowClaudeSilently();
+  if (!input.ok) failSafeOnUnreadablePayload();
   const normalized = normalizeClaudeHookPayload(input.value);
-  if (!normalized.ok) allowClaudeSilently();
+  if (!normalized.ok) failSafeOnUnreadablePayload();
   const payload = normalized.payload;
 
   const run = resolveActiveRun({

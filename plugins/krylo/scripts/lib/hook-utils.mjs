@@ -39,19 +39,29 @@ export function eventName(payload) {
 /**
  * Resolve the active KRYLO run for one already-normalized host identity.
  * Returns { active: false } unless a pointer exists, the state loads and
- * validates, the project root hash matches, host + hostSessionId are both
- * known, and no terminal state is set.
+ * validates, the project root hash and host match, and no terminal state is
+ * set.
+ *
+ * `hostSessionId` may be omitted (undefined): per ADR-0020, when the caller's
+ * session id could not be established (e.g. a malformed/missing Hook
+ * `session_id` field), resolution falls back to the single most recently
+ * updated pointer for this host + project, matching the pre-multi-host
+ * behavior and preserving single-session enforcement instead of treating an
+ * unidentifiable session as "no run is active" and bypassing the gate
+ * entirely. `readActiveRunPointer` already implements this fallback scoped
+ * to one host's own directory; it is never applied across hosts.
  */
 export function resolveActiveRun({ projectRoot, host, hostSessionId } = {}) {
   try {
     const projectRootHash = computeProjectRootHash(projectRoot ?? process.cwd());
-    if (!host || !hostSessionId) return { active: false };
+    if (!host) return { active: false };
     const pointer = readActiveRunPointer({ projectRootHash, host, hostSessionId });
     if (!pointer.ok || !pointer.value?.runId) return { active: false };
     if (pointer.value.projectRootHash && pointer.value.projectRootHash !== projectRootHash) return { active: false };
     const loaded = loadState(pointer.value.runId);
     if (!loaded.ok || loaded.value.terminalState !== null) return { active: false };
-    if (loaded.value.host.name !== host || loaded.value.host.sessionId !== hostSessionId) return { active: false };
+    if (loaded.value.host.name !== host) return { active: false };
+    if (hostSessionId && loaded.value.host.sessionId !== hostSessionId) return { active: false };
     return { active: true, state: loaded.value };
   } catch {
     return { active: false };
