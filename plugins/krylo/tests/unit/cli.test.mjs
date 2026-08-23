@@ -55,8 +55,13 @@ test('init-run.mjs with a goal containing a fake secret never persists the secre
     assert.ok(!raw.includes(secret));
 
     const state = JSON.parse(raw);
-    assert.equal(state.schemaVersion, '1.0.0');
+    assert.equal(state.schemaVersion, '1.1.0');
     assert.equal(state.phase, 'INITIALIZING');
+    assert.equal(state.host.name, 'claude');
+    assert.equal(state.host.sessionId, 'session-cli-1');
+    assert.equal(state.delegation.externalWorker, false);
+    assert.equal(state.delegation.depth, 0);
+    assert.equal('sessionId' in state, false);
 
     // printed statePath must have the home dir masked, never a raw secret
     assert.ok(!res.json.statePath.includes(secret));
@@ -81,6 +86,50 @@ test('read-state.mjs --field returns a single dotted field', () => {
     assert.equal(res.status, 0);
     assert.equal(res.json.ok, true);
     assert.equal(res.json.value, 'BUILD');
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('read-state.mjs and update-state.mjs resolve the current run via --session after pointer migration', () => {
+  const dataDir = mkTempDataDir();
+  try {
+    const initA = runCli('runtime/init-run.mjs', [
+      '--goal', 'session A run',
+      '--session', 'session-multi-a',
+      '--project-dir', dataDir,
+      '--lane', 'BUILD',
+      '--risk', 'low',
+    ], dataDir);
+    assert.equal(initA.json.ok, true);
+
+    const initB = runCli('runtime/init-run.mjs', [
+      '--goal', 'session B run',
+      '--session', 'session-multi-b',
+      '--project-dir', dataDir,
+      '--lane', 'BUILD',
+      '--risk', 'low',
+    ], dataDir);
+    assert.equal(initB.json.ok, true);
+
+    // Explicit --session must resolve to THAT session's own run, never
+    // whichever pointer happens to be most recently updated.
+    const readA = runCli('runtime/read-state.mjs', [
+      '--session', 'session-multi-a', '--project-dir', dataDir, '--field', 'runId',
+    ], dataDir);
+    assert.equal(readA.json.ok, true);
+    assert.equal(readA.json.value, initA.json.runId);
+
+    const updateA = runCli('runtime/update-state.mjs', [
+      '--session', 'session-multi-a', '--project-dir', dataDir, '--phase', 'EXECUTING',
+    ], dataDir);
+    assert.equal(updateA.json.ok, true);
+    assert.equal(updateA.json.runId, initA.json.runId);
+
+    const stateA = JSON.parse(fs.readFileSync(path.join(dataDir, 'runs', initA.json.runId, 'state.json'), 'utf8'));
+    assert.equal(stateA.phase, 'EXECUTING');
+    const stateB = JSON.parse(fs.readFileSync(path.join(dataDir, 'runs', initB.json.runId, 'state.json'), 'utf8'));
+    assert.equal(stateB.phase, 'INITIALIZING');
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
   }

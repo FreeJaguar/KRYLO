@@ -14,7 +14,12 @@ const SCRIPTS_ROOT = path.resolve(__dirname, '..', '..', 'scripts');
 function runCli(scriptRelPath, args, dataDir) {
   const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath), ...args], {
     encoding: 'utf8',
-    env: { ...process.env, KRYLO_DATA_ROOT: dataDir },
+    // Both are set deliberately: CLAUDE_PLUGIN_DATA is what the Claude host
+    // adapter bootstrap reads (and KRYLO_DATA_ROOT is then derived from it
+    // and overwritten to the SAME dataDir); KRYLO_DATA_ROOT is also set
+    // directly so an entrypoint not yet wired to the Claude adapter still
+    // resolves to this isolated temp dir instead of a real data root.
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, KRYLO_DATA_ROOT: dataDir },
   });
   return { status: res.status, json: JSON.parse(res.stdout.trim()) };
 }

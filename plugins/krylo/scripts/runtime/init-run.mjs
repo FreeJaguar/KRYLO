@@ -10,6 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { getDataRoot } from '../lib/paths.mjs';
 import { createInitialState, saveState, writeActiveRunPointer } from '../lib/state.mjs';
 import { redactText } from '../lib/redact.mjs';
+import { bootstrapClaudeRuntimeEnvironment } from '../host/claude/context.mjs';
 
 const RISK_BUDGETS = { low: 3, medium: 5, high: 7 };
 const HARD_MAX_BUDGET = 10;
@@ -71,15 +72,19 @@ function main() {
   const lane = args.lane || 'BUILD';
   const risk = args.risk || 'medium';
   const complexity = args.complexity;
-  const budget = computeBudget(risk);
   const projectDir = path.resolve(args.projectDir);
+
+  // Normalizes CLAUDE_SESSION_ID / CLAUDE_PLUGIN_DATA / CLAUDE_PLUGIN_OPTION_*
+  // into the host-neutral identity and KRYLO_* runtime env vars before any
+  // budget/state/pointer logic reads them.
+  const hostIdentity = bootstrapClaudeRuntimeEnvironment({
+    explicitSessionId: args.session,
+    projectRoot: projectDir,
+  });
+
+  const budget = computeBudget(risk);
   const git = detectGit(projectDir);
   const runId = `run-${crypto.randomBytes(6).toString('hex')}`;
-
-  // TODO(multi-host Task 5): normalize through bootstrapClaudeRuntimeEnvironment /
-  // createClaudeHostIdentity instead of this literal 'claude' identity once
-  // this entrypoint is wired to the Claude host adapter.
-  const hostIdentity = { host: 'claude', hostSessionId: args.session };
 
   const state = createInitialState({
     goalText: args.goal,
@@ -104,8 +109,8 @@ function main() {
   writeActiveRunPointer({
     runId,
     projectRootHash: state.project.rootHash,
-    host: 'claude',
-    hostSessionId: args.session,
+    host: hostIdentity.host,
+    hostSessionId: hostIdentity.hostSessionId,
   });
 
   const statePath = path.join(getDataRoot(), 'runs', runId, 'state.json');

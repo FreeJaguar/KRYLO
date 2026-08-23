@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import { loadState, readActiveRunPointer, computeProjectRootHash } from '../lib/state.mjs';
 import { deepRedact } from '../lib/redact.mjs';
+import { bootstrapClaudeStorageEnvironment, resolveClaudeSessionId } from '../host/claude/context.mjs';
 
 function parseArgs(argv) {
   const args = {};
@@ -21,12 +22,6 @@ function parseArgs(argv) {
   return args;
 }
 
-function resolveSessionId(explicit) {
-  if (typeof explicit === 'string' && explicit.trim() !== '') return explicit;
-  const env = process.env.CLAUDE_SESSION_ID;
-  return typeof env === 'string' && env.trim() !== '' ? env : undefined;
-}
-
 function getByPath(obj, dotPath) {
   return dotPath.split('.').reduce((acc, key) => (acc == null ? undefined : acc[key]), obj);
 }
@@ -34,14 +29,17 @@ function getByPath(obj, dotPath) {
 function main() {
   const args = parseArgs(process.argv.slice(2));
 
+  // The data root must be bootstrapped before any state/pointer access, even
+  // when a session id is not (yet) known: --run bypasses pointer lookup
+  // entirely, but still needs the correct KRYLO_DATA_ROOT resolved from the
+  // Claude-specific env vars.
+  bootstrapClaudeStorageEnvironment();
+
   let runId = args.run;
   if (!runId) {
     const projectRootHash = computeProjectRootHash(path.resolve(args.projectDir || process.cwd()));
-    const sessionId = resolveSessionId(args.session);
-    // TODO(multi-host Task 5): normalize through resolveClaudeSessionId
-    // instead of this literal 'claude' host once this entrypoint is wired to
-    // the Claude host adapter.
-    const pointer = readActiveRunPointer({ projectRootHash, host: 'claude', hostSessionId: sessionId });
+    const hostSessionId = resolveClaudeSessionId({ explicitSessionId: args.session }) || undefined;
+    const pointer = readActiveRunPointer({ projectRootHash, host: 'claude', hostSessionId });
     if (!pointer.ok || !pointer.value || !pointer.value.runId) {
       console.log(JSON.stringify({ ok: false, error: 'no-current-run' }));
       process.exit(1);

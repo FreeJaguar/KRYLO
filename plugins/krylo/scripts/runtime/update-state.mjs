@@ -20,18 +20,13 @@ import { fingerprintText } from '../lib/action-fingerprint.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { withFileLock } from '../lib/lock.mjs';
 import { runLockPath } from '../lib/paths.mjs';
+import { bootstrapClaudeStorageEnvironment, resolveClaudeSessionId } from '../host/claude/context.mjs';
 
 // How long an approved (but not yet consumed) risk approval remains usable.
 // Long enough for the model to retry the approved action within the same
 // working session; short enough that an approval granted for one task
 // cannot linger and silently authorize an unrelated later action.
 const APPROVAL_TTL_MS = 15 * 60 * 1000;
-
-function resolveSessionId(explicit) {
-  if (typeof explicit === 'string' && explicit.trim() !== '') return explicit;
-  const env = process.env.CLAUDE_SESSION_ID;
-  return typeof env === 'string' && env.trim() !== '' ? env : undefined;
-}
 
 function nowIso() {
   return new Date().toISOString();
@@ -340,7 +335,7 @@ function applyOp(state, op) {
     case 'request-approval': {
       if (!ENUMS.actionClass.includes(op.actionClass)) return { error: 'invalid-action-class' };
       const id = nextNumericId(state.riskApprovals, 'ra');
-      const environment = process.env.CLAUDE_PLUGIN_OPTION_SECURITY_PROFILE || null;
+      const environment = process.env.KRYLO_SECURITY_PROFILE || null;
       // Only `summary`/`target` are free text a caller could embed a secret
       // in; the rest are structural identifiers (a 64-hex project hash would
       // itself be mistaken for an opaque token and mangled by deepRedact).
@@ -473,14 +468,18 @@ function loadApplySave(runId, ops) {
 function main() {
   const { runId: explicitRunId, session, projectDir, ops } = parseArgv(process.argv.slice(2));
 
+  // The data root must be bootstrapped before any state/pointer access, even
+  // when a session id is not (yet) known: --run bypasses pointer lookup
+  // entirely, but still needs the correct KRYLO_DATA_ROOT resolved from the
+  // Claude-specific env vars (and KRYLO_SECURITY_PROFILE mapped from the
+  // current userConfig option, read by the request-approval op above).
+  bootstrapClaudeStorageEnvironment();
+
   let runId = explicitRunId;
   if (!runId) {
     const projectRootHash = computeProjectRootHash(path.resolve(projectDir || process.cwd()));
-    const sessionId = resolveSessionId(session);
-    // TODO(multi-host Task 5): normalize through resolveClaudeSessionId
-    // instead of this literal 'claude' host once this entrypoint is wired to
-    // the Claude host adapter.
-    const pointer = readActiveRunPointer({ projectRootHash, host: 'claude', hostSessionId: sessionId });
+    const hostSessionId = resolveClaudeSessionId({ explicitSessionId: session }) || undefined;
+    const pointer = readActiveRunPointer({ projectRootHash, host: 'claude', hostSessionId });
     if (!pointer.ok || !pointer.value || !pointer.value.runId) {
       fail('no-current-run');
       return;
