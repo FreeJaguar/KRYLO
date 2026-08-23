@@ -6,6 +6,7 @@
 // external content. Prints nothing when no KRYLO run is active.
 
 import { readActiveRunPointerForCwd, loadState } from '../lib/state.mjs';
+import { bootstrapClaudeStorageEnvironment, resolveClaudeSessionId } from '../host/claude/context.mjs';
 
 function elapsedSeconds(fromIso, toIso) {
   const from = Date.parse(fromIso);
@@ -61,20 +62,38 @@ export function renderStatus(state, detail = 'normal', nowMs = Date.now()) {
 }
 
 async function main() {
-  // Consume stdin defensively (statusline payloads are host-defined).
+  // Consume stdin defensively: statusline payloads are Claude-defined JSON
+  // (may include session_id) but must never be trusted to be well-formed.
+  let stdinRaw = '';
   try {
     if (!process.stdin.isTTY) {
-      let sink = '';
       for await (const chunk of process.stdin) {
-        sink += chunk;
-        if (sink.length > 65536) break;
+        stdinRaw += chunk;
+        if (stdinRaw.length > 65536) break;
       }
     }
   } catch {
     // ignore
   }
 
-  const pointer = readActiveRunPointerForCwd();
+  bootstrapClaudeStorageEnvironment();
+
+  let hookPayload = null;
+  try {
+    const parsed = JSON.parse(stdinRaw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) hookPayload = parsed;
+  } catch {
+    // Absent or unparsable stdin just means no session id is available from
+    // it; the pointer lookup below falls back to the most recent Claude
+    // pointer for this project.
+  }
+  const hostSessionId = resolveClaudeSessionId({ hookPayload });
+
+  // No hostSessionId is not an error here: it falls back to the most
+  // recently updated pointer inside the `claude` host directory for this
+  // project only (readActiveRunPointer never crosses into another host's
+  // directory), matching the pre-multi-host statusline behavior.
+  const pointer = readActiveRunPointerForCwd(process.cwd(), { host: 'claude', hostSessionId });
   if (!pointer.ok || !pointer.value?.runId) process.exit(0);
   const loaded = loadState(pointer.value.runId);
   if (!loaded.ok) process.exit(0);

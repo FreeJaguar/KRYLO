@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process';
 import { getDataRoot } from '../lib/paths.mjs';
 import { readJson } from '../lib/atomic.mjs';
 import { readActiveRunPointerForCwd, loadState } from '../lib/state.mjs';
+import { bootstrapClaudeStorageEnvironment, resolveClaudeSessionId } from '../host/claude/context.mjs';
 
 async function readStdinRaw() {
   try {
@@ -29,9 +30,12 @@ async function readStdinRaw() {
   }
 }
 
-function kryloSegment() {
+function kryloSegment(hostSessionId) {
   try {
-    const pointer = readActiveRunPointerForCwd();
+    // No hostSessionId falls back to the most recently updated pointer
+    // inside the `claude` host directory for this project only (never
+    // crosses into another host's directory).
+    const pointer = readActiveRunPointerForCwd(process.cwd(), { host: 'claude', hostSessionId });
     if (!pointer.ok || !pointer.value?.runId) return '';
     const loaded = loadState(pointer.value.runId);
     if (!loaded.ok) return '';
@@ -45,6 +49,17 @@ function kryloSegment() {
 
 async function main() {
   const stdinRaw = await readStdinRaw();
+
+  bootstrapClaudeStorageEnvironment();
+
+  let hookPayload = null;
+  try {
+    const parsed = JSON.parse(stdinRaw);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) hookPayload = parsed;
+  } catch {
+    // Absent or unparsable stdin just means no session id is available.
+  }
+  const hostSessionId = resolveClaudeSessionId({ hookPayload });
 
   let originalOut = '';
   try {
@@ -64,7 +79,7 @@ async function main() {
     originalOut = '';
   }
 
-  const segment = kryloSegment();
+  const segment = kryloSegment(hostSessionId);
   const parts = [originalOut, segment].filter((p) => p !== '');
   process.stdout.write(parts.join(' | '));
   process.exit(0);

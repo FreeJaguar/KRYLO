@@ -91,6 +91,69 @@ export function createActiveRun(dataDir, { projectDir = dataDir, goal = 'hook fi
   };
 }
 
+/**
+ * Claude-only variants of runCli()/runHook()/createActiveRun() for the
+ * multi-host-foundation regression requirement (docs/process/
+ * MULTI_HOST_FOUNDATION_IMPLEMENTATION_PLAN.md, Task 8, Step 1): set ONLY
+ * CLAUDE_PLUGIN_DATA (never KRYLO_DATA_ROOT, explicitly deleted even if
+ * inherited from the outer shell) so every write/read genuinely exercises
+ * the Claude host adapter's own CLAUDE_PLUGIN_DATA -> KRYLO_DATA_ROOT
+ * bootstrap instead of a directly-set host-neutral override.
+ */
+function claudeOnlyEnv(dataDir, extra = {}) {
+  const env = { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, ...extra };
+  delete env.KRYLO_DATA_ROOT;
+  return env;
+}
+
+export function runCliClaudeOnly(scriptRelPath, args, dataDir) {
+  const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath), ...args], {
+    encoding: 'utf8',
+    cwd: dataDir,
+    env: claudeOnlyEnv(dataDir),
+  });
+  let json;
+  try {
+    json = JSON.parse(res.stdout.trim());
+  } catch {
+    json = null;
+  }
+  return { status: res.status, stdout: res.stdout, stderr: res.stderr, json };
+}
+
+export function runHookClaudeOnly(scriptRelPath, payload, dataDir, { rawInput, env } = {}) {
+  const input = rawInput !== undefined ? rawInput : JSON.stringify(payload);
+  const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath)], {
+    encoding: 'utf8',
+    input,
+    env: claudeOnlyEnv(dataDir, { CLAUDE_SESSION_ID: 'hook-session', ...env }),
+  });
+  let json = null;
+  try {
+    json = JSON.parse(res.stdout.trim());
+  } catch {
+    json = null;
+  }
+  return { status: res.status, stdout: res.stdout, stderr: res.stderr, json };
+}
+
+export function createActiveRunClaudeOnly(dataDir, { projectDir = dataDir, goal = 'hook fixture run', lane = 'PATCH', risk = 'low' } = {}) {
+  const res = runCliClaudeOnly('runtime/init-run.mjs', [
+    '--goal', goal,
+    '--session', 'hook-session',
+    '--project-dir', projectDir,
+    '--lane', lane,
+    '--risk', risk,
+  ], dataDir);
+  if (res.status !== 0 || !res.json?.ok) {
+    throw new Error(`fixture init-run (Claude-only env) failed: ${res.stdout} ${res.stderr}`);
+  }
+  return {
+    runId: res.json.runId,
+    statePath: path.join(dataDir, 'runs', res.json.runId, 'state.json'),
+  };
+}
+
 /** Read, patch, and write a run's state.json directly (fixture surgery). */
 export function patchState(statePath, mutator) {
   const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));

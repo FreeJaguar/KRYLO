@@ -17,6 +17,7 @@ import { getDataRoot, ensureDir } from '../lib/paths.mjs';
 import { readJson } from '../lib/atomic.mjs';
 import { readActiveRunPointerForCwd, loadState } from '../lib/state.mjs';
 import { redactText } from '../lib/redact.mjs';
+import { bootstrapClaudeStorageEnvironment } from '../host/claude/context.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(HERE, '..', '..');
@@ -133,7 +134,11 @@ function checkStorage(problems) {
     report.runCount = fs.existsSync(runsDir) ? fs.readdirSync(runsDir).length : 0;
     const telemetryDir = path.join(dataRoot, 'telemetry');
     report.telemetryFiles = fs.existsSync(telemetryDir) ? fs.readdirSync(telemetryDir).length : 0;
-    const pointer = readActiveRunPointerForCwd();
+    // Doctor is a sessionless storage probe: it has no session identity to
+    // offer, so this falls back to the most recently updated pointer inside
+    // the `claude` host directory for this project only (never crosses into
+    // another host's directory) -- informational only, never written to.
+    const pointer = readActiveRunPointerForCwd(process.cwd(), { host: 'claude' });
     if (pointer.ok && pointer.value?.runId) {
       report.pointerValid = loadState(pointer.value.runId).ok;
     }
@@ -183,6 +188,11 @@ function checkCatalog() {
   }
 }
 
+// Deliberately Claude-specific (docs/process/MULTI_HOST_FOUNDATION_IMPLEMENTATION_PLAN.md,
+// Task 8): doctor.mjs is a Claude-facing diagnostic surface in this phase and
+// may report the raw CLAUDE_PLUGIN_OPTION_* keys the Claude host exposes,
+// even though Shared Core storage access below is bootstrapped to the
+// host-neutral KRYLO_DATA_ROOT.
 function userConfigReport() {
   const nonSensitive = [
     'LANGUAGE',
@@ -203,6 +213,12 @@ function userConfigReport() {
 }
 
 function main() {
+  // doctor.mjs is a sessionless storage utility: it bootstraps the Claude
+  // data root (CLAUDE_PLUGIN_DATA -> KRYLO_DATA_ROOT) without requiring a
+  // session identity, so checkStorage() below reads/probes the same
+  // host-neutral KRYLO_DATA_ROOT every other KRYLO entrypoint uses.
+  bootstrapClaudeStorageEnvironment();
+
   const problems = [];
   const pluginManifest = readJson(path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'));
 
