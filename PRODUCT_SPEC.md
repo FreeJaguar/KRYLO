@@ -2,7 +2,7 @@
 
 ## Product summary
 
-KRYLO is a Claude Code plugin that turns one high-level task into a controlled software-development run. It analyzes the repository, derives acceptance criteria, selects a risk level and workflow lane, delegates bounded work to specialized agents, verifies the result, performs independent review, and produces an evidence-backed completion report.
+KRYLO is an evidence-driven software-development orchestration product with Claude Code and Codex as approved first-class hosts. The 0.1.x shipped surface is the Claude Code plugin; KRYLO 0.2 adds the Codex host through the approved multi-host roadmap (`docs/adr/0023-multi-host-product-and-shared-core.md`). On each host, KRYLO turns one high-level task into a controlled software-development run: it analyzes the repository, derives acceptance criteria, selects a risk level and workflow lane, delegates bounded work to specialized agents, verifies the result, performs independent review, and produces an evidence-backed completion report.
 
 ## Primary user
 
@@ -14,6 +14,8 @@ A developer, founder, product owner, or technical operator who wants Claude Code
 
 ## Primary command
 
+On the Claude host, the shipped public command is:
+
 ```text
 /krylo:run <task>
 ```
@@ -23,6 +25,8 @@ Optional local convenience alias:
 ```text
 /krylo <task>
 ```
+
+Codex receives its own explicit host invocation defined by a later approved plan; it is not implemented in the multi-host Foundation.
 
 ## Product goals
 
@@ -62,6 +66,13 @@ KRYLO v0.1.0 will not:
 - The Orbit loop is bounded and stops on stagnation or iteration limit.
 - The plugin operates with no optional third-party integration installed.
 - Tests pass on Windows and Linux, with macOS compatibility covered by portable path and process behavior.
+
+## Goals for 0.2 (multi-host Foundation)
+
+- Generalize Shared Core so it does not depend on Claude-only session, option, model, or Hook-output field names.
+- Give every run a KRYLO-owned `runId` independent of any host session identifier.
+- Preserve all v0.1.0 Claude behavior, security controls, and success criteria unchanged while the Foundation lands.
+- Prepare, but do not ship, the Codex host: native Codex installation and runtime support remain out of scope until a separate, approved Codex host plan is implemented and verified.
 
 ## User-visible terminal states
 

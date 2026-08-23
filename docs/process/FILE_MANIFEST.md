@@ -6,7 +6,7 @@ Originally the planned target manifest of the blueprint (preserved verbatim in t
 
 ```text
 .claude-plugin/marketplace.json             # implemented
-CLAUDE.md                                   # compact index, 113 lines (<=130)
+CLAUDE.md                                   # compact index, 115 lines (<=130)
 README.md                                   # implemented (public repository readme)
 CHANGELOG.md                                # implemented (0.1.0 entry)
 CONTRIBUTING.md                             # as drafted

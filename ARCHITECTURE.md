@@ -25,6 +25,21 @@ flowchart TD
 
 ## Component boundaries
 
+### Shared Core, Claude Host, and Codex Host
+
+KRYLO has one Shared Core and thin host-specific adapters (`docs/adr/0023-multi-host-product-and-shared-core.md`).
+
+Shared Core owns:
+
+- Run state, Orbit, evidence, completion, approvals, tool governance, data-egress policy, telemetry/privacy, external-adapter policy, and logical agent roles.
+- The host-neutral `HostIdentity` and `HostContext` contracts: host name, host session identifier, optional host turn identifier, and project/plugin/data roots. Every host adapter normalizes its own inputs into this shape before calling Shared Core; Shared Core never reads a host-specific environment variable or Hook payload field directly.
+- The KRYLO-owned `runId`: the persisted run identity referenced by state, delegation, evidence, and approvals. A host session identifier is metadata attached to a run, not the run identity itself.
+
+Host adapters own invocation syntax, host-specific Hook input/output translation (the Hook transport), host session metadata, host agent configuration, model mapping, packaging, and setup mechanics.
+
+- **Claude Host** (implemented and released): the public Claude Code plugin described below.
+- **Codex Host** (planned): no native Codex installation, invocation, or runtime support exists until a separate, approved Codex host plan is implemented and verified. This Foundation only generalizes Shared Core so that work does not require Core changes.
+
 ### Plugin interface
 
 Owns:
@@ -43,7 +58,7 @@ Does not own:
 - External service accounts.
 - Third-party plugin lifecycle.
 
-### Runtime core
+### Runtime core (Shared Core)
 
 Owns:
 
@@ -56,7 +71,7 @@ Owns:
 - Local telemetry aggregation.
 - Redaction and retention.
 
-Runtime state must be written under `${CLAUDE_PLUGIN_DATA}` or an equivalent persistent plugin data directory, never inside `${CLAUDE_PLUGIN_ROOT}` and never in the application repository by default.
+Runtime state must be written under a KRYLO-owned, host-provided persistent data root that the active host adapter resolves (`${CLAUDE_PLUGIN_DATA}` on the Claude Host), never inside the plugin/installation root and never in the application repository by default.
 
 ### Repository instruction boundary
 

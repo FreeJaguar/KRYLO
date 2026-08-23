@@ -23,6 +23,7 @@
 - Accidental user misconfiguration.
 - A model attempting to finish prematurely or overstate evidence.
 - A contributor introducing unsafe default behavior.
+- A host adapter that mistranslates or bypasses Shared Core policy when normalizing platform-specific metadata.
 
 ## Threats and controls
 
@@ -88,6 +89,17 @@ Controls:
 - Resolve and validate paths.
 - Restrict KRYLO writes to plugin data, temporary directories, and the active worktree.
 - Refuse writes through symlinks that escape allowed roots.
+
+### Host adapter boundary drift
+
+Threat:
+A host adapter (Claude Host today; a future Codex Host) translates platform-specific session, Hook, or model metadata into KRYLO's host-neutral contracts in a way that weakens or bypasses risk, approval, or completion policy, or a future cross-provider capability is treated as active before it is implemented and verified.
+
+Controls:
+
+- Shared Core owns risk classification, approvals, and completion policy; a host adapter may only translate metadata into host-neutral contracts, never redefine that policy.
+- Only the Claude Host is implemented and released. No native Codex host, and no cross-harness or cross-provider data flow, exists until a separate, approved host plan is implemented and verified.
+- Shared Core modules do not read host-specific environment variables or Hook payload fields directly (`docs/adr/0023-multi-host-product-and-shared-core.md`).
 
 ### Premature or false completion
 
