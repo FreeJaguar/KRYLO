@@ -88,7 +88,12 @@ test('a missing session_id with genuinely no active run still allows silently (u
   }
 });
 
-test('unparseable stdin still checks for an active run via cwd fallback and asks instead of silently allowing', () => {
+test('unparseable stdin still checks for an active run via cwd fallback and denies instead of silently allowing', () => {
+  // SECURITY BLOCKER 4 (security-hardening checkpoint): current official
+  // Claude Code documentation does not confirm permissionDecision: "ask"
+  // reliably produces a genuine blocking human prompt at the 2.1.197
+  // compatibility floor (anthropics/claude-code#39344). This fail-safe path
+  // now denies deterministically instead.
   const dataDir = mkTempDataDir('krylo-failsafe-garbage-');
   try {
     createActiveRun(dataDir, { projectDir: dataDir });
@@ -100,8 +105,8 @@ test('unparseable stdin still checks for an active run via cwd fallback and asks
     assert.equal(res.status, 0);
     let json = null;
     try { json = JSON.parse(res.stdout.trim()); } catch { json = null; }
-    assert.ok(json, 'expected an "ask" decision, not a silent allow, since a run is active');
-    assert.equal(json.hookSpecificOutput.permissionDecision, 'ask');
+    assert.ok(json, 'expected a "deny" decision, not a silent allow, since a run is active');
+    assert.equal(json.hookSpecificOutput.permissionDecision, 'deny');
   } finally {
     cleanup(dataDir);
   }

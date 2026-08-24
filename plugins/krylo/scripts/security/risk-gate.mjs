@@ -8,8 +8,19 @@
 // into Claude's PreToolUse Hook output shape. It holds no policy logic of
 // its own.
 //
-// Fail mode: fail SAFE (ask) while a run is active; silent pass-through when
-// no KRYLO run is active for this project.
+// Fail mode: fail SAFE (deny) while a run is active; silent pass-through
+// when no KRYLO run is active for this project.
+//
+// This uses `deny`, not `ask`, for every failure path. Current official
+// Claude Code Hook documentation does not confirm that a PreToolUse
+// `permissionDecision: "ask"` reliably produces a genuine, blocking human
+// prompt in every session mode (a documented issue, anthropics/claude-code
+// #39344, shows `ask` can silently defer to other permission config on
+// versions at or before this project's pinned 2.1.197 compatibility floor;
+// see docs/adr for the security-hardening checkpoint this was found in).
+// `deny` has no such ambiguity: it deterministically blocks the tool call
+// through the same documented decision model KRYLO already uses for a
+// normal policy denial.
 
 import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
 import {
@@ -26,14 +37,14 @@ import { classifyRiskAction, consumeMatchingApproval } from './risk-policy.mjs';
  * call itself cannot be classified. Per this module's fail-safe contract,
  * that is not license to silently allow: still check (via the Hook
  * process's own cwd, since there is no parsed payload to read `cwd` from)
- * whether a KRYLO run is active, and ask a human rather than pass through
- * silently if so.
+ * whether a KRYLO run is active, and deny rather than pass through silently
+ * if so.
  */
 function failSafeOnUnreadablePayload() {
   const identity = claudeCwdFallbackIdentity();
   if (identity) {
     const run = resolveActiveRun({ projectRoot: identity.projectRoot, host: identity.host, hostSessionId: identity.hostSessionId });
-    if (run.active) emitClaudePreToolDecision('ask', 'KRYLO risk gate could not read this action; review it manually.');
+    if (run.active) emitClaudePreToolDecision('deny', 'KRYLO risk gate could not read this action and denied it as a fail-safe. Re-run with a well-formed request.');
   }
   allowClaudeSilently();
 }
@@ -93,8 +104,8 @@ async function main() {
 
     allowClaudeSilently();
   } catch {
-    // Fail safe while a run is active: require the user to look at it.
-    emitClaudePreToolDecision('ask', 'KRYLO risk gate could not evaluate this action.');
+    // Fail safe while a run is active: deny, don't silently pass through.
+    emitClaudePreToolDecision('deny', 'KRYLO risk gate could not evaluate this action and denied it as a fail-safe.');
   }
 }
 

@@ -169,9 +169,9 @@ function isApprovalUsable(approval, { className, projectRootHash, runId, environ
  *   { action: 'require-approval', category: '<actionClass>', actionClass: '<actionClass>', reason: '...' }
  *
  * Never throws for a well-formed input; never calls process.exit or writes
- * to stdout. A caller must catch and fail toward its own safe default (e.g.
- * "ask") for a malformed input (missing/invalid dataRoot, unreadable policy
- * file, etc).
+ * to stdout. A caller must catch and fail toward its own safe default (a
+ * deterministic deny, not an unconfirmed-safe "ask") for a malformed input
+ * (missing/invalid dataRoot, unreadable policy file, etc).
  */
 export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot } = {}) {
   const name = String(toolName ?? '');

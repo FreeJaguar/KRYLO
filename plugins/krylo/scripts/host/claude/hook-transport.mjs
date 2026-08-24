@@ -45,7 +45,7 @@ export function normalizeClaudeHookPayload(payload) {
     // but-otherwise-valid payload for session A get evaluated against
     // session B's run and spend session B's approvals. In that case, fail
     // the same way an invalid payload does and let the caller's own
-    // fail-safe path (e.g. risk-gate.mjs's cwd-fallback "ask") decide.
+    // fail-safe path (e.g. risk-gate.mjs's cwd-fallback deny) decide.
     if (resolveClaudeSessionId({ hookPayload: payload }) !== null) {
       return { ok: false, error: 'invalid-host-identity' };
     }
