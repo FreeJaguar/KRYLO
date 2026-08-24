@@ -814,10 +814,22 @@ function migrateLegacyGlobalPointer(projectRootHash, hostSessionId) {
 }
 
 /**
- * Resolve the active run pointer for a project + host, preferring the exact
- * host-session pointer when a hostSessionId is known. Falls back to the most
- * recently updated pointer inside that host's directory only (never another
- * host's), then to one-time lazy migration of a pre-existing Claude pointer.
+ * Resolve the active run pointer for a project + host.
+ *
+ * When `hostSessionId` is explicitly known, ONLY that exact session's own
+ * pointer (or its own legacy-migrated equivalent) is ever resolved. If it is
+ * missing or corrupt, this returns not-found -- it never falls back to a
+ * sibling session's pointer just because the requested one is unavailable.
+ * An explicitly named session must never silently read or mutate a
+ * different active session's run (see ADR-0020 and the multi-host Foundation
+ * security-hardening checkpoint that tightened this).
+ *
+ * When `hostSessionId` is unknown (falsy/undefined), resolution falls back
+ * to the single most recently updated pointer inside that host's directory
+ * only (never another host's) -- ADR-0020's documented convenience default
+ * for callers that genuinely do not know a session identity -- then to
+ * one-time lazy migration of a pre-existing Claude pointer.
+ *
  * `host` is required: a caller with no known host must not silently assume
  * Claude.
  */
@@ -827,6 +839,19 @@ export function readActiveRunPointer({ projectRootHash, host, hostSessionId } = 
   if (hostSessionId) {
     const direct = readJson(activeRunPointerPath(projectRootHash, host, hostSessionId));
     if (direct.ok) return direct;
+
+    if (host === 'claude') {
+      const migratedFlat = migrateLegacyFlatPointer(projectRootHash, hostSessionId);
+      if (migratedFlat) return { ok: true, value: migratedFlat };
+
+      const migratedGlobal = migrateLegacyGlobalPointer(projectRootHash, hostSessionId);
+      if (migratedGlobal && migratedGlobal.hostSessionId === hostSessionId) return { ok: true, value: migratedGlobal };
+    }
+
+    // The exact session was named but has no pointer of its own (missing or
+    // corrupt): fail safely. Do NOT fall through to another session's
+    // pointer below.
+    return { ok: false, error: 'not-found' };
   }
 
   const pointers = listHostPointers(projectRootHash, host);
