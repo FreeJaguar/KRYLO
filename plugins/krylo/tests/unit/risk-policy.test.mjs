@@ -76,17 +76,19 @@ test('shared risk policy denies a protected secret path for Read, Glob, and Grep
   // absent from the risk-gate matcher and from classifyRiskAction()'s
   // tool-name branches: a model denied on `cat .env` via Bash could simply
   // switch to Read(".env") and read the identical content ungated.
-  for (const toolName of ['Read', 'Glob', 'Grep']) {
-    const result = classifyRiskAction({
-      toolName,
-      toolInput: { file_path: '.env' },
-      cwd: process.cwd(),
-      dataRoot: tempDataRoot(),
-    });
-    assert.equal(result.action, 'deny', `expected deny for ${toolName}(.env)`);
-    assert.equal(result.category, 'sensitive-path');
-  }
-  // Grep/Glob commonly carry `path` rather than `file_path`.
+  const readDeny = classifyRiskAction({
+    toolName: 'Read',
+    toolInput: { file_path: '.env' },
+    cwd: process.cwd(),
+    dataRoot: tempDataRoot(),
+  });
+  assert.equal(readDeny.action, 'deny');
+  assert.equal(readDeny.category, 'sensitive-path');
+
+  // Grep's real schema carries `path` and, separately, `glob` -- a second
+  // independent review round found the first fix checked only `path`,
+  // leaving `glob` (which Grep(pattern, glob, output_mode: 'content') can
+  // use to return an arbitrary file's *content*) completely unchecked.
   const grepByPath = classifyRiskAction({
     toolName: 'Grep',
     toolInput: { path: '.env', pattern: 'SECRET' },
@@ -95,18 +97,56 @@ test('shared risk policy denies a protected secret path for Read, Glob, and Grep
   });
   assert.equal(grepByPath.action, 'deny');
   assert.equal(grepByPath.category, 'sensitive-path');
+
+  const grepByGlob = classifyRiskAction({
+    toolName: 'Grep',
+    toolInput: { pattern: '.', glob: '**/.env', output_mode: 'content' },
+    cwd: process.cwd(),
+    dataRoot: tempDataRoot(),
+  });
+  assert.equal(grepByGlob.action, 'deny', 'Grep(glob: **/.env) must be denied, not just Grep(path: .env)');
+  assert.equal(grepByGlob.category, 'sensitive-path');
+
+  // Glob has no `file_path` field at all -- its real path-shaped field is
+  // `pattern` itself (the second bypass reproduced by the same review).
+  const globByPattern = classifyRiskAction({
+    toolName: 'Glob',
+    toolInput: { pattern: '**/.env' },
+    cwd: process.cwd(),
+    dataRoot: tempDataRoot(),
+  });
+  assert.equal(globByPattern.action, 'deny', 'Glob(pattern: **/.env) must be denied');
+  assert.equal(globByPattern.category, 'sensitive-path');
 });
 
 test('shared risk policy passes a benign Read/Glob/Grep target', () => {
-  for (const toolName of ['Read', 'Glob', 'Grep']) {
-    const result = classifyRiskAction({
-      toolName,
-      toolInput: { file_path: 'src/app.js', path: 'src/app.js' },
-      cwd: process.cwd(),
-      dataRoot: tempDataRoot(),
-    });
-    assert.equal(result.action, 'pass', `expected pass for benign ${toolName}`);
-  }
+  const benignRead = classifyRiskAction({
+    toolName: 'Read',
+    toolInput: { file_path: 'src/app.js' },
+    cwd: process.cwd(),
+    dataRoot: tempDataRoot(),
+  });
+  assert.equal(benignRead.action, 'pass');
+
+  // A Grep search PATTERN (the content regex, not a path) must never be
+  // matched against sensitive-path patterns -- only `path`/`glob` are
+  // path-shaped for Grep. Searching *for* the text ".env" across ordinary
+  // source files is not the same as reading a secret file.
+  const benignGrep = classifyRiskAction({
+    toolName: 'Grep',
+    toolInput: { pattern: '.env', glob: '**/*.js' },
+    cwd: process.cwd(),
+    dataRoot: tempDataRoot(),
+  });
+  assert.equal(benignGrep.action, 'pass', 'Grep pattern text must not itself be treated as a path');
+
+  const benignGlob = classifyRiskAction({
+    toolName: 'Glob',
+    toolInput: { pattern: '**/*.js' },
+    cwd: process.cwd(),
+    dataRoot: tempDataRoot(),
+  });
+  assert.equal(benignGlob.action, 'pass');
 });
 
 test('shared risk policy denies a Bash command that reads a protected secret path', () => {

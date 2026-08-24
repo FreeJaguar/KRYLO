@@ -6,6 +6,14 @@ The project follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- **Native permission approval replaces KRYLO-APPROVE (ADR-0024, superseded; ADR-0025).** Human approval authority for a `require-approval` classification now belongs to Claude Code's own native permission UI (`permissionDecision: "ask"`), not to any KRYLO-local chat-phrase or approval record a prompt-injected model could forge. Scoped narrowly, per official CHANGELOG confirmation, to the Bash tool's `git-push`/`git-force` classes, and only when the session's `permission_mode` is in a live-verified allowlist (`auto`, `manual`, `default`); every other tool, class, or permission mode keeps the prior deterministic `deny`. `scripts/security/human-approval-gate.mjs` and `risk-policy.mjs`'s `consumeMatchingApproval()`/`isApprovalUsable()` are deleted: a KRYLO-local approval record can no longer independently authorize execution, for any tool.
+- **PowerShell risk parity (ADR-0026).** Bash and PowerShell tool calls are classified identically by the shared risk policy; PowerShell's own destructive-delete aliases and parameter abbreviations are recognized.
+- **Sensitive-path protection (`.env`, private keys, credential stores) now also covers Read/Glob/Grep**, not just Bash/Write/Edit/NotebookEdit, checking every path-shaped field each tool actually carries (Grep's `path`/`glob`; Glob's `path`/`pattern`; a content-search `pattern` is never treated as a path).
+- The pinned Claude Code compatibility floor is raised to `2.1.223` (`docs/adr/0022-claude-code-compatibility-policy.md`): 2.1.211 confirms the core hook-`ask` fix this design relies on; 2.1.223 additionally closes a Bash permission-check bypass relevant to a human seeing the real command before approving it. Because the npm registry has not published past `2.1.197`, CI now installs this floor from a checksum-verified GitHub release binary instead of `npm install -g`.
+- `withFileLock` now retries `EPERM`/`EACCES`/`EBUSY` in addition to `EEXIST` (a real Windows delete-pending lock race found during this checkpoint).
+
 ### Added
 
 - Re-audited the `mattpocock-skills` adapter at the upstream repository's current commit (`2ab958093e83e0ec752e6c1c5932da465bf23e0c`, was `ed37663cc5fbef691ddfecd080dff42f7e7e350d`): every Skill in `skills/engineering/`, `skills/productivity/`, and `skills/misc/` was individually re-inspected (not just carried over from folder names), adding `grilling` as a seventh optional advisory discipline (Architect/Product Strategist mapping) and explicitly documenting the 13 user-invoked-only Skills, the two Skills excluded despite being model-invokable (`prototype`, `resolving-merge-conflicts`), and the two Hook/config-mutating Skills (`git-guardrails-claude-code`, `setup-pre-commit`) that only KRYLO's own policy — not Claude Code's frontmatter gate — keeps out. See `docs/external-adapter-audit-2026-07-27.md` ("Re-review — 2026-07-30") and `plugins/krylo/adapters/mattpocock-skills.md`.

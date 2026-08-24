@@ -92,6 +92,28 @@ test('risk-gate: git push/force-push commands trigger a native ask prompt on Bas
   }
 });
 
+test('risk-gate: permission_mode "default" -- an undocumented sixth CLI value, live-verified on the pinned 2.1.223 floor -- also triggers ask, not deny', () => {
+  // A second independent review round found `--permission-mode default`
+  // (absent from `claude --help`'s own choices list but silently accepted
+  // by the CLI) produces `"permission_mode":"default"` in the real Hook
+  // payload, and live testing on the pinned 2.1.223 binary confirmed it
+  // honors a hook's `ask` decision identically to `auto`/`manual`
+  // (docs/adr/0025-native-permission-approval.md). Excluding it would have
+  // silently made native ask inert for whatever real sessions actually use
+  // this mode.
+  const dataDir = mkTempDataDir();
+  try {
+    createActiveRun(dataDir);
+    const res = runHook(GATE, {
+      hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push origin main' },
+      cwd: dataDir, permission_mode: 'default',
+    }, dataDir);
+    assert.equal(decision(res), 'ask');
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
 test('risk-gate: every other production/destructive/publish/release/merge/secrets class stays deny on Bash, even though it would qualify for ask if it were git-push/git-force', () => {
   const dataDir = mkTempDataDir();
   try {
@@ -253,17 +275,51 @@ test('risk-gate: sensitive file targets are denied for Write and Bash', () => {
 
     // Read/Glob/Grep must be gated too (HIGH finding, independent security
     // review): a model denied on `cat .env` via Bash must not be able to
-    // read the identical content by switching to a different tool.
-    for (const toolName of ['Read', 'Glob', 'Grep']) {
-      const res = runHook(GATE, {
-        hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: { file_path: '.env' }, cwd: projectDir,
-      }, dataDir);
-      assert.equal(decision(res), 'deny', `expected deny for ${toolName}(.env)`);
-    }
+    // read the identical content by switching to a different tool. Each
+    // tool_input below uses that tool's REAL parameter shape (a second
+    // independent review round found the first fix's test used a synthetic
+    // `file_path` payload Grep/Glob never actually send, masking a real
+    // bypass through Grep's `glob` and Glob's `pattern` fields).
+    const readDeny = runHook(GATE, {
+      hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: '.env' }, cwd: projectDir,
+    }, dataDir);
+    assert.equal(decision(readDeny), 'deny', 'expected deny for Read(.env)');
+
+    const grepPathDeny = runHook(GATE, {
+      hook_event_name: 'PreToolUse', tool_name: 'Grep', tool_input: { pattern: '.', path: '.env' }, cwd: projectDir,
+    }, dataDir);
+    assert.equal(decision(grepPathDeny), 'deny', 'expected deny for Grep(path: .env)');
+
+    // Reproduced bypass (second independent review round): Grep's `glob`
+    // field, not `path`, was the unchecked route to the same file content.
+    const grepGlobDeny = runHook(GATE, {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Grep',
+      tool_input: { pattern: '.', glob: '**/.env', output_mode: 'content' },
+      cwd: projectDir,
+    }, dataDir);
+    assert.equal(decision(grepGlobDeny), 'deny', 'expected deny for Grep(glob: **/.env, output_mode: content)');
+
+    // Reproduced bypass: Glob's real field is `pattern`, not `file_path`.
+    const globPatternDeny = runHook(GATE, {
+      hook_event_name: 'PreToolUse', tool_name: 'Glob', tool_input: { pattern: '**/.env' }, cwd: projectDir,
+    }, dataDir);
+    assert.equal(decision(globPatternDeny), 'deny', 'expected deny for Glob(pattern: **/.env)');
+
     const benignRead = runHook(GATE, {
       hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: 'src/app.js' }, cwd: projectDir,
     }, dataDir);
     assert.equal(decision(benignRead), null);
+
+    const benignGrep = runHook(GATE, {
+      hook_event_name: 'PreToolUse', tool_name: 'Grep', tool_input: { pattern: 'TODO', glob: '**/*.js' }, cwd: projectDir,
+    }, dataDir);
+    assert.equal(decision(benignGrep), null, 'a benign content search must not be denied merely for containing a search pattern');
+
+    const benignGlob = runHook(GATE, {
+      hook_event_name: 'PreToolUse', tool_name: 'Glob', tool_input: { pattern: '**/*.js' }, cwd: projectDir,
+    }, dataDir);
+    assert.equal(decision(benignGlob), null);
   } finally {
     cleanup(dataDir);
     cleanup(projectDir);

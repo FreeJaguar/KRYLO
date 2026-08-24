@@ -19,7 +19,7 @@
 //
 // `ask` is used ONLY for the Bash tool, ONLY for the `git-push`/`git-force`
 // action classes, and ONLY when the payload's `permission_mode` is in the
-// `ASK_ELIGIBLE_PERMISSION_MODES` allowlist below (`auto`, `manual`) --
+// `ASK_ELIGIBLE_PERMISSION_MODES` allowlist below (`auto`, `manual`, `default`) --
 // never merely "not `bypassPermissions`" (see that allowlist's own comment
 // for the polarity reasoning). Current official Claude Code documentation (this
 // project's own verified CHANGELOG, checked in full through the current
@@ -85,10 +85,14 @@ const NATIVE_ASK_ACTION_CLASSES = new Set(['git-push', 'git-force']);
 // (docs/adr/0025-native-permission-approval.md's verification log: `manual`
 // tested explicitly; `auto` tested explicitly and also observed as the
 // real default for a non-interactive session with no --permission-mode flag
-// at all) are eligible. Everything else -- `bypassPermissions`, `plan`,
-// `acceptEdits`, `dontAsk`, an absent field, or any future/renamed mode --
+// at all; `default` -- an undocumented sixth value accepted by the CLI
+// despite being absent from `claude --help`'s own choices list -- tested
+// explicitly on the pinned 2.1.223 floor binary and confirmed to honor
+// `ask` identically) are eligible. Everything else -- `bypassPermissions`,
+// `plan`, `acceptEdits`, `dontAsk`, an absent field, or any future/renamed
+// mode --
 // falls through to the deterministic `deny` fail-safe.
-const ASK_ELIGIBLE_PERMISSION_MODES = new Set(['auto', 'manual']);
+const ASK_ELIGIBLE_PERMISSION_MODES = new Set(['auto', 'manual', 'default']);
 
 /**
  * The stdin payload could not be read or normalized at all, so the tool

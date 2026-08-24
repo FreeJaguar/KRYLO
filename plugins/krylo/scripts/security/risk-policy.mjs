@@ -319,20 +319,34 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot } = {}) 
   // via the Read/Glob/Grep tools at all -- SKILL.md's risk-gate matcher did
   // not even list them, so a model blocked on `cat .env` could simply
   // switch tools and read the same file through Read() unimpeded. Same
-  // check as Write/Edit/NotebookEdit above, against whichever path-shaped
-  // field each of these tools actually carries.
+  // check as Write/Edit/NotebookEdit above, against every path-shaped field
+  // each of these tools actually carries -- a second independent review
+  // round found the first fix checked only `file_path`/`path`, which is
+  // Read's real shape but not Grep's or Glob's: Grep's real schema is
+  // `{pattern, path?, glob?, output_mode, ...}` (`pattern` is the content
+  // regex being searched FOR, not a path, and must not be checked here --
+  // only `path`/`glob` are path-shaped) and Glob's is `{pattern, path?}`
+  // (Glob's `pattern` IS a file-glob, so it is path-shaped there). Before
+  // this fix, `Grep(pattern: '.', glob: '**/.env', output_mode: 'content')`
+  // (returning file *contents*) and `Glob(pattern: '**/.env')` (disclosing
+  // secret-file locations) both bypassed this check entirely -- reproduced
+  // end to end by two independent reviewers. Every path-shaped field each
+  // tool actually carries is checked now, so a secret path cannot be
+  // reached through any of them.
   if (name === 'Read' || name === 'Glob' || name === 'Grep') {
-    const target = typeof input.file_path === 'string'
-      ? input.file_path
-      : typeof input.path === 'string'
-        ? input.path
-        : '';
-    if (target !== '' && matchesSensitivePath(policy, target)) {
-      return {
-        action: 'deny',
-        category: 'sensitive-path',
-        reason: `${policy.sensitivePaths.reason} This read target is a protected secret path.`,
-      };
+    const candidates = name === 'Read'
+      ? [input.file_path]
+      : name === 'Glob'
+        ? [input.path, input.pattern]
+        : [input.path, input.glob]; // Grep: never input.pattern (a content regex, not a path)
+    for (const candidate of candidates) {
+      if (typeof candidate === 'string' && candidate !== '' && matchesSensitivePath(policy, candidate)) {
+        return {
+          action: 'deny',
+          category: 'sensitive-path',
+          reason: `${policy.sensitivePaths.reason} This read target is a protected secret path.`,
+        };
+      }
     }
     return { action: 'pass', category: 'pass' };
   }
