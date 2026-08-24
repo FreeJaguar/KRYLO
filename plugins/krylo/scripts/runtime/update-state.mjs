@@ -358,15 +358,13 @@ function applyOp(state, op) {
     }
 
     case 'resolve-approval': {
-      // SECURITY BLOCKER 1 (security-hardening checkpoint): this CLI is
-      // model-accessible (any Bash call can invoke it), so it must never be
-      // able to turn its own pending request into an approved human
-      // authorization -- that would make the risk-gate's approval
-      // requirement decorative. Denial (the model backing off its own
-      // request) is harmless and remains allowed here. Approval is only
-      // ever granted by scripts/security/human-approval-gate.mjs, driven by
-      // a raw human-typed UserPromptSubmit confirmation phrase the model
-      // cannot originate or fabricate on its own (see ADR-0024).
+      // This CLI is model-accessible (any Bash call can invoke it), so it
+      // must never be able to turn its own pending request into an approved
+      // human authorization. Denial (the model backing off its own request)
+      // is harmless and remains allowed here. Nothing in the codebase grants
+      // `approved` any more (docs/adr/0025-native-permission-approval.md):
+      // for the Bash tool, authorization now happens live through Claude
+      // Code's own native permission prompt, not through this record.
       const [id, status] = String(op.value ?? '').split('=');
       if (status === 'approved') return { error: 'model-approval-forbidden' };
       if (status !== 'denied') return { error: 'invalid-approval-status' };

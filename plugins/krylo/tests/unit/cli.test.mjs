@@ -275,13 +275,12 @@ test('update-state.mjs: question grant/consume and budget refusal', () => {
 });
 
 test('update-state.mjs: risk approval request, model-driven denial works, model-driven approval is refused', () => {
-  // SECURITY BLOCKER 1 (security-hardening checkpoint): the model-accessible
-  // CLI must not be able to turn its own pending request into an approved
-  // human authorization. Denial (a model backing off its own request) is
-  // harmless and remains allowed; approval requires the human-typed
-  // confirmation phrase captured by scripts/security/human-approval-gate.mjs
-  // (see plugins/krylo/tests/hooks/human-approval-gate.test.mjs for that
-  // full flow).
+  // The model-accessible CLI must not be able to turn its own pending
+  // request into an approved human authorization. Denial (a model backing
+  // off its own request) is harmless and remains allowed; nothing in the
+  // codebase grants `approved` any more (docs/adr/
+  // 0025-native-permission-approval.md) -- for the Bash tool, authorization
+  // now happens live through Claude Code's own native permission prompt.
   const dataDir = mkTempDataDir();
   try {
     const init = runCli('runtime/init-run.mjs', [

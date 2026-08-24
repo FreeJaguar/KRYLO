@@ -4,9 +4,8 @@
 // SubagentStart/SubagentStop/Stop hook entrypoints (posttool-telemetry.mjs,
 // question-gate.mjs, status/agent-events.mjs, orbit/fingerprint.mjs,
 // orbit/stop-gate.mjs) still called saveState() with NO lock of their own --
-// only update-state.mjs, risk-policy.mjs's consumeMatchingApproval, and the
-// new human-approval-gate.mjs wrapped their load-mutate-save sequence in the
-// run's exclusive lock. Two of these unlocked hooks (or one of them racing a
+// only update-state.mjs wrapped its load-mutate-save sequence in the run's
+// exclusive lock. Two of these unlocked hooks (or one of them racing a
 // locked mutator) firing concurrently against the same run could still lose
 // an update: classic read-mutate-write race, independent of the migration
 // question this task originally asked about.

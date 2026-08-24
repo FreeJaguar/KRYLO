@@ -627,13 +627,15 @@ export function completionEval(state) {
 export const APPROVAL_TTL_MS = 15 * 60 * 1000;
 
 /**
- * Transition one risk approval's status in place. Shared by the two ONLY
- * legitimate callers: update-state.mjs's CLI `resolve-approval` op (denied
- * only -- see SECURITY BLOCKER 1) and
- * scripts/security/human-approval-gate.mjs (approved or denied, driven only
- * by a raw human-typed UserPromptSubmit confirmation phrase). Both call
- * this under the same run lock used everywhere else state is mutated.
- * Pure: does not load, save, or lock anything itself.
+ * Transition one risk approval's status in place. The only legitimate
+ * caller is update-state.mjs's CLI `resolve-approval` op, and only for
+ * `denied` -- `approved` is unconditionally refused there (a model backing
+ * off its own request is harmless; a model granting its own request is not).
+ * Nothing in the codebase sets `approved` any more (docs/adr/
+ * 0025-native-permission-approval.md): a KRYLO-local approval record can no
+ * longer, on its own, authorize execution for any tool. Called under the
+ * same run lock used everywhere else state is mutated. Pure: does not load,
+ * save, or lock anything itself.
  */
 export function applyApprovalResolution(state, id, status) {
   if (!['approved', 'denied'].includes(status)) return { error: 'invalid-approval-status' };

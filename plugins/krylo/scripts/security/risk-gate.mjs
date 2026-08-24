@@ -106,18 +106,24 @@ async function main() {
       // KRYLO-local approval record is looked up or consumed here, so a
       // persisted riskApprovals entry (however it got there) can never by
       // itself let this action through, for any tool.
+      //
+      // Structured as if/else (not two sequential ifs) so the Bash path
+      // never reaches the deny branch even in principle -- it must not
+      // depend on emitClaudePreToolDecision()'s process.exit(0) as the only
+      // thing preventing a double decision.
       if (toolName === 'Bash') {
         recordEvent(state.runId, { event: 'risk-gate', category: decision.actionClass, status: 'ask' });
         emitClaudePreToolDecision(
           'ask',
           `${decision.reason} Claude Code will ask you to allow or deny this specific action.`,
         );
+      } else {
+        recordEvent(state.runId, { event: 'risk-gate', category: decision.actionClass, status: 'denied' });
+        emitClaudePreToolDecision(
+          'deny',
+          `${decision.reason} This action class does not yet use the native approval prompt for this tool. If a human should review and unblock it, record it with update-state.mjs --request-approval ${decision.actionClass} --summary "<safe summary>" and stop at RISK_APPROVAL_REQUIRED.`,
+        );
       }
-      recordEvent(state.runId, { event: 'risk-gate', category: decision.actionClass, status: 'denied' });
-      emitClaudePreToolDecision(
-        'deny',
-        `${decision.reason} This action class does not yet use the native approval prompt for this tool. If a human should review and unblock it, record it with update-state.mjs --request-approval ${decision.actionClass} --summary "<safe summary>" and stop at RISK_APPROVAL_REQUIRED.`,
-      );
     }
 
     allowClaudeSilently();
