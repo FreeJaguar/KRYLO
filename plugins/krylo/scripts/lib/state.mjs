@@ -676,12 +676,25 @@ function preserveCorruptState(statePath, failure) {
  * preserved as state.corrupt-<epoch>.json beside the original and reported
  * via a recovery indicator instead of being trusted.
  *
- * Version-aware: a real prior-schema document is migrated in memory first,
- * validated against the CURRENT validator, backed up (the original bytes,
- * untouched, alongside the run) and only then atomically persisted. A
+ * Version-aware: a real prior-schema document is migrated to the CURRENT
+ * schema IN MEMORY ONLY and validated against the current validator. A
  * schema version this build does not know how to migrate is refused
  * (a distinct, non-'corrupted' error) and the original file is left exactly
  * as it was -- never renamed away, never guessed at, never overwritten.
+ *
+ * loadState() never writes to disk. This is deliberate (security-hardening
+ * checkpoint, SECURITY BLOCKER 2): persisting a migration is a state.json
+ * mutation, and this function is called from many places that hold no lock
+ * at all (read-state.mjs, statusline/doctor/stagnation convenience readers,
+ * every Hook's initial resolveActiveRun() check). If loadState() itself
+ * wrote the migrated document, two concurrent unlocked (or differently-
+ * locked) callers could race: one persists a migrated copy computed from a
+ * stale read, after another has already locked, loaded, mutated (e.g.
+ * consumed an approval), and saved -- silently reverting that mutation.
+ * Since loadState() only ever returns an in-memory value now, the one and
+ * only place a migration is actually written to disk is saveState(), which
+ * every real mutator already calls from within the run's exclusive lock
+ * (scripts/lib/lock.mjs, runLockPath) -- see saveState() below.
  */
 export function loadState(runId) {
   const statePath = runStatePath(runId);
@@ -708,28 +721,22 @@ export function loadState(runId) {
     return preserveCorruptState(statePath, { error: 'invalid-schema', raw: JSON.stringify(migration.value), validationErrors: errors });
   }
 
-  if (migration.migrated) {
-    const backupPath = path.join(path.dirname(statePath), `state.pre-migration-${migration.fromVersion}-${Date.now()}.json`);
-    try {
-      // Copy the ORIGINAL on-disk bytes (pre-migration), not the migrated
-      // value, so the backup is a faithful record of what was actually there.
-      fs.copyFileSync(statePath, backupPath);
-    } catch (err) {
-      return { ok: false, error: 'migration-backup-failed', details: err && err.message };
-    }
-    try {
-      writeJsonAtomic(statePath, migration.value);
-    } catch (err) {
-      return { ok: false, error: 'migration-persist-failed', details: err && err.message };
-    }
-  }
-
   return { ok: true, value: migration.value };
 }
 
 /**
  * Validate then atomically persist a run state, refreshing updatedAt.
  * Never writes state that fails validation.
+ *
+ * This is the ONLY place a schema migration is ever committed to disk (see
+ * loadState() above). If the file currently on disk is at an older schema
+ * version than the state being saved, its exact original bytes are backed
+ * up first -- a one-time event, since every subsequent save sees a matching
+ * schemaVersion and skips it. This happens inside whatever lock the caller
+ * is already holding (every real mutator calls saveState() from within
+ * withFileLock(runLockPath(runId), ...)), so it is exactly as serialized as
+ * every other state mutation -- no separate or recursive lock is acquired
+ * here, and none is needed.
  */
 export function saveState(state) {
   const updated = { ...state, updatedAt: nowIso() };
@@ -738,6 +745,21 @@ export function saveState(state) {
     return { ok: false, error: 'invalid', errors };
   }
   const statePath = runStatePath(updated.runId);
+
+  try {
+    const currentRaw = fs.readFileSync(statePath, 'utf8');
+    const currentParsed = JSON.parse(currentRaw);
+    if (isString(currentParsed?.schemaVersion) && currentParsed.schemaVersion !== updated.schemaVersion) {
+      const backupPath = path.join(path.dirname(statePath), `state.pre-migration-${currentParsed.schemaVersion}-${Date.now()}.json`);
+      // Exact original on-disk bytes, not the migrated value, so the backup
+      // is a faithful record of what was actually there before this save.
+      fs.writeFileSync(backupPath, currentRaw, 'utf8');
+    }
+  } catch {
+    // No existing file (a brand-new run), or it isn't parseable -- either
+    // way there is nothing meaningful to back up before this write.
+  }
+
   writeJsonAtomic(statePath, updated);
   return { ok: true, value: updated };
 }
