@@ -1,41 +1,35 @@
 // KRYLO shared risk policy (host-neutral).
 //
-// Classifies commands, file targets, and MCP tool calls against
+// Classifies commands, file targets, and MCP tool calls (Bash and PowerShell
+// alike -- a risky action must not bypass KRYLO merely because Claude
+// invoked one shell tool instead of the other) against
 // policies/production-policy.json and policies/mcp-policy.json (the latter
 // integrated with the Tool Trust Registry in catalog/tools.json). Production,
 // destructive, publish, release, push, merge, IAM/secret, payment, external-
-// message, and other declared write classes require an explicit, scoped,
-// single-use, expiring user approval (scripts/runtime/update-state.mjs
-// --request-approval / --resolve-approval). Sensitive files (.env, keys,
-// credential stores) are protected.
+// message, and other declared write classes result in a `require-approval`
+// decision; the host adapter is responsible for routing that through its own
+// native, host-controlled human-approval surface (see risk-gate.mjs and
+// docs/adr/0025-native-permission-approval.md) -- this module never grants,
+// consumes, or otherwise authorizes an action itself. Sensitive files (.env,
+// keys, credential stores) are protected outright (denied, not merely
+// gated).
 //
 // This module is shared by every host adapter (scripts/security/risk-gate.mjs
 // for Claude Code today). It never reads a host-specific environment
 // variable or Hook payload field, never calls process.exit, and never writes
 // to stdout: every entrypoint here returns a plain decision or result object
 // for its caller to translate into that host's own output format.
-// `KRYLO_SECURITY_PROFILE` is the one host-neutral runtime variable this
-// module still reads directly (as a fallback when a caller does not pass
-// `securityProfile` explicitly), since every host adapter's bootstrap sets
-// it, not just Claude Code's.
 //
 // Decision text (the `reason` field) references ONLY the policy class and its
 // reason — never the matched command, path, or tool arguments (prompt-
-// injection and secret-leak safety). The one exception is the approval's own
-// audit trail (fingerprint + redacted target), which is never surfaced back
-// to the model as free text.
+// injection and secret-leak safety).
 
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-import { getDataRoot, runLockPath } from '../lib/paths.mjs';
-import { loadState, saveState } from '../lib/state.mjs';
-import { redactAndTruncate, deepRedact } from '../lib/redact.mjs';
-import { fingerprintText } from '../lib/action-fingerprint.mjs';
-import { withFileLock } from '../lib/lock.mjs';
+import { getDataRoot } from '../lib/paths.mjs';
 import { isMcpToolName, classifyMcpTool } from './mcp-classifier.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -57,30 +51,23 @@ export const OVERSIZED_COMMAND_REASON =
 
 export const HOOK_ENTRYPOINT_REASON =
   'This script is a KRYLO Hook entrypoint, invoked only by the host platform\'s own Hook dispatch -- it must never ' +
-  'be executed directly. In particular, a risk approval may only be granted by a genuine top-level human chat ' +
-  'message (see docs/adr/0024-host-controlled-human-approval-boundary.md), never by running the approval hook script.';
+  'be executed directly.';
 
 // Hook entrypoints (registered in skills/run/SKILL.md's frontmatter, never
 // meant to be invoked by anything other than the host's own Hook dispatch)
 // vs. the runtime CLIs the model IS meant to call directly
 // (init-run.mjs/read-state.mjs/update-state.mjs/cleanup.mjs/doctor.mjs/
-// audit-tool.mjs/validate-runtime.mjs). Security-hardening checkpoint,
-// SECURITY BLOCKER 1 follow-on: independent review found that
-// human-approval-gate.mjs's security property (only a genuine
-// UserPromptSubmit event grants an approval) is meaningless on its own,
-// because the script is an ordinary executable the model's own Bash tool
-// can invoke directly with fabricated stdin, achieving the exact same
-// state mutation without any human ever having typed anything. The same
-// applies in spirit to every other Hook entrypoint (a model could forge a
-// PostToolUse/SubagentStart/Stop payload to manipulate telemetry, agent
-// records, or Orbit bookkeeping). Denying direct invocation of these
+// audit-tool.mjs/validate-runtime.mjs). Security-hardening checkpoint:
+// independent review found that a Hook entrypoint is an ordinary executable
+// the model's own Bash/PowerShell tool can invoke directly with fabricated
+// stdin, achieving the same state mutation a real Hook dispatch would (e.g.
+// forging a PostToolUse/SubagentStart/Stop payload to manipulate telemetry,
+// agent records, or Orbit bookkeeping). Denying direct invocation of these
 // specific scripts closes the concrete, reproducible bypass; it is a
 // text-matching defense-in-depth layer with the same category of
 // limitation as touchesDataRoot() below (a sufficiently obfuscated
 // invocation -- indirection through another interpreter, string
-// concatenation, a copied/renamed file -- is not caught by design; see
-// docs/adr/0024-host-controlled-human-approval-boundary.md for the
-// residual-risk statement).
+// concatenation, a copied/renamed file -- is not caught by design).
 const HOOK_ENTRYPOINT_FILENAMES = [
   'question-gate.mjs',
   'risk-gate.mjs',
@@ -88,7 +75,6 @@ const HOOK_ENTRYPOINT_FILENAMES = [
   'fingerprint.mjs',
   'agent-events.mjs',
   'stop-gate.mjs',
-  'human-approval-gate.mjs',
 ];
 
 /**
@@ -159,7 +145,11 @@ function touchesDataRoot({ toolName, toolInput, cwd, dataRoot }) {
   const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
   const name = String(toolName ?? '');
 
-  if (name === 'Bash') {
+  // Bash and PowerShell are separate Claude Code tool names (confirmed
+  // against official Hook documentation, ADR-0022) but both carry the actual
+  // shell command in tool_input.command -- a risky command must be caught
+  // identically regardless of which shell Claude chose to invoke it through.
+  if (name === 'Bash' || name === 'PowerShell') {
     const command = String(input.command ?? '').toLowerCase();
     if (variants.some((v) => command.includes(v))) return true;
     const expanded = homeExpandedVariants(command, os.homedir());
@@ -193,14 +183,15 @@ function touchesDataRoot({ toolName, toolInput, cwd, dataRoot }) {
 }
 
 /**
- * Deny a Bash command that directly executes a KRYLO Hook entrypoint (see
- * HOOK_ENTRYPOINT_FILENAMES above). Only Bash is checked: a Hook entrypoint
- * being merely read/opened via Write/Edit's file_path is not itself a
- * dangerous execution, and touchesDataRoot() already protects the data it
- * would mutate.
+ * Deny a Bash or PowerShell command that directly executes a KRYLO Hook
+ * entrypoint (see HOOK_ENTRYPOINT_FILENAMES above). Only these two shell
+ * tools are checked: a Hook entrypoint being merely read/opened via
+ * Write/Edit's file_path is not itself a dangerous execution, and
+ * touchesDataRoot() already protects the data it would mutate.
  */
 function touchesHookEntrypoint({ toolName, toolInput }) {
-  if (String(toolName ?? '') !== 'Bash') return false;
+  const name = String(toolName ?? '');
+  if (name !== 'Bash' && name !== 'PowerShell') return false;
   const command = typeof toolInput?.command === 'string' ? toolInput.command.toLowerCase() : '';
   if (command === '') return false;
   return HOOK_ENTRYPOINT_FILENAMES.some((filename) => command.includes(filename.toLowerCase()));
@@ -245,40 +236,6 @@ function commandTouchesSensitivePath(policy, command) {
     .some((token) => matchesSensitivePath(policy, token));
 }
 
-function computeFingerprint(toolName, toolInput) {
-  // Bash uses the exact same normalization as update-state.mjs's
-  // --request-approval --target, so a pre-bound approval's fingerprint can
-  // be compared for an exact match against the command actually attempted.
-  if (toolName === 'Bash') return fingerprintText(toolInput.command ?? '');
-  const descriptor = JSON.stringify(deepRedact({ tool: toolName, input: toolInput ?? {} }));
-  return crypto.createHash('sha256').update(descriptor, 'utf8').digest('hex');
-}
-
-function computeTargetLabel(toolName, toolInput) {
-  if (toolName === 'Bash') return redactAndTruncate(String(toolInput.command ?? '').replace(/\s+/g, ' '), 300);
-  if (toolInput && typeof toolInput.file_path === 'string') return redactAndTruncate(toolInput.file_path, 300);
-  if (toolInput && typeof toolInput.notebook_path === 'string') return redactAndTruncate(toolInput.notebook_path, 300);
-  return redactAndTruncate(JSON.stringify(deepRedact(toolInput ?? {})), 300);
-}
-
-function isApprovalUsable(approval, { className, projectRootHash, runId, environment, nowMs, fingerprint }) {
-  if (approval.actionClass !== className) return false;
-  if (approval.status !== 'approved') return false;
-  // Absent binding fields mean "not bound to this dimension" (pre-0.1.1
-  // approvals, or a caller that never set one); present fields must match
-  // exactly. A mismatch on any bound dimension refuses consumption.
-  if (approval.projectRootHash && approval.projectRootHash !== projectRootHash) return false;
-  if (approval.runId && approval.runId !== runId) return false;
-  if (approval.environment && approval.environment !== environment) return false;
-  if (approval.expiresAt && Date.parse(approval.expiresAt) < nowMs) return false;
-  // A caller who requested approval with --target pre-binds the exact
-  // action: only an attempt whose own fingerprint matches may consume it. A
-  // different or modified command in the same actionClass must be refused
-  // and requires its own fresh approval.
-  if (approval.fingerprint && approval.fingerprint !== fingerprint) return false;
-  return true;
-}
-
 /**
  * Classify one tool call against KRYLO's shared risk policy. Host-neutral:
  * takes a plain { toolName, toolInput, cwd, dataRoot } input and returns one
@@ -310,7 +267,7 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot } = {}) 
   // deny outright rather than attempting to classify (never merely
   // truncate before matching, which could hide a real dangerous command
   // that happens to appear later in an otherwise-padded string).
-  if (name === 'Bash' && typeof input.command === 'string' && input.command.length > MAX_BASH_COMMAND_LENGTH) {
+  if ((name === 'Bash' || name === 'PowerShell') && typeof input.command === 'string' && input.command.length > MAX_BASH_COMMAND_LENGTH) {
     return { action: 'deny', category: 'oversized-command', reason: OVERSIZED_COMMAND_REASON };
   }
 
@@ -322,7 +279,7 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot } = {}) 
     return { action: 'deny', category: 'hook-entrypoint-protection', reason: HOOK_ENTRYPOINT_REASON };
   }
 
-  if (name === 'Bash') {
+  if (name === 'Bash' || name === 'PowerShell') {
     const command = typeof input.command === 'string' ? input.command : '';
 
     if (commandTouchesSensitivePath(policy, command)) {
@@ -366,48 +323,4 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot } = {}) 
   }
 
   return { action: 'pass', category: 'pass' };
-}
-
-/**
- * Atomically find and spend the one usable approval for this class, scoped
- * to the exact project + run + (optional) environment. State is reloaded
- * fresh under an exclusive per-run lock so two concurrent evaluations for the
- * same class can never both consume the same single-use approval.
- *
- * `securityProfile` is taken as an explicit input (falling back to the
- * host-neutral `KRYLO_SECURITY_PROFILE` runtime variable when omitted) rather
- * than always reading the environment internally, so a caller can bind an
- * approval consumption to a specific profile value without relying on
- * process-global state.
- *
- * No transport may bypass these checks: actionClass exact match, status ===
- * 'approved', projectRootHash/runId/environment binding when present, expiry,
- * exact fingerprint binding when present, exclusive per-run file lock,
- * status -> 'consumed', consumedAt timestamp, single save under the lock.
- */
-export function consumeMatchingApproval({ runId, actionClass, toolName, toolInput, projectRootHash, securityProfile } = {}) {
-  return withFileLock(runLockPath(runId), () => {
-    const reloaded = loadState(runId);
-    if (!reloaded.ok) return { consumed: false };
-    const freshState = reloaded.value;
-    const environment = securityProfile !== undefined && securityProfile !== null
-      ? securityProfile
-      : (process.env.KRYLO_SECURITY_PROFILE || null);
-    const nowMs = Date.now();
-    const fingerprint = computeFingerprint(toolName, toolInput ?? {});
-
-    const approvals = Array.isArray(freshState.riskApprovals) ? freshState.riskApprovals : [];
-    const approval = approvals.find((a) => isApprovalUsable(a, { className: actionClass, projectRootHash, runId, environment, nowMs, fingerprint }));
-    if (!approval) return { consumed: false };
-
-    approval.status = 'consumed';
-    approval.consumedAt = new Date().toISOString();
-    // Preserve a pre-bound fingerprint/target (set by --request-approval
-    // --target); an untargeted approval records what actually consumed it,
-    // for audit only — it is never used to authorize a second action.
-    approval.fingerprint = approval.fingerprint || fingerprint;
-    approval.target = approval.target || computeTargetLabel(toolName, toolInput ?? {});
-    const saved = saveState(freshState);
-    return { consumed: saved.ok, approvalId: approval.id };
-  });
 }

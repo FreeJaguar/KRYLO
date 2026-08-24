@@ -1,5 +1,5 @@
 {
-  "$comment": "KRYLO production and destructive-action policy. Consumed by scripts/security/risk-gate.mjs. Patterns are matched against Bash tool commands after whitespace normalization; matching is case-insensitive substring/regex per entry. Markdown intent: SECURITY.md, plugin references/risk-policy.md.",
+  "$comment": "KRYLO production and destructive-action policy. Consumed by scripts/security/risk-gate.mjs. Patterns are matched against Bash and PowerShell tool commands after whitespace normalization; matching is case-insensitive substring/regex per entry. Markdown intent: SECURITY.md, plugin references/risk-policy.md.",
   "approvalClasses": {
     "production-deploy": {
       "decision": "deny",
@@ -43,6 +43,7 @@
         "\\bgit\\b[^|;&\\n]*?\\bcheckout\\s+--\\s+\\.",
         "\\bgit\\b[^|;&\\n]*?\\brestore\\s+(--worktree\\s+)?\\.(?:\\s|$)",
         "\\brm\\s+(-[a-z]*[rf][a-z]*\\s+)+(/|~|\\$HOME|[a-z]:\\\\)",
+        "\\bremove-item\\b[^|;&\\n]*?-(recurse|force)\\b",
         "\\bgit\\b[^|;&\\n]*?\\bbranch\\s+-[dD]\\b",
         "\\bgit\\b[^|;&\\n]*?\\bstash\\s+(drop|clear)\\b"
       ]

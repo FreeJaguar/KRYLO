@@ -17,7 +17,7 @@ Status legend: `done` (locally verified with evidence), `static` (statically ins
 ## Environment (preflight evidence)
 
 - OS: Windows 11, x86_64. Target support: Windows, macOS, Linux (macOS not exercised by a local runner; see Known limitations).
-- Git, Node v24.17.0, npm, Claude Code CLI 2.1.197 (the pinned minimum-supported floor; see `docs/adr/0022-claude-code-compatibility-policy.md`).
+- Git, Node v24.17.0, npm, Claude Code CLI 2.1.211 (the pinned minimum-supported floor as of the native-permission-approval security-hardening checkpoint; raised from 2.1.197 — see `docs/adr/0022-claude-code-compatibility-policy.md` and `docs/adr/0025-native-permission-approval.md`).
 
 ## Current release: what changed since 0.1.0
 
@@ -59,7 +59,9 @@ No unresolved Critical, High, or valid Medium finding remains open.
 
 ## Deviations from blueprint / prior release (each covered by an ADR)
 
-- ADR-0016: no plugin `settings.json` with `subagentStatusLine` (CLI floor 2.1.197 < 2.1.207 requirement). Unchanged in 0.1.1.
+- ADR-0016: no plugin `settings.json` with `subagentStatusLine`. Originally deferred because the CLI floor (2.1.197) was below the 2.1.207 requirement; the floor is now 2.1.211 (≥ 2.1.207, see ADR-0022's amendment), so this deferral's original reason no longer holds. `subagentStatusLine` itself was not implemented in this checkpoint (out of scope) — tracked as a follow-up, not yet done.
+- ADR-0025: native, host-controlled permission approval replaces the KRYLO-APPROVE chat-phrase mechanism (ADR-0024, superseded) for the Bash tool; raised the CLI floor to 2.1.211.
+- ADR-0026: PowerShell risk-classification parity with Bash (data-root, Hook-entrypoint, sensitive-path, oversized-command, and policy-class checks); PowerShell require-approval classes keep the `deny` fail-safe pending official `ask` confirmation for that tool.
 - ADR-0017: hand-written structural state validator (zero dependencies), cross-checked against the JSON Schemas by `validate-runtime.mjs`. Unchanged.
 - ADR-0018: MCP and external-tool write protection (item 2).
 - ADR-0019: scoped, single-use, expiring risk approvals (item 3).

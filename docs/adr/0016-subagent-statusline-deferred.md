@@ -17,3 +17,7 @@ KRYLO 0.1.0 ships `scripts/status/subagent-statusline.mjs` (fully tested) but do
 - 0.1.0 validates strictly on current CLI releases.
 - Subagent status rendering is available through setup instead of automatically.
 - A follow-up release adds the settings key and removes this limitation.
+
+## Update (security-hardening checkpoint, ADR-0022 amendment)
+
+ADR-0022's pinned Claude Code compatibility floor was raised from `2.1.197` to `2.1.211` for an unrelated reason (ADR-0025, native permission approval). `2.1.211` is above this ADR's `2.1.207` requirement, so the original blocking reason no longer applies. Implementing the plugin `settings.json` `subagentStatusLine` key itself was out of scope for that checkpoint and was not done here; this is recorded as a now-unblocked, not-yet-implemented follow-up, not a completed change.

@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Superseded by ADR-0025 (native permission approval). Left unedited below as an accurate historical record of the design and the reasoning available at the time; see ADR-0025 for what changed and why.
 
 ## Context
 
@@ -51,4 +51,4 @@ None. Extends ADR-0019 (scoped/single-use/atomic approvals) with the missing hum
 
 ## Superseded by
 
-None.
+ADR-0025 (native permission approval). The KRYLO-APPROVE chat-phrase mechanism this ADR introduced is removed outright: official documentation now confirms a stronger, host-native primitive this ADR's own "Stated guarantee and residual scope" section anticipated revisiting for.

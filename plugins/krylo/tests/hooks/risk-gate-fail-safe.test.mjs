@@ -34,7 +34,7 @@ function runRiskGateRaw(input, dataDir, extraEnv = {}) {
   return { status: res.status, stdout: res.stdout, json };
 }
 
-test('a git push --force with a missing session_id is still denied while exactly one run is active (ADR-0020 fallback)', () => {
+test('a git push --force with a missing session_id is still gated while exactly one run is active (ADR-0020 fallback)', () => {
   const dataDir = mkTempDataDir('krylo-failsafe-push-');
   try {
     createActiveRun(dataDir); // registers session 'hook-session' as the sole active run
@@ -47,7 +47,11 @@ test('a git push --force with a missing session_id is still denied while exactly
     }), dataDir);
     assert.equal(res.status, 0);
     assert.ok(res.json, 'expected a PreToolUse JSON decision, not a silent allow');
-    assert.equal(res.json.hookSpecificOutput.permissionDecision, 'deny');
+    // A well-formed require-approval classification (git-force), resolved via
+    // the ADR-0020 fallback -- not a payload-read failure -- so this now
+    // routes through the native ask prompt, same as a fully-identified
+    // session would get.
+    assert.equal(res.json.hookSpecificOutput.permissionDecision, 'ask');
   } finally {
     cleanup(dataDir);
   }
@@ -89,11 +93,13 @@ test('a missing session_id with genuinely no active run still allows silently (u
 });
 
 test('unparseable stdin still checks for an active run via cwd fallback and denies instead of silently allowing', () => {
-  // SECURITY BLOCKER 4 (security-hardening checkpoint): current official
-  // Claude Code documentation does not confirm permissionDecision: "ask"
-  // reliably produces a genuine blocking human prompt at the 2.1.197
-  // compatibility floor (anthropics/claude-code#39344). This fail-safe path
-  // now denies deterministically instead.
+  // This path can never even classify the action (the payload could not be
+  // parsed at all), so it is not a `require-approval` decision with a
+  // legitimate human-review outcome the way a well-formed Bash git-push
+  // attempt is (docs/adr/0025-native-permission-approval.md) -- it is
+  // KRYLO's own inability to evaluate anything. `deny` remains the
+  // unambiguous, fail-safe response here regardless of tool or Claude Code
+  // version.
   const dataDir = mkTempDataDir('krylo-failsafe-garbage-');
   try {
     createActiveRun(dataDir, { projectDir: dataDir });
@@ -140,7 +146,9 @@ test('a missing session_id never binds to a different host\'s pointer (host is s
       tool_input: { command: 'git push --force origin main' },
       cwd: dataDir,
     }), dataDir);
-    assert.equal(res.json.hookSpecificOutput.permissionDecision, 'deny');
+    // Same reasoning as above: a normal require-approval classification via
+    // the ADR-0020 fallback now routes through the native ask prompt.
+    assert.equal(res.json.hookSpecificOutput.permissionDecision, 'ask');
   } finally {
     cleanup(dataDir);
   }

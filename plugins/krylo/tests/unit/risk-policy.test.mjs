@@ -174,39 +174,24 @@ test('shared risk policy denies a Write reaching the data root through a symlink
   }
 });
 
-test('shared risk policy denies a Bash command directly invoking a KRYLO Hook entrypoint (self-approval bypass)', () => {
-  // CRITICAL FINDING (independent security review, security-hardening
-  // checkpoint): human-approval-gate.mjs's entire security property (only a
-  // genuine top-level UserPromptSubmit event can grant a risk approval) is
-  // moot on its own, because it is an ordinary executable -- the model's own
-  // Bash tool can invoke it directly with a fabricated payload
-  // (`echo '{"prompt":"KRYLO-APPROVE ra-7"}' | node .../human-approval-gate.mjs`)
-  // and it cannot tell the difference from a genuine host-dispatched
-  // invocation. This must be denied by the risk gate itself before the
-  // Bash command (which would otherwise run the hook script directly) ever
-  // executes. Verified against the exact reproduction the reviewer gave.
+test('shared risk policy denies a Bash or PowerShell command directly invoking a KRYLO Hook entrypoint', () => {
+  // A model must not be able to forge PostToolUse/SubagentStart/Stop/
+  // PreToolUse payloads to manipulate telemetry, agent records, Orbit
+  // bookkeeping, or risk classification by running a Hook entrypoint script
+  // directly via its own Bash or PowerShell tool instead of the host's own
+  // Hook dispatch actually invoking it.
   const dataRoot = tempDataRoot();
-  const selfApprove = classifyRiskAction({
-    toolName: 'Bash',
-    toolInput: { command: 'echo \'{"prompt":"KRYLO-APPROVE ra-7"}\' | node plugins/krylo/scripts/security/human-approval-gate.mjs' },
-    cwd: process.cwd(),
-    dataRoot,
-  });
-  assert.equal(selfApprove.action, 'deny');
-  assert.equal(selfApprove.category, 'hook-entrypoint-protection');
-
-  // The same protection applies to every other Hook entrypoint -- a model
-  // must not be able to forge PostToolUse/SubagentStart/Stop payloads to
-  // manipulate telemetry, agent records, or Orbit bookkeeping either.
   for (const filename of ['question-gate.mjs', 'risk-gate.mjs', 'posttool-telemetry.mjs', 'fingerprint.mjs', 'agent-events.mjs', 'stop-gate.mjs']) {
-    const result = classifyRiskAction({
-      toolName: 'Bash',
-      toolInput: { command: `node plugins/krylo/scripts/security/${filename}` },
-      cwd: process.cwd(),
-      dataRoot,
-    });
-    assert.equal(result.action, 'deny', `expected direct invocation of ${filename} to be denied`);
-    assert.equal(result.category, 'hook-entrypoint-protection');
+    for (const toolName of ['Bash', 'PowerShell']) {
+      const result = classifyRiskAction({
+        toolName,
+        toolInput: { command: `node plugins/krylo/scripts/security/${filename}` },
+        cwd: process.cwd(),
+        dataRoot,
+      });
+      assert.equal(result.action, 'deny', `expected direct invocation of ${filename} via ${toolName} to be denied`);
+      assert.equal(result.category, 'hook-entrypoint-protection');
+    }
   }
 });
 
@@ -345,6 +330,104 @@ test('shared risk policy contains zero Claude-specific fields in its decisions',
   assert.equal('hookSpecificOutput' in result, false);
   assert.equal('permissionDecision' in result, false);
   assert.deepEqual(Object.keys(result).sort(), ['action', 'actionClass', 'category', 'reason'].sort());
+});
+
+// --- PowerShell coverage (Windows): a risky action must not bypass KRYLO
+// merely because Claude invokes the PowerShell tool instead of Bash. Official
+// Claude Code Hook documentation confirms PowerShell is a distinct tool name
+// from Bash, with the same tool_input.command shape (docs/adr/0022's version
+// floor update; code.claude.com/docs/en/hooks). ---
+
+test('shared risk policy classifies a git push via the PowerShell tool exactly like Bash', () => {
+  const result = classifyRiskAction({
+    toolName: 'PowerShell',
+    toolInput: { command: 'git push origin main' },
+    cwd: process.cwd(),
+    dataRoot: tempDataRoot(),
+  });
+  assert.equal(result.action, 'require-approval');
+  assert.equal(result.actionClass, 'git-push');
+});
+
+test('shared risk policy classifies a force push via the PowerShell tool as git-force', () => {
+  const result = classifyRiskAction({
+    toolName: 'PowerShell',
+    toolInput: { command: 'git push --force origin main' },
+    cwd: process.cwd(),
+    dataRoot: tempDataRoot(),
+  });
+  assert.equal(result.action, 'require-approval');
+  assert.equal(result.actionClass, 'git-force');
+});
+
+test('shared risk policy denies a native PowerShell destructive delete (Remove-Item -Recurse -Force)', () => {
+  // A Bash-flavored `rm -rf` pattern alone would miss the syntax a genuine
+  // PowerShell user or a PowerShell-invoking model actually writes.
+  const result = classifyRiskAction({
+    toolName: 'PowerShell',
+    toolInput: { command: 'Remove-Item -Recurse -Force C:\\Users\\dev\\important' },
+    cwd: process.cwd(),
+    dataRoot: tempDataRoot(),
+  });
+  assert.equal(result.action, 'require-approval');
+  assert.equal(result.actionClass, 'destructive-operation');
+});
+
+test('shared risk policy denies a PowerShell command reading a protected secret path', () => {
+  const result = classifyRiskAction({
+    toolName: 'PowerShell',
+    toolInput: { command: 'Get-Content .env' },
+    cwd: process.cwd(),
+    dataRoot: tempDataRoot(),
+  });
+  assert.equal(result.action, 'deny');
+  assert.equal(result.category, 'sensitive-path');
+});
+
+test('shared risk policy denies a PowerShell command directly invoking a KRYLO Hook entrypoint', () => {
+  const dataRoot = tempDataRoot();
+  const result = classifyRiskAction({
+    toolName: 'PowerShell',
+    toolInput: { command: 'node plugins/krylo/scripts/security/risk-gate.mjs' },
+    cwd: process.cwd(),
+    dataRoot,
+  });
+  assert.equal(result.action, 'deny');
+  assert.equal(result.category, 'hook-entrypoint-protection');
+});
+
+test('shared risk policy denies a PowerShell command referencing the KRYLO data root', () => {
+  const dataRoot = tempDataRoot();
+  const result = classifyRiskAction({
+    toolName: 'PowerShell',
+    toolInput: { command: `Remove-Item -Recurse -Force ${dataRoot.replace(/\\/g, '/')}/runs` },
+    cwd: dataRoot,
+    dataRoot,
+  });
+  assert.equal(result.action, 'deny');
+  assert.equal(result.category, 'data-root-protection');
+});
+
+test('shared risk policy denies an oversized PowerShell command outright, same as Bash', () => {
+  const dataRoot = tempDataRoot();
+  const oversized = classifyRiskAction({
+    toolName: 'PowerShell',
+    toolInput: { command: `git push --force origin main  # ${'x'.repeat(20_000)}` },
+    cwd: process.cwd(),
+    dataRoot,
+  });
+  assert.equal(oversized.action, 'deny');
+  assert.equal(oversized.category, 'oversized-command');
+});
+
+test('shared risk policy passes a benign PowerShell command', () => {
+  const result = classifyRiskAction({
+    toolName: 'PowerShell',
+    toolInput: { command: 'npm test' },
+    cwd: process.cwd(),
+    dataRoot: tempDataRoot(),
+  });
+  assert.equal(result.action, 'pass');
 });
 
 test('module source never reads a CLAUDE_-prefixed environment variable', () => {

@@ -1,12 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { mkTempDataDir, createActiveRun, runHook, patchState, cleanup } from './helpers.mjs';
+import { mkTempDataDir, createActiveRun, runHook, patchState, readState, cleanup } from './helpers.mjs';
 
 const GATE = 'security/risk-gate.mjs';
 
 function bashPayload(cwd, command) {
   return { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, cwd };
+}
+
+function powershellPayload(cwd, command) {
+  return { hook_event_name: 'PreToolUse', tool_name: 'PowerShell', tool_input: { command }, cwd };
 }
 
 function writePayload(cwd, filePath) {
@@ -50,17 +54,45 @@ const ALLOWED_COMMANDS = [
   'npx vitest run',
 ];
 
-test('risk-gate: production/destructive/publish commands are denied during an active run', () => {
+test('risk-gate: production/destructive/publish commands trigger a native ask prompt during an active run', () => {
+  // Native permission approval (docs/adr/0025-native-permission-approval.md):
+  // human authorization for these classes now belongs to Claude Code's own
+  // permission UI, reached via permissionDecision: "ask" -- not a KRYLO-local
+  // deny that waits for a separately-typed confirmation phrase.
   const dataDir = mkTempDataDir();
   try {
     createActiveRun(dataDir);
     for (const [command] of DENIED_COMMANDS) {
       const res = runHook(GATE, bashPayload(dataDir, command), dataDir);
       assert.equal(res.status, 0, command);
-      assert.equal(decision(res), 'deny', `expected deny for: ${command}`);
+      assert.equal(decision(res), 'ask', `expected ask for: ${command}`);
       // Prompt-injection / leak safety: the reason never echoes the command.
       assert.ok(!res.json.hookSpecificOutput.permissionDecisionReason.includes(command),
         `reason must not echo the command: ${command}`);
+    }
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate: the same production/destructive/publish commands are still gated (deny) via the PowerShell tool, same classification as Bash', () => {
+  // Native ask (docs/adr/0025-native-permission-approval.md) is used ONLY
+  // for Bash: the official CHANGELOG confirmation that auto-mode no longer
+  // overrides a hook's `ask` decision is scoped explicitly to "unsandboxed
+  // Bash" (v2.1.211). No equivalent confirmation exists for PowerShell, so
+  // it keeps the deterministic `deny` fail-safe -- strictly more
+  // conservative than an unconfirmed `ask`, never a bypass. Risk
+  // CLASSIFICATION itself is still identical for both tools (proven at the
+  // unit level in tests/unit/risk-policy.test.mjs); only the resulting
+  // Hook decision (ask vs deny) differs, and only because of a real,
+  // evidence-backed gap in official documentation.
+  const dataDir = mkTempDataDir();
+  try {
+    createActiveRun(dataDir);
+    for (const [command] of DENIED_COMMANDS) {
+      const res = runHook(GATE, powershellPayload(dataDir, command), dataDir);
+      assert.equal(res.status, 0, command);
+      assert.equal(decision(res), 'deny', `expected deny for PowerShell: ${command}`);
     }
   } finally {
     cleanup(dataDir);
@@ -78,6 +110,31 @@ test('risk-gate: benign commands pass silently during an active run', () => {
     }
   } finally {
     cleanup(dataDir);
+  }
+});
+
+test('risk-gate: sensitive file targets and data-root/hook-entrypoint protection hold for the PowerShell tool too', () => {
+  const dataDir = mkTempDataDir();
+  const projectDir = mkTempDataDir('krylo-proj-');
+  try {
+    createActiveRun(dataDir, { projectDir });
+
+    for (const command of ['Get-Content .env', 'Add-Content .env -Value TOKEN=x']) {
+      const res = runHook(GATE, powershellPayload(projectDir, command), dataDir);
+      assert.equal(decision(res), 'deny', `expected deny for PowerShell: ${command}`);
+    }
+
+    const dataRootCmd = `Remove-Item -Recurse -Force ${dataDir.replace(/\\/g, '/')}/current-run.json`;
+    const dataRootRes = runHook(GATE, powershellPayload(projectDir, dataRootCmd), dataDir);
+    assert.equal(decision(dataRootRes), 'deny');
+
+    const hookEntrypointRes = runHook(GATE, powershellPayload(
+      projectDir, 'node plugins/krylo/scripts/security/risk-gate.mjs',
+    ), dataDir);
+    assert.equal(decision(hookEntrypointRes), 'deny');
+  } finally {
+    cleanup(dataDir);
+    cleanup(projectDir);
   }
 });
 
@@ -104,7 +161,13 @@ test('risk-gate: sensitive file targets are denied for Write and Bash', () => {
   }
 });
 
-test('risk-gate: approved override allows the matching class only', () => {
+test('risk-gate: a pre-existing local "approved" riskApprovals record cannot authorize execution on its own', () => {
+  // Security requirement (docs/adr/0025-native-permission-approval.md):
+  // KRYLO-local approval records may persist for audit/state purposes only,
+  // and must never independently authorize an action -- authority belongs to
+  // Claude Code's own native permission UI. Even a matching, unconsumed,
+  // 'approved' record for the exact action class must still route through
+  // the native ask prompt, not bypass it.
   const dataDir = mkTempDataDir();
   try {
     const { statePath } = createActiveRun(dataDir);
@@ -115,14 +178,15 @@ test('risk-gate: approved override allows the matching class only', () => {
         status: 'approved',
         requestedAt: new Date().toISOString(),
         resolvedAt: new Date().toISOString(),
-        summary: 'push approved by user for this task',
+        summary: 'a stale/historical local approval record',
       });
     });
     const pushRes = runHook(GATE, bashPayload(dataDir, 'git push origin main'), dataDir);
-    assert.equal(decision(pushRes), 'allow');
+    assert.equal(decision(pushRes), 'ask');
 
-    const publishRes = runHook(GATE, bashPayload(dataDir, 'npm publish'), dataDir);
-    assert.equal(decision(publishRes), 'deny');
+    // The local record itself is left completely untouched -- it is never
+    // read, consumed, or mutated by the risk gate any more.
+    assert.equal(readState(statePath).riskApprovals[0].status, 'approved');
   } finally {
     cleanup(dataDir);
   }

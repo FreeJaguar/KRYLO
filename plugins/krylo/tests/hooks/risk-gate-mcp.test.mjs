@@ -14,6 +14,11 @@ function decision(res) {
 }
 
 test('risk-gate: unknown MCP server is denied for both a write- and a read-shaped operation', () => {
+  // Native ask (docs/adr/0025-native-permission-approval.md) is used ONLY
+  // for the Bash tool -- the official CHANGELOG confirmation is scoped
+  // explicitly to Bash, with no equivalent found for any MCP tool's
+  // permission dialog. MCP require-approval classes keep the deterministic
+  // `deny` fail-safe.
   const dataDir = mkTempDataDir();
   try {
     createActiveRun(dataDir);
@@ -43,7 +48,7 @@ test('risk-gate: MCP writes across the required categories are denied pending ap
   const dataDir = mkTempDataDir();
   try {
     createActiveRun(dataDir);
-    const denied = [
+    const gated = [
       'mcp__postgres__execute_sql',
       'mcp__supabase__update_row',
       'mcp__github__merge_pull_request',
@@ -58,7 +63,7 @@ test('risk-gate: MCP writes across the required categories are denied pending ap
       'mcp__vault__write_secret',
       'mcp__stripe__create_refund',
     ];
-    for (const toolName of denied) {
+    for (const toolName of gated) {
       const res = runHook(GATE, mcpPayload(dataDir, toolName, { x: 1 }), dataDir);
       assert.equal(decision(res), 'deny', `expected deny for ${toolName}`);
       assert.ok(!res.json.hookSpecificOutput.permissionDecisionReason.includes(toolName) || true);
@@ -68,7 +73,13 @@ test('risk-gate: MCP writes across the required categories are denied pending ap
   }
 });
 
-test('risk-gate: an approved class-level approval allows exactly one MCP write and then requires a fresh approval', () => {
+test('risk-gate: a pre-existing local "approved" record for an MCP action class cannot authorize execution on its own', () => {
+  // Same native-permission-approval invariant as the Bash case
+  // (docs/adr/0025-native-permission-approval.md): a local riskApprovals
+  // record, however it got there, must never authorize execution -- MCP
+  // tools keep the deny fail-safe (no official ask confirmation exists for
+  // them), so this proves the local record doesn't even get a chance to
+  // matter: every attempt is denied regardless of its presence.
   const dataDir = mkTempDataDir();
   try {
     const { statePath } = createActiveRun(dataDir);
@@ -86,15 +97,15 @@ test('risk-gate: an approved class-level approval allows exactly one MCP write a
         consumedAt: null,
         fingerprint: null,
         target: null,
-        summary: 'merge PR #42 after review',
+        summary: 'a stale/historical local approval record',
       });
     });
 
     const first = runHook(GATE, mcpPayload(dataDir, 'mcp__github__merge_pull_request', { pr: 42 }), dataDir);
-    assert.equal(decision(first), 'allow');
+    assert.equal(decision(first), 'deny');
 
     const second = runHook(GATE, mcpPayload(dataDir, 'mcp__github__merge_pull_request', { pr: 43 }), dataDir);
-    assert.equal(decision(second), 'deny', 'the single-use approval must not authorize a second merge');
+    assert.equal(decision(second), 'deny');
   } finally {
     cleanup(dataDir);
   }

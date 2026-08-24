@@ -12,6 +12,8 @@ On the Claude Host, the implemented Hook transport is Skill-scoped, per `docs/ad
 
 ### PreToolUse
 
+Matcher: `Bash|PowerShell|Write|Edit|NotebookEdit|mcp__.*` -- a risky action must not bypass KRYLO merely because Claude invokes PowerShell instead of Bash (both are covered identically by risk classification; see `docs/adr/0026-powershell-risk-parity.md`).
+
 Uses:
 
 - Question gate.
@@ -19,7 +21,7 @@ Uses:
 - External-write classification.
 - Sensitive-path protection.
 
-The risk gate's `permissionDecision` is `allow` for a policy-approved action and `deny` for a policy-denied action or a matched risk approval consumption. Both of its fail-safe paths (an unreadable/malformed Hook payload, or an exception while classifying the tool call) also return `deny`, not `ask`: current official Claude Code Hook documentation does not confirm that `permissionDecision: "ask"` reliably produces a genuine, blocking human prompt in every session mode at this project's pinned 2.1.197 compatibility floor (a documented issue, `anthropics/claude-code#39344`, shows `ask` can silently defer to other permission configuration on versions at or before that floor). `deny` has no such ambiguity, so KRYLO uses it for every path where the tool call could not be evaluated at all.
+The risk gate's `permissionDecision` is `allow` for a policy-passed action, `deny` for an outright policy denial (data-root protection, Hook-entrypoint protection, a protected secret path, an oversized command), and, for a `require-approval` classification (production, destructive, publish, release, push, merge, IAM/secret, payment, and other declared write classes): `ask` when the tool is Bash, or `deny` for every other tool (PowerShell, MCP). This split is not a policy gap -- risk *classification* is identical across tools -- it is because official Claude Code documentation only confirms the underlying `ask` guarantee for Bash (see `docs/adr/0025-native-permission-approval.md` and `docs/adr/0026-powershell-risk-parity.md`); a require-approval class on any other tool keeps the deterministic `deny` fail-safe, which is strictly more conservative than an unconfirmed `ask`. Both genuine fail-safe paths (an unreadable/malformed Hook payload, or an exception while classifying the tool call) also return `deny`: those are not `require-approval` decisions with a legitimate human-review outcome, they are KRYLO's own inability to classify the action at all.
 
 ### PostToolUse
 
@@ -60,16 +62,6 @@ Uses:
 - Deterministic completion gate.
 - Optional prompt-based narrative consistency check.
 - Orbit continuation.
-
-### UserPromptSubmit
-
-Implemented as a seventh Skill-scoped Hook event, `scripts/security/human-approval-gate.mjs`, registered in `skills/run/SKILL.md`'s frontmatter exactly like the other six (never in `hooks/hooks.json`). Per `docs/adr/0024-host-controlled-human-approval-boundary.md`, it is the only path that can transition a risk approval from `pending` to `approved` (or `denied`); the model-accessible CLI (`update-state.mjs --resolve-approval <id>=approved`) is unconditionally refused for that reason.
-
-Uses:
-
-- Scans the raw text of a genuine top-level prompt submission for an explicit `KRYLO-APPROVE <id>` / `KRYLO-DENY <id>` phrase (case-insensitive).
-- Ignores any payload attributed to a subagent (`agent_id` or `agent_type` present) before even inspecting the prompt text.
-- Never blocks, delays, or alters the prompt, and never prints anything visible to the model: it always exits 0 silently, whether or not a confirmation phrase matched.
 
 ## Failure modes
 

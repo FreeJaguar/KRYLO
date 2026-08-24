@@ -1,26 +1,44 @@
 #!/usr/bin/env node
-// KRYLO risk gate (PreToolUse, matcher: Bash|Write|Edit|NotebookEdit|mcp__.*).
+// KRYLO risk gate (PreToolUse, matcher: Bash|PowerShell|Write|Edit|NotebookEdit|mcp__.*).
 //
 // This is the Claude-specific adapter: it parses Claude's PreToolUse stdin
 // payload, normalizes it into a host-neutral identity, delegates the actual
-// classification and approval consumption to the shared, host-neutral
-// scripts/security/risk-policy.mjs, and translates the resulting decision
-// into Claude's PreToolUse Hook output shape. It holds no policy logic of
-// its own.
+// classification to the shared, host-neutral scripts/security/risk-policy.mjs,
+// and translates the resulting decision into Claude's PreToolUse Hook output
+// shape. It holds no policy logic of its own.
 //
 // Fail mode: fail SAFE (deny) while a run is active; silent pass-through
 // when no KRYLO run is active for this project.
 //
-// This uses `deny`, not `ask`, for every failure path. Current official
-// Claude Code Hook documentation does not confirm that a PreToolUse
-// `permissionDecision: "ask"` reliably produces a genuine, blocking human
-// prompt in every session mode (a documented issue, anthropics/claude-code
-// #39344, shows `ask` can silently defer to other permission config on
-// versions at or before this project's pinned 2.1.197 compatibility floor;
-// see docs/adr for the security-hardening checkpoint this was found in).
-// `deny` has no such ambiguity: it deterministically blocks the tool call
-// through the same documented decision model KRYLO already uses for a
-// normal policy denial.
+// Human approval boundary (docs/adr/0025-native-permission-approval.md):
+// a `require-approval` classification is translated into Claude Code's own
+// native `permissionDecision: "ask"` -- putting the actual authorization
+// decision in the host's own permission UI, not in any KRYLO-local state a
+// prompt-injected model could forge or manipulate -- replacing the prior
+// KRYLO-APPROVE chat-phrase mechanism (ADR-0024, superseded).
+//
+// `ask` is used ONLY for the Bash tool. Current official Claude Code
+// documentation (this project's own verified CHANGELOG entry for v2.1.211,
+// the version ADR-0022 raises the compatibility floor to) states precisely:
+// "Fixed auto mode overriding a PreToolUse hook's `ask` decision for
+// unsandboxed Bash -- a hook `ask` now floors the decision at a prompt."
+// That confirmation is scoped explicitly to Bash; no equivalent fix has been
+// found for PowerShell or for any MCP tool's permission dialog in the same
+// CHANGELOG (checked in full through the current released version). Per the
+// task's own instruction not to invent runtime contracts, `ask` is not used
+// for those tool types absent that confirmation: they keep the deterministic
+// `deny` fail-safe (the same choice this module made for every
+// require-approval class before this checkpoint), which is strictly more
+// conservative than an unconfirmed `ask`, never a weaker one. This is a
+// known, deliberate ergonomic gap -- documented in ADR-0025 and ADR-0026 --
+// to be revisited once official documentation confirms the same auto-mode
+// guarantee for PowerShell/MCP.
+//
+// Every failure path (unreadable payload, classification exception) also
+// still uses deterministic `deny`: those are not `require-approval`
+// decisions with a legitimate human-review outcome, they are KRYLO's own
+// inability to classify the action at all, and `deny` remains the
+// unambiguous, fail-safe response to that.
 
 import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
 import {
@@ -30,7 +48,7 @@ import {
   claudeCwdFallbackIdentity,
 } from '../host/claude/hook-transport.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
-import { classifyRiskAction, consumeMatchingApproval } from './risk-policy.mjs';
+import { classifyRiskAction } from './risk-policy.mjs';
 
 /**
  * The stdin payload could not be read or normalized at all, so the tool
@@ -83,22 +101,22 @@ async function main() {
     }
 
     if (decision.action === 'require-approval') {
-      const consumed = consumeMatchingApproval({
-        runId: state.runId,
-        actionClass: decision.actionClass,
-        toolName,
-        toolInput,
-        projectRootHash: state.project.rootHash,
-        securityProfile: process.env.KRYLO_SECURITY_PROFILE ?? null,
-      });
-      if (consumed.consumed) {
-        recordEvent(state.runId, { event: 'risk-gate', category: decision.actionClass, status: 'approved-override' });
-        emitClaudePreToolDecision('allow', `Action class ${decision.actionClass} was approved by the user (${consumed.approvalId}) and is now spent.`);
+      // Authorization now belongs entirely to Claude Code's own native
+      // permission UI (Bash only -- see the header comment for why): no
+      // KRYLO-local approval record is looked up or consumed here, so a
+      // persisted riskApprovals entry (however it got there) can never by
+      // itself let this action through, for any tool.
+      if (toolName === 'Bash') {
+        recordEvent(state.runId, { event: 'risk-gate', category: decision.actionClass, status: 'ask' });
+        emitClaudePreToolDecision(
+          'ask',
+          `${decision.reason} Claude Code will ask you to allow or deny this specific action.`,
+        );
       }
       recordEvent(state.runId, { event: 'risk-gate', category: decision.actionClass, status: 'denied' });
       emitClaudePreToolDecision(
         'deny',
-        `${decision.reason} Record it with update-state.mjs --request-approval ${decision.actionClass} --summary "<safe summary>" and stop at RISK_APPROVAL_REQUIRED.`,
+        `${decision.reason} This action class does not yet use the native approval prompt for this tool. If a human should review and unblock it, record it with update-state.mjs --request-approval ${decision.actionClass} --summary "<safe summary>" and stop at RISK_APPROVAL_REQUIRED.`,
       );
     }
 
