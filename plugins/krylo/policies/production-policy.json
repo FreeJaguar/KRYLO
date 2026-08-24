@@ -40,7 +40,7 @@
         "\\bgit\\b[^|;&\\n]*?\\bcheckout\\s+--\\s+\\.",
         "\\bgit\\b[^|;&\\n]*?\\brestore\\s+(--worktree\\s+)?\\.(?:\\s|$)",
         "\\brm\\s+(-[a-z]*[rf][a-z]*\\s+)+(/|~|\\$HOME|[a-z]:\\\\)",
-        "\\b(remove-item|ri|rd|rmdir|del|erase|rm)\\b[^|;&\\n]*?(-r\\w*|-f\\w*|/s\\b|/q\\b|/f\\b)",
+        "\\b(remove-item|ri|rd|rmdir|del|erase)\\b[^|;&\\n]*?(-r\\w*|-f\\w*|/s\\b|/q\\b|/f\\b)",
         "\\bgit\\b[^|;&\\n]*?\\bbranch\\s+-[dD]\\b",
         "\\bgit\\b[^|;&\\n]*?\\bstash\\s+(drop|clear)\\b"
       ]

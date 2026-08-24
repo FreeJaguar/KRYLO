@@ -421,7 +421,12 @@ function applyOp(state, op) {
         ITERATION_LIMIT_REACHED: 'ITERATION_LIMIT',
       };
       state.phase = phaseByTerminal[op.value] || state.phase;
-      clearActiveRunPointerForState(state);
+      // The active-run pointer is cleared in loadApplySave(), after a
+      // confirmed successful save -- not here. Clearing it before the save
+      // is even attempted would leave a run with no persisted terminal
+      // state (if the save then failed) invisible to resolveActiveRun(),
+      // silently disabling every KRYLO gate for the rest of the session
+      // while state.json still says the run is active.
       return {};
     }
 
@@ -455,7 +460,12 @@ function loadApplySave(runId, ops) {
     }
 
     const saveResult = saveState(state);
-    if (!saveResult.ok) return { ok: false, error: 'invalid-state', details: saveResult.errors };
+    if (!saveResult.ok) return { ok: false, error: saveResult.error, details: saveResult.errors ?? saveResult.details };
+
+    // Only now, after a confirmed successful save, clear the pointer for a
+    // run that just reached a terminal state (see applyOp()'s 'terminal'
+    // case for why this must not happen any earlier).
+    if (state.terminalState !== null) clearActiveRunPointerForState(state);
 
     return { ok: true, applied };
   });

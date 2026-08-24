@@ -119,6 +119,30 @@ test('risk-gate: git push/force-push in bypassPermissions mode falls back to den
   }
 });
 
+test('risk-gate: bypassPermissions still falls back to deny even when session_id is missing (degraded identity)', () => {
+  // Independent security review found that normalizeClaudeHookPayload()'s
+  // degraded (session-less) identity path omits permissionMode entirely, so
+  // checking normalized.identity.permissionMode would let a bypassPermissions
+  // session with an unresolvable session_id slip through to 'ask'. The gate
+  // must read permission_mode directly off the raw payload instead.
+  const dataDir = mkTempDataDir();
+  try {
+    createActiveRun(dataDir); // the sole active run, resolved via the ADR-0020 fallback
+    const payload = {
+      hook_event_name: 'PreToolUse',
+      tool_name: 'Bash',
+      tool_input: { command: 'git push origin main' },
+      cwd: dataDir,
+      permission_mode: 'bypassPermissions',
+      // session_id deliberately omitted
+    };
+    const res = runHook(GATE, payload, dataDir, { env: { CLAUDE_SESSION_ID: undefined } });
+    assert.equal(decision(res), 'deny');
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
 test('risk-gate: the same production/destructive/publish commands are still gated (deny) via the PowerShell tool, same classification as Bash', () => {
   // Native ask (docs/adr/0025-native-permission-approval.md) is used ONLY
   // for Bash: the official CHANGELOG confirmation that auto-mode no longer

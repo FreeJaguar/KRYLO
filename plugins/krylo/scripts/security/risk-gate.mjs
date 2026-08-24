@@ -136,9 +136,17 @@ async function main() {
       // path never reaches the deny branch even in principle -- it must not
       // depend on emitClaudePreToolDecision()'s process.exit(0) as the only
       // thing preventing a double decision.
+      // Read permission_mode directly off the raw payload, not off the
+      // normalized identity: independent review found that
+      // normalizeClaudeHookPayload()'s degraded (session-less) identity
+      // path omits permissionMode entirely, so a bypassPermissions session
+      // whose session_id happened to be unresolvable would still read
+      // undefined here and pass this check -- exactly the gap it exists to
+      // close. The raw payload always carries the field when Claude Code
+      // sets it, independent of session-id resolution.
       const eligibleForNativeAsk = toolName === 'Bash'
         && NATIVE_ASK_ACTION_CLASSES.has(decision.actionClass)
-        && normalized.identity.permissionMode !== 'bypassPermissions';
+        && payload.permission_mode !== 'bypassPermissions';
 
       if (eligibleForNativeAsk) {
         recordEvent(state.runId, { event: 'risk-gate', category: decision.actionClass, status: 'ask' });

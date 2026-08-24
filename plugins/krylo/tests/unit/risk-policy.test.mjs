@@ -378,7 +378,15 @@ test('shared risk policy catches PowerShell parameter abbreviations and built-in
   // "remove-item"/"-recurse"/"-force" spelling, which PowerShell's own
   // parameter-prefix matching and built-in command aliases trivially evade
   // (verified empirically: -Rec/-Fo/-R/-F abbreviations and the ri/rd/rmdir/
-  // del/erase/rm aliases all previously classified as a silent 'pass').
+  // del/erase aliases all previously classified as a silent 'pass'). `rm`
+  // is deliberately EXCLUDED from this alias list: a follow-up review found
+  // that including it turned ordinary Bash hygiene commands (`rm -rf
+  // node_modules`, `rm -f package-lock.json`) into unconditional denies
+  // with no in-run unlock (destructive-operation is not in the native-ask
+  // allowlist). The pre-existing, separately-anchored Bash `rm` pattern
+  // (root/home/drive-letter targets only) is unaffected and still covers
+  // genuinely dangerous `rm` usage; see the benign-command test below for
+  // the negative case this trade-off requires.
   const dataRoot = tempDataRoot();
   const commands = [
     'Remove-Item -Rec -Fo C:\\important',
@@ -388,12 +396,33 @@ test('shared risk policy catches PowerShell parameter abbreviations and built-in
     'rmdir -Recurse -Force C:\\important',
     'del /f /s /q C:\\important',
     'erase -Force C:\\important',
-    'rm -Recurse -Force .',
   ];
   for (const command of commands) {
     const result = classifyRiskAction({ toolName: 'PowerShell', toolInput: { command }, cwd: process.cwd(), dataRoot });
     assert.equal(result.action, 'require-approval', `expected require-approval for: ${command}`);
     assert.equal(result.actionClass, 'destructive-operation', `expected destructive-operation for: ${command}`);
+  }
+});
+
+test('shared risk policy still passes ordinary Bash rm/git-rm/docker-rm hygiene commands (negative case for the PowerShell alias fix)', () => {
+  // Regression found by independent review: an earlier attempt at the fix
+  // above included bare "rm" in the PowerShell alias alternation, which
+  // (since the alternation has no path/target anchor) turned routine Bash
+  // commands with no PowerShell involvement at all into unconditional
+  // destructive-operation denies -- with no native-ask unlock, a real
+  // availability regression on ordinary build/dev hygiene.
+  const dataRoot = tempDataRoot();
+  const commands = [
+    'rm -rf node_modules',
+    'rm -rf dist',
+    'rm -f package-lock.json',
+    'docker rm -f my-container',
+    'git rm -r --cached .',
+    'xargs rm -f',
+  ];
+  for (const command of commands) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'pass', `expected pass (not blocked) for: ${command}`);
   }
 });
 

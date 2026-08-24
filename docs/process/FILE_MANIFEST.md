@@ -16,7 +16,14 @@ THREAT_MODEL.md                             # as drafted
 LICENSE                                     # implemented, Apache-2.0 canonical text
 package.json / package-lock.json            # implemented (zero dependencies, node:test)
 RELEASE_READINESS.md                        # implemented (progress + evidence record)
-RELEASE_MANIFEST.json                       # implemented (per-file SHA-256 of the release tree)
+RELEASE_MANIFEST.json                       # implemented (per-file SHA-256 of the release tree).
+                                             # STALE as of the multi-host Foundation / security-hardening
+                                             # checkpoints (generated 2026-07-30): every file these
+                                             # checkpoints touched has a different hash than recorded, and
+                                             # ADR-0024/0025/0026 are not listed at all. Regenerate before
+                                             # any release build; not done as part of this checkpoint
+                                             # (release-prep scope, not one of its stated acceptance
+                                             # criteria).
 BLUEPRINT_MANIFEST.json                     # immutable blueprint record (paths updated for the
                                              # archive/ move below; content and hashes unchanged)
 archive/blueprint-v0.1.2/                   # immutable blueprint drafts (unchanged content; moved
