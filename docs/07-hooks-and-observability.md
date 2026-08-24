@@ -19,6 +19,8 @@ Uses:
 - External-write classification.
 - Sensitive-path protection.
 
+The risk gate's `permissionDecision` is `allow` for a policy-approved action and `deny` for a policy-denied action or a matched risk approval consumption. Both of its fail-safe paths (an unreadable/malformed Hook payload, or an exception while classifying the tool call) also return `deny`, not `ask`: current official Claude Code Hook documentation does not confirm that `permissionDecision: "ask"` reliably produces a genuine, blocking human prompt in every session mode at this project's pinned 2.1.197 compatibility floor (a documented issue, `anthropics/claude-code#39344`, shows `ask` can silently defer to other permission configuration on versions at or before that floor). `deny` has no such ambiguity, so KRYLO uses it for every path where the tool call could not be evaluated at all.
+
 ### PostToolUse
 
 Uses:
@@ -58,6 +60,16 @@ Uses:
 - Deterministic completion gate.
 - Optional prompt-based narrative consistency check.
 - Orbit continuation.
+
+### UserPromptSubmit
+
+Implemented as a seventh Skill-scoped Hook event, `scripts/security/human-approval-gate.mjs`, registered in `skills/run/SKILL.md`'s frontmatter exactly like the other six (never in `hooks/hooks.json`). Per `docs/adr/0024-host-controlled-human-approval-boundary.md`, it is the only path that can transition a risk approval from `pending` to `approved` (or `denied`); the model-accessible CLI (`update-state.mjs --resolve-approval <id>=approved`) is unconditionally refused for that reason.
+
+Uses:
+
+- Scans the raw text of a genuine top-level prompt submission for an explicit `KRYLO-APPROVE <id>` / `KRYLO-DENY <id>` phrase (case-insensitive).
+- Ignores any payload attributed to a subagent (`agent_id` or `agent_type` present) before even inspecting the prompt text.
+- Never blocks, delays, or alters the prompt, and never prints anything visible to the model: it always exits 0 silently, whether or not a confirmation phrase matched.
 
 ## Failure modes
 

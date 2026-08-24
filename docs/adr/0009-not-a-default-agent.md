@@ -17,3 +17,7 @@ KRYLO activates only through its explicit command.
 - Normal sessions remain lightweight.
 - The user controls when orchestration begins.
 - Setup must not write an `agent` default.
+
+## Superseded by
+
+Not superseded. ADR-0023 (multi-host product and shared KRYLO Core) generalizes this decision from "not the default Claude agent" to "not the default orchestrator on either host" (Claude Code and Codex).

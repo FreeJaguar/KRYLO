@@ -54,7 +54,11 @@ The deterministic runtime owns state transitions. The model proposes actions and
 
 ## Schema versioning and migration
 
-Schema `1.1.0` introduced host-neutral identity. It replaced the prior flat `sessionId` field with a `host` object (`name`, `sessionId`, optional `turnId`) and added a `delegation` object (`externalWorker`, `depth`, optional `parentRunId`). Migration from schema `1.0.0` is deterministic and one-directional: the legacy `sessionId` becomes `host.sessionId` with `host.name` set to `claude` (the only host that produced `1.0.0` state), and `delegation` defaults to a non-delegated, depth-0 run. A document with any other prior schema version, or a `1.0.0` document missing `sessionId`, is refused rather than guessed. Refused or corrupted state is preserved for diagnosis, and a fresh recovery state is initialized instead of trusting it.
+Schema `1.1.0` introduced host-neutral identity. It replaced the prior flat `sessionId` field with a `host` object (`name`, `sessionId`, optional `turnId`) and added a `delegation` object (`externalWorker`, `depth`, optional `parentRunId`). Migration from schema `1.0.0` is deterministic and one-directional: the legacy `sessionId` becomes `host.sessionId` with `host.name` set to `claude` (the only host that produced `1.0.0` state), and `delegation` defaults to a non-delegated, depth-0 run. A document with any other prior schema version, or a `1.0.0` document missing `sessionId`, is refused rather than guessed and the original file is left untouched.
+
+Migration to the current schema happens purely in memory, inside `loadState()`; `loadState()` never writes to disk under any circumstance. `saveState()` is the only place a migration is actually committed: if the schema version currently on disk differs from the schema version being saved, the exact original on-disk bytes are backed up first (`state.pre-migration-<oldVersion>-<epoch>.json`), then the migrated-and-mutated state is written. Every real mutator already calls `saveState()` from inside the run's exclusive lock, so this backup-then-persist is exactly as serialized as any other state mutation; a bare unlocked read (`read-state.mjs`, statusline/doctor/stagnation readers, a Hook's initial active-run check) can migrate a document in memory for its own use but can never persist that migration.
+
+Refused or corrupted state is never overwritten with a fabricated replacement. `loadState()` copies the original file (or, if the file itself was already missing, the raw bytes it tried to parse) to `state.corrupt-<epoch>.json` beside it, then returns `{ ok: false, error: 'corrupted', recovered: true, corruptPath }` so the caller can report the problem; it never initializes a fresh recovery state on the caller's behalf.
 
 ## Persistence
 
@@ -65,7 +69,7 @@ State is stored under a KRYLO-owned data root resolved by the active host adapte
 3. Rename over the prior state.
 4. Validate against the schema.
 
-Corrupted state must not be trusted. KRYLO should preserve the corrupted file for diagnosis, initialize a safe recovery state, and report the problem.
+Corrupted or schema-invalid state must not be trusted. KRYLO preserves the original file as `state.corrupt-<epoch>.json` for diagnosis and reports the problem; it does not initialize a fresh state on its own.
 
 ## Resumption
 
