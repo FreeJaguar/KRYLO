@@ -274,7 +274,14 @@ test('update-state.mjs: question grant/consume and budget refusal', () => {
   }
 });
 
-test('update-state.mjs: risk approval request and resolve', () => {
+test('update-state.mjs: risk approval request, model-driven denial works, model-driven approval is refused', () => {
+  // SECURITY BLOCKER 1 (security-hardening checkpoint): the model-accessible
+  // CLI must not be able to turn its own pending request into an approved
+  // human authorization. Denial (a model backing off its own request) is
+  // harmless and remains allowed; approval requires the human-typed
+  // confirmation phrase captured by scripts/security/human-approval-gate.mjs
+  // (see plugins/krylo/tests/hooks/human-approval-gate.test.mjs for that
+  // full flow).
   const dataDir = mkTempDataDir();
   try {
     const init = runCli('runtime/init-run.mjs', [
@@ -293,14 +300,24 @@ test('update-state.mjs: risk approval request and resolve', () => {
     assert.equal(request.status, 0);
     assert.equal(request.json.ok, true);
 
-    const resolve = runCli('runtime/update-state.mjs', [
+    const selfApprove = runCli('runtime/update-state.mjs', [
       '--run', runId, '--resolve-approval', 'ra-1=approved',
     ], dataDir);
-    assert.equal(resolve.status, 0);
-    assert.equal(resolve.json.ok, true);
+    assert.notEqual(selfApprove.status, 0);
+    assert.equal(selfApprove.json.ok, false);
+    assert.equal(selfApprove.json.error, 'model-approval-forbidden');
+
+    const stillPending = JSON.parse(fs.readFileSync(path.join(dataDir, 'runs', runId, 'state.json'), 'utf8'));
+    assert.equal(stillPending.riskApprovals[0].status, 'pending', 'the model-driven CLI must never move an approval to approved');
+
+    const deny = runCli('runtime/update-state.mjs', [
+      '--run', runId, '--resolve-approval', 'ra-1=denied',
+    ], dataDir);
+    assert.equal(deny.status, 0);
+    assert.equal(deny.json.ok, true);
 
     const stateRaw = JSON.parse(fs.readFileSync(path.join(dataDir, 'runs', runId, 'state.json'), 'utf8'));
-    assert.equal(stateRaw.riskApprovals[0].status, 'approved');
+    assert.equal(stateRaw.riskApprovals[0].status, 'denied', 'model-driven denial of its own request remains allowed');
     assert.equal(stateRaw.riskApprovals[0].actionClass, 'git-push');
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });

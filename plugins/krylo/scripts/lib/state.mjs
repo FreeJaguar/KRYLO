@@ -620,6 +620,36 @@ export function completionEval(state) {
   return { complete: reasons.length === 0, reasons };
 }
 
+// How long an approved (but not yet consumed) risk approval remains usable.
+// Long enough for the model to retry the approved action within the same
+// working session; short enough that an approval granted for one task
+// cannot linger and silently authorize an unrelated later action.
+export const APPROVAL_TTL_MS = 15 * 60 * 1000;
+
+/**
+ * Transition one risk approval's status in place. Shared by the two ONLY
+ * legitimate callers: update-state.mjs's CLI `resolve-approval` op (denied
+ * only -- see SECURITY BLOCKER 1) and
+ * scripts/security/human-approval-gate.mjs (approved or denied, driven only
+ * by a raw human-typed UserPromptSubmit confirmation phrase). Both call
+ * this under the same run lock used everywhere else state is mutated.
+ * Pure: does not load, save, or lock anything itself.
+ */
+export function applyApprovalResolution(state, id, status) {
+  if (!['approved', 'denied'].includes(status)) return { error: 'invalid-approval-status' };
+  const approval = (state.riskApprovals || []).find((a) => a.id === id);
+  if (!approval) return { error: 'approval-not-found' };
+  if (approval.status !== 'pending') return { error: 'approval-not-pending' };
+  approval.status = status;
+  approval.resolvedAt = nowIso();
+  // The expiry clock starts at approval, not at request: a request that
+  // sits unreviewed for a while must not burn down its usable window.
+  if (status === 'approved') {
+    approval.expiresAt = new Date(Date.now() + APPROVAL_TTL_MS).toISOString();
+  }
+  return { ok: true, approval };
+}
+
 function preserveCorruptState(statePath, failure) {
   const epoch = Date.now();
   const corruptPath = path.join(path.dirname(statePath), `state.corrupt-${epoch}.json`);

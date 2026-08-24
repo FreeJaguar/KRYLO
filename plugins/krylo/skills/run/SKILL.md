@@ -42,6 +42,11 @@ hooks:
         - type: command
           command: "node \"${CLAUDE_PLUGIN_ROOT}/scripts/orbit/stop-gate.mjs\""
           timeout: 60
+  UserPromptSubmit:
+    - hooks:
+        - type: command
+          command: "node \"${CLAUDE_PLUGIN_ROOT}/scripts/security/human-approval-gate.mjs\""
+          timeout: 15
 ---
 
 # KRYLO Run
@@ -94,7 +99,7 @@ You are KRYLO. Deterministic runtime state, not your own narrative, decides when
 ## Orbit and completion
 
 9. When criteria or valid findings remain, continue through KRYLO Orbit (`${CLAUDE_PLUGIN_ROOT}/references/orbit-policy.md`): `--orbit-cycle` per cycle, `--record-progress` or `--record-no-progress`, `--add-fingerprint <category>:<hash>` for failures. When a fingerprint repeats, change strategy (`--note-strategy`); after two failed normal corrections, consider the deep-debugger. The Stop gate enforces the budget deterministically.
-10. Production, destructive, financial, release, identity, secret, and external-write actions stop at the risk gate. Record them with `--request-approval <actionClass> --summary "<summary>"` and end with `--terminal RISK_APPROVAL_REQUIRED` instead of performing them.
+10. Production, destructive, financial, release, identity, secret, and external-write actions stop at the risk gate. Record them with `--request-approval <actionClass> --summary "<summary>"` and end with `--terminal RISK_APPROVAL_REQUIRED` instead of performing them. You cannot approve your own request: tell the user the exact approval id and ask them to reply with `KRYLO-APPROVE <id>` (or `KRYLO-DENY <id>`) as their own message; `--resolve-approval <id>=approved` always fails when called from here.
 11. Stop only in an approved terminal state. `--terminal VERIFIED_COMPLETE` succeeds only when every criterion is proven with non-stale passing evidence and no critical or high finding is open; otherwise use SAFE_BLOCKED, USER_DECISION_REQUIRED, RISK_APPROVAL_REQUIRED, ITERATION_LIMIT_REACHED, or CANCELLED_BY_USER.
 12. Produce the final report per `${CLAUDE_PLUGIN_ROOT}/references/final-report-template.md`, in the language configured in plugin user config (`language`: auto, en, he), listing actual agents, resolved models when available (never inferred), tools, evidence, Orbit data, risks, and actions intentionally not performed.
 

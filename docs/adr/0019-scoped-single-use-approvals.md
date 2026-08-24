@@ -26,4 +26,8 @@ Only `summary`/`target` are free text; every other field is a structural identif
 
 - An approval authorizes exactly the one action it was granted for (or, if untargeted, exactly one action in its class) — never a second, different, or later action.
 - `tests/hooks/risk-gate-approvals.test.mjs` covers exact match, different target, modified command, expired, reused, concurrent consumption, wrong project, wrong run, and wrong environment.
-- The approval TTL (15 minutes from resolution) is a fixed constant (`APPROVAL_TTL_MS` in `scripts/runtime/update-state.mjs`); a future release may make it configurable if real usage shows it is too short or too long.
+- The approval TTL (15 minutes from resolution) is a fixed constant (`APPROVAL_TTL_MS`, now in `scripts/lib/state.mjs` alongside the shared `applyApprovalResolution` mutator); a future release may make it configurable if real usage shows it is too short or too long.
+
+## Superseded by
+
+Not superseded. ADR-0024 (host-controlled human-approval boundary) extends this decision: it does not change approval scoping, expiry, or single-use consumption, but closes a separate gap this ADR did not originally address — the model's own CLI access could otherwise resolve `pending -> approved` for its own request, which no scoping rule here prevents by itself.

@@ -12,6 +12,7 @@ import {
   clearActiveRunPointerForState,
   completionEval,
   computeProjectRootHash,
+  applyApprovalResolution,
   ENUMS,
   validateEvidence,
 } from '../lib/state.mjs';
@@ -21,12 +22,6 @@ import { recordEvent } from '../lib/telemetry.mjs';
 import { withFileLock } from '../lib/lock.mjs';
 import { runLockPath } from '../lib/paths.mjs';
 import { bootstrapClaudeStorageEnvironment, resolveClaudeSessionId } from '../host/claude/context.mjs';
-
-// How long an approved (but not yet consumed) risk approval remains usable.
-// Long enough for the model to retry the approved action within the same
-// working session; short enough that an approval granted for one task
-// cannot linger and silently authorize an unrelated later action.
-const APPROVAL_TTL_MS = 15 * 60 * 1000;
 
 function nowIso() {
   return new Date().toISOString();
@@ -363,17 +358,20 @@ function applyOp(state, op) {
     }
 
     case 'resolve-approval': {
+      // SECURITY BLOCKER 1 (security-hardening checkpoint): this CLI is
+      // model-accessible (any Bash call can invoke it), so it must never be
+      // able to turn its own pending request into an approved human
+      // authorization -- that would make the risk-gate's approval
+      // requirement decorative. Denial (the model backing off its own
+      // request) is harmless and remains allowed here. Approval is only
+      // ever granted by scripts/security/human-approval-gate.mjs, driven by
+      // a raw human-typed UserPromptSubmit confirmation phrase the model
+      // cannot originate or fabricate on its own (see ADR-0024).
       const [id, status] = String(op.value ?? '').split('=');
-      if (!['approved', 'denied'].includes(status)) return { error: 'invalid-approval-status' };
-      const approval = state.riskApprovals.find((a) => a.id === id);
-      if (!approval) return { error: 'approval-not-found' };
-      approval.status = status;
-      approval.resolvedAt = nowIso();
-      // The expiry clock starts at approval, not at request: a request that
-      // sits unreviewed for a while must not burn down its usable window.
-      if (status === 'approved') {
-        approval.expiresAt = new Date(Date.now() + APPROVAL_TTL_MS).toISOString();
-      }
+      if (status === 'approved') return { error: 'model-approval-forbidden' };
+      if (status !== 'denied') return { error: 'invalid-approval-status' };
+      const result = applyApprovalResolution(state, id, status);
+      if (result.error) return { error: result.error };
       return {};
     }
 
