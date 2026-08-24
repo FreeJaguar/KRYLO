@@ -6,25 +6,35 @@ Accepted
 
 ## Context
 
-`validate-plugin.yml` installs `@anthropic-ai/claude-code@2.1.211` (the minimum supported version) and runs strict plugin/marketplace validation against it. That pin is deliberate: it is the release-producing, PR-blocking compatibility floor, and it must never silently drift to whatever CLI version happens to be current when the workflow runs — an unpinned `@latest` install in that job would make the same commit pass or fail non-deterministically as upstream ships new CLI releases, and a breaking upstream schema change could block every PR with no actionable signal.
+`validate-plugin.yml` installs `@anthropic-ai/claude-code@2.1.223` (the minimum supported version) and runs strict plugin/marketplace validation against it. That pin is deliberate: it is the release-producing, PR-blocking compatibility floor, and it must never silently drift to whatever CLI version happens to be current when the workflow runs — an unpinned `@latest` install in that job would make the same commit pass or fail non-deterministically as upstream ships new CLI releases, and a breaking upstream schema change could block every PR with no actionable signal.
 
 At the same time, KRYLO only benefits users if it keeps working on the CLI they actually have installed, which is normally newer than the pinned floor. Nothing in the pinned job exercises that.
 
-### Version bump: 2.1.197 → 2.1.211 (security-hardening checkpoint)
+### Version bump: 2.1.197 → 2.1.223 (security-hardening checkpoint)
 
 ADR-0025 (native permission approval) requires a Claude Code version where official documentation guarantees that a PreToolUse Hook's `permissionDecision: "ask"` reliably produces a blocking human prompt, rather than being silently overridden by auto-mode or other permission configuration (`anthropics/claude-code#39344`; ADR-0024's original context). This project's own CHANGELOG (`https://raw.githubusercontent.com/anthropics/claude-code/main/CHANGELOG.md`, checked in full through the current released version) states, for v2.1.211 exactly:
 
 > Fixed auto mode overriding a PreToolUse hook's `ask` decision for unsandboxed Bash — a hook `ask` now floors the decision at a prompt
 
-No earlier version's CHANGELOG entry states this, so 2.1.211 is the minimum version this decision can rely on. The floor is raised to exactly that version — not further — because raising it past what the decision actually requires would be an unjustified, undocumented tightening; see ADR-0025 for why `ask` is deliberately *not* extended to PowerShell or MCP tools despite the floor now covering versions where later, unrelated PowerShell-specific permission fixes also shipped (2.1.212, 2.1.214) — none of those later entries restate the same auto-mode-`ask`-flooring guarantee for those tool types, so this ADR does not claim they do.
+That confirmation alone would justify a floor of 2.1.211. Independent security review of that decision found the CHANGELOG carries two more directly relevant entries at later versions, both quoted verbatim after independent verification against the raw upstream file:
 
-This bump is a real cross-reference to check going forward: ADR-0016 (`subagentStatusLine`, requires 2.1.207) was deferred solely because the previous 2.1.197 floor was below that requirement. The new 2.1.211 floor is now above it — this ADR does not itself implement `subagentStatusLine` (out of this checkpoint's scope), but ADR-0016 should be revisited as a now-unblocked, not-yet-implemented opportunity.
+> (v2.1.221) Fixed a Bash tool permission-check bypass where zsh could execute hidden commands in `[[ ]]` regex conditionals; affected commands now prompt for permission
+>
+> (v2.1.223) Fixed a Bash permission bypass where a crafted command could hide parts of itself from permission checks
+
+Relying on a human's native `ask` prompt for informed consent requires that the prompt the human actually sees reflects the real command being run. A version where part of a Bash command could still hide from the permission layer's own analysis would undermine that premise even though the auto-mode-override bug itself was already fixed at 2.1.211 — the human could be shown, and approve, an incomplete view of what actually executes. The floor is therefore raised to **2.1.223**, the version that closes the more recent and most directly relevant of these two bypasses (2.1.223 supersedes 2.1.221 as a floor).
+
+No CHANGELOG entry through the current released version extends the underlying auto-mode-`ask`-flooring guarantee to PowerShell or to any MCP tool's permission dialog (see ADR-0025/ADR-0026 for why `ask` is accordingly not used for those tool types, and is further narrowed on Bash itself to only the `git-push`/`git-force` action classes).
+
+**Residual, disclosed limitation**: this project's own local validation environment runs Claude Code CLI `2.1.197` (confirmed via `claude --version`), below this floor. Every `claude plugin validate --strict` and `npm test` run performed while raising this floor was executed against the locally installed `2.1.197`, not `2.1.223` — the floor itself is a declared, evidence-backed CI/documentation decision, not a behavior locally exercised at that exact version in this environment. `RELEASE_READINESS.md` states this explicitly rather than implying the newer version was verified locally.
+
+This bump is a real cross-reference to check going forward: ADR-0016 (`subagentStatusLine`, requires 2.1.207) was deferred solely because the previous 2.1.197 floor was below that requirement. The new floor is now above it — this ADR does not itself implement `subagentStatusLine` (out of this checkpoint's scope), but ADR-0016 should be revisited as a now-unblocked, not-yet-implemented opportunity.
 
 ## Decision
 
 Two separate, independently-scoped checks:
 
-1. **Pinned floor (`validate-plugin.yml`, unchanged)** — runs on every push to `main` and every PR, installs `@anthropic-ai/claude-code@2.1.211` exactly, and is a required, PR-blocking check. This version is the documented minimum supported Claude Code release and changes only through an explicit ADR update, never automatically.
+1. **Pinned floor (`validate-plugin.yml`, unchanged)** — runs on every push to `main` and every PR, installs `@anthropic-ai/claude-code@2.1.223` exactly, and is a required, PR-blocking check. This version is the documented minimum supported Claude Code release and changes only through an explicit ADR update, never automatically.
 2. **Current-version compatibility (`claude-code-compat.yml`, new)** — runs on a weekly schedule and on manual `workflow_dispatch`, installs `@anthropic-ai/claude-code@latest` (intentionally unpinned — that is the entire point of the check), and runs the same strict plugin/marketplace validation plus the full test suite. It never runs on `push` or `pull_request` and is not a required check, so a failure here can never block a PR or a release.
 
 A failure of the current-version job:

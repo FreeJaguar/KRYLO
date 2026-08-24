@@ -10,6 +10,7 @@ import {
   completionEval,
   saveState,
   loadState,
+  applyApprovalResolution,
 } from '../../scripts/lib/state.mjs';
 
 function hostIdentityFor(hostSessionId) {
@@ -203,4 +204,24 @@ test('saveState refuses to persist an invalid state', () => {
     assert.equal(result.ok, false);
     assert.ok(result.errors.length > 0);
   });
+});
+
+test('applyApprovalResolution refuses "approved" itself, as defense in depth (docs/adr/0025-native-permission-approval.md)', () => {
+  // A KRYLO-local approval record must never again be able to authorize
+  // execution. update-state.mjs's CLI already refuses `approved` before
+  // ever calling this function, but the function itself must refuse it too
+  // -- a future caller must not be able to reintroduce the removed
+  // authorization surface just by calling this with a different status.
+  const state = createInitialState({ goalText: 'x', hostIdentity: hostIdentityFor('s'), projectDir: '/tmp/proj', lane: 'BUILD', risk: 'low' });
+  state.riskApprovals.push({
+    id: 'ra-1', actionClass: 'git-push', status: 'pending', requestedAt: new Date().toISOString(),
+  });
+
+  const result = applyApprovalResolution(state, 'ra-1', 'approved');
+  assert.equal(result.error, 'invalid-approval-status');
+  assert.equal(state.riskApprovals[0].status, 'pending', 'the approval must be left untouched by the refused call');
+
+  const denied = applyApprovalResolution(state, 'ra-1', 'denied');
+  assert.equal(denied.ok, true);
+  assert.equal(state.riskApprovals[0].status, 'denied');
 });

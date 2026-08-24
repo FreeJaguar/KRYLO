@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: "24"
       - name: Install pinned Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code@2.1.211
+        run: npm install -g @anthropic-ai/claude-code@2.1.223
       - name: Validate plugin and marketplace (strict)
         run: |
           claude plugin validate --strict plugins/krylo

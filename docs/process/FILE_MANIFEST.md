@@ -28,6 +28,9 @@ docs/process/                               # this file, IMPLEMENTATION_PLAN.md 
                                              # and MULTI_HOST_FOUNDATION_IMPLEMENTATION_PLAN.md
                                              # (approved 0.2 multi-host design and Foundation plan)
 docs/adr/0023-multi-host-product-and-shared-core.md   # accepted: two first-class hosts, one Shared Core
+docs/adr/0024-host-controlled-human-approval-boundary.md  # superseded by 0025; kept as history
+docs/adr/0025-native-permission-approval.md           # accepted: native Claude permission ask replaces KRYLO-APPROVE
+docs/adr/0026-powershell-risk-parity.md               # accepted: PowerShell risk classification parity with Bash
 ```
 
 ## Plugin root

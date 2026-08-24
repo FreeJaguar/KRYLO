@@ -620,35 +620,28 @@ export function completionEval(state) {
   return { complete: reasons.length === 0, reasons };
 }
 
-// How long an approved (but not yet consumed) risk approval remains usable.
-// Long enough for the model to retry the approved action within the same
-// working session; short enough that an approval granted for one task
-// cannot linger and silently authorize an unrelated later action.
-export const APPROVAL_TTL_MS = 15 * 60 * 1000;
-
 /**
- * Transition one risk approval's status in place. The only legitimate
- * caller is update-state.mjs's CLI `resolve-approval` op, and only for
- * `denied` -- `approved` is unconditionally refused there (a model backing
- * off its own request is harmless; a model granting its own request is not).
- * Nothing in the codebase sets `approved` any more (docs/adr/
- * 0025-native-permission-approval.md): a KRYLO-local approval record can no
- * longer, on its own, authorize execution for any tool. Called under the
- * same run lock used everywhere else state is mutated. Pure: does not load,
- * save, or lock anything itself.
+ * Transition one pending risk approval to `denied`. The only legitimate
+ * caller is update-state.mjs's CLI `resolve-approval` op (a model backing
+ * off its own request is harmless). This function itself refuses any status
+ * other than `denied` -- in particular `approved` -- as defense in depth:
+ * nothing in the codebase should ever again be able to set `approved`
+ * (docs/adr/0025-native-permission-approval.md), since a KRYLO-local
+ * approval record can no longer, on its own, authorize execution for any
+ * tool, and a future caller must not be able to reintroduce that by simply
+ * calling this function with a different status string. `approved` remains
+ * a valid enum value in the schema only for backward-compatibility with
+ * state persisted before this checkpoint. Called under the same run lock
+ * used everywhere else state is mutated. Pure: does not load, save, or lock
+ * anything itself.
  */
 export function applyApprovalResolution(state, id, status) {
-  if (!['approved', 'denied'].includes(status)) return { error: 'invalid-approval-status' };
+  if (status !== 'denied') return { error: 'invalid-approval-status' };
   const approval = (state.riskApprovals || []).find((a) => a.id === id);
   if (!approval) return { error: 'approval-not-found' };
   if (approval.status !== 'pending') return { error: 'approval-not-pending' };
   approval.status = status;
   approval.resolvedAt = nowIso();
-  // The expiry clock starts at approval, not at request: a request that
-  // sits unreviewed for a while must not burn down its usable window.
-  if (status === 'approved') {
-    approval.expiresAt = new Date(Date.now() + APPROVAL_TTL_MS).toISOString();
-  }
   return { ok: true, approval };
 }
 

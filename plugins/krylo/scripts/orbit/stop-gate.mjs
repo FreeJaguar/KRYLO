@@ -53,12 +53,23 @@ function buildDelta(state, evalResult) {
   return parts.join(' ');
 }
 
+/**
+ * Persist a terminal state. Only clears the active-run pointer and records
+ * the "terminal" telemetry event if the save actually succeeded -- a failed
+ * save (e.g. a pre-migration backup write failure, scripts/lib/state.mjs's
+ * saveState()) must never be followed by clearing the pointer or reporting
+ * a terminal event for a state.json that still says the run is active.
+ * Doing so would leave the run with no persisted terminal state while
+ * resolveActiveRun() (and therefore every other gate) now treats it as
+ * gone, silently disabling KRYLO enforcement for the rest of the session.
+ */
 function finalize(state, terminalState, phase) {
   state.terminalState = terminalState;
   state.phase = phase;
-  saveState(state);
-  clearActiveRunPointerForState(state);
-  recordEvent(state.runId, { event: 'terminal', terminalState, cycle: state.orbit.cycle });
+  const saved = saveState(state);
+  if (!saved.ok) return;
+  clearActiveRunPointerForState(saved.value);
+  recordEvent(saved.value.runId, { event: 'terminal', terminalState, cycle: saved.value.orbit.cycle });
 }
 
 async function main() {

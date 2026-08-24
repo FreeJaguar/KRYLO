@@ -360,7 +360,7 @@ test('shared risk policy classifies a force push via the PowerShell tool as git-
   assert.equal(result.actionClass, 'git-force');
 });
 
-test('shared risk policy denies a native PowerShell destructive delete (Remove-Item -Recurse -Force)', () => {
+test('shared risk policy classifies a native PowerShell destructive delete (Remove-Item -Recurse -Force) as destructive-operation (require-approval)', () => {
   // A Bash-flavored `rm -rf` pattern alone would miss the syntax a genuine
   // PowerShell user or a PowerShell-invoking model actually writes.
   const result = classifyRiskAction({
@@ -371,6 +371,30 @@ test('shared risk policy denies a native PowerShell destructive delete (Remove-I
   });
   assert.equal(result.action, 'require-approval');
   assert.equal(result.actionClass, 'destructive-operation');
+});
+
+test('shared risk policy catches PowerShell parameter abbreviations and built-in aliases for the same destructive delete', () => {
+  // Independent security review found the prior pattern required the FULL
+  // "remove-item"/"-recurse"/"-force" spelling, which PowerShell's own
+  // parameter-prefix matching and built-in command aliases trivially evade
+  // (verified empirically: -Rec/-Fo/-R/-F abbreviations and the ri/rd/rmdir/
+  // del/erase/rm aliases all previously classified as a silent 'pass').
+  const dataRoot = tempDataRoot();
+  const commands = [
+    'Remove-Item -Rec -Fo C:\\important',
+    'Remove-Item -R -F C:\\important',
+    'ri -Recurse -Force C:\\important',
+    'rd /s /q C:\\important',
+    'rmdir -Recurse -Force C:\\important',
+    'del /f /s /q C:\\important',
+    'erase -Force C:\\important',
+    'rm -Recurse -Force .',
+  ];
+  for (const command of commands) {
+    const result = classifyRiskAction({ toolName: 'PowerShell', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'require-approval', `expected require-approval for: ${command}`);
+    assert.equal(result.actionClass, 'destructive-operation', `expected destructive-operation for: ${command}`);
+  }
 });
 
 test('shared risk policy denies a PowerShell command reading a protected secret path', () => {

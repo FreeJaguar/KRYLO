@@ -21,12 +21,23 @@ function decision(res) {
   return res.json?.hookSpecificOutput?.permissionDecision ?? null;
 }
 
-const DENIED_COMMANDS = [
-  ['git push origin main', 'git-push or git-force'],
+// Native ask (docs/adr/0025-native-permission-approval.md) is narrowed to
+// git-push/git-force only: every other require-approval class keeps the
+// deterministic deny fail-safe regardless of severity (a proportionality
+// fix from independent security review -- a single-click native prompt,
+// which Claude Code can persist as an "always allow" rule, must not be the
+// SAME weight of gate for a routine git push as for production-deploy,
+// payment, or iam-or-secrets).
+const GIT_PUSH_OR_FORCE_COMMANDS = [
+  ['git push origin main', 'git-push'],
   ['git -C /some/repo push origin main', 'git-push via -C (security finding 1)'],
   ['git -c user.name=x push origin main', 'git-push via -c'],
   ['git --git-dir=/r/.git push', 'git-push via --git-dir'],
-  ['git push origin +main', 'force via +refspec'],
+  ['git push origin +main', 'git-force via +refspec'],
+  ['git push --force origin main', 'git-force'],
+];
+
+const OTHER_GATED_COMMANDS = [
   ['git -C ../other reset --hard HEAD~1', 'destructive via -C'],
   ['kubectl -n prod delete pod x', 'production-deploy via -n flag (code review finding 1)'],
   ['kubectl --context prod apply -f x.yaml', 'production-deploy via --context flag'],
@@ -34,7 +45,6 @@ const DENIED_COMMANDS = [
   ['helm --namespace prod upgrade app ./chart', 'production-deploy via --namespace flag'],
   ['terraform -chdir=infra apply', 'production-deploy via -chdir flag'],
   ['docker --context prod push myimage:latest', 'package-publish via --context flag'],
-  ['git push --force origin main', 'force'],
   ['npm publish', 'publish'],
   ['gh release create v1.0.0', 'release'],
   ['terraform apply -auto-approve', 'deploy'],
@@ -46,6 +56,8 @@ const DENIED_COMMANDS = [
   ['gh secret set DEPLOY_KEY', 'secrets'],
 ];
 
+const DENIED_COMMANDS = [...GIT_PUSH_OR_FORCE_COMMANDS, ...OTHER_GATED_COMMANDS];
+
 const ALLOWED_COMMANDS = [
   'npm test',
   'git status',
@@ -54,15 +66,14 @@ const ALLOWED_COMMANDS = [
   'npx vitest run',
 ];
 
-test('risk-gate: production/destructive/publish commands trigger a native ask prompt during an active run', () => {
+test('risk-gate: git push/force-push commands trigger a native ask prompt on Bash during an active run', () => {
   // Native permission approval (docs/adr/0025-native-permission-approval.md):
-  // human authorization for these classes now belongs to Claude Code's own
-  // permission UI, reached via permissionDecision: "ask" -- not a KRYLO-local
-  // deny that waits for a separately-typed confirmation phrase.
+  // human authorization for git-push/git-force belongs to Claude Code's own
+  // permission UI, reached via permissionDecision: "ask".
   const dataDir = mkTempDataDir();
   try {
     createActiveRun(dataDir);
-    for (const [command] of DENIED_COMMANDS) {
+    for (const [command] of GIT_PUSH_OR_FORCE_COMMANDS) {
       const res = runHook(GATE, bashPayload(dataDir, command), dataDir);
       assert.equal(res.status, 0, command);
       assert.equal(decision(res), 'ask', `expected ask for: ${command}`);
@@ -70,6 +81,39 @@ test('risk-gate: production/destructive/publish commands trigger a native ask pr
       assert.ok(!res.json.hookSpecificOutput.permissionDecisionReason.includes(command),
         `reason must not echo the command: ${command}`);
     }
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate: every other production/destructive/publish/release/merge/secrets class stays deny on Bash, even though it would qualify for ask if it were git-push/git-force', () => {
+  const dataDir = mkTempDataDir();
+  try {
+    createActiveRun(dataDir);
+    for (const [command] of OTHER_GATED_COMMANDS) {
+      const res = runHook(GATE, bashPayload(dataDir, command), dataDir);
+      assert.equal(res.status, 0, command);
+      assert.equal(decision(res), 'deny', `expected deny for: ${command}`);
+      assert.ok(!res.json.hookSpecificOutput.permissionDecisionReason.includes(command),
+        `reason must not echo the command: ${command}`);
+    }
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate: git push/force-push in bypassPermissions mode falls back to deny, not ask', () => {
+  // permission_mode: "bypassPermissions" is a session mode whose documented
+  // purpose is skipping permission prompts -- the v2.1.211 auto-mode-ask-
+  // flooring guarantee says nothing about it, so trusting ask there would be
+  // exactly the unconfirmed leap this checkpoint's evidence discipline
+  // forbids.
+  const dataDir = mkTempDataDir();
+  try {
+    createActiveRun(dataDir);
+    const payload = { ...bashPayload(dataDir, 'git push origin main'), permission_mode: 'bypassPermissions' };
+    const res = runHook(GATE, payload, dataDir);
+    assert.equal(decision(res), 'deny');
   } finally {
     cleanup(dataDir);
   }
