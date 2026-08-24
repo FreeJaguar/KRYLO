@@ -12,7 +12,9 @@ import crypto from 'node:crypto';
 
 import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
 import { normalizeClaudeHookPayload, allowClaudeSilently } from '../host/claude/hook-transport.mjs';
-import { saveState } from '../lib/state.mjs';
+import { loadState, saveState } from '../lib/state.mjs';
+import { withFileLock } from '../lib/lock.mjs';
+import { runLockPath } from '../lib/paths.mjs';
 import { redactText } from '../lib/redact.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 
@@ -72,30 +74,46 @@ async function main() {
   });
   if (!run.active) allowClaudeSilently();
 
-  const state = run.state;
+  const runId = run.state.runId;
   const toolName = String(payload.tool_name ?? 'unknown');
   const failureText = extractFailureText(payload);
   const signature = normalizeSignature(toolName, failureText);
   const hash = crypto.createHash('sha256').update(signature, 'utf8').digest('hex').slice(0, 16);
   const category = categorize(toolName, failureText);
 
-  const existing = state.orbit.fingerprints.find((f) => f.hash === hash);
-  if (existing) {
-    existing.count += 1;
-    existing.lastSeenCycle = state.orbit.cycle;
-    if (existing.count >= 2) state.orbit.requiredStrategyChange = true;
-  } else {
-    state.orbit.fingerprints.push({
-      hash,
-      category,
-      count: 1,
-      firstSeenCycle: state.orbit.cycle,
-      lastSeenCycle: state.orbit.cycle,
+  // Mutate under the run's exclusive lock, re-reading state fresh once
+  // acquired (security-hardening checkpoint, SECURITY BLOCKER 2): a stale
+  // pre-lock read of orbit.fingerprints/cycle would risk losing a
+  // concurrent update, and this can never race a concurrent migration-
+  // persist or another mutation.
+  let cycleForEvent = null;
+  try {
+    withFileLock(runLockPath(runId), () => {
+      const reloaded = loadState(runId);
+      if (!reloaded.ok) return;
+      const state = reloaded.value;
+      const existing = state.orbit.fingerprints.find((f) => f.hash === hash);
+      if (existing) {
+        existing.count += 1;
+        existing.lastSeenCycle = state.orbit.cycle;
+        if (existing.count >= 2) state.orbit.requiredStrategyChange = true;
+      } else {
+        state.orbit.fingerprints.push({
+          hash,
+          category,
+          count: 1,
+          firstSeenCycle: state.orbit.cycle,
+          lastSeenCycle: state.orbit.cycle,
+        });
+      }
+      saveState(state);
+      cycleForEvent = state.orbit.cycle;
     });
+  } catch {
+    // Fail open: fingerprinting must never block or crash the tool call.
   }
 
-  saveState(state);
-  recordEvent(state.runId, { event: 'failure', category, hash, cycle: state.orbit.cycle });
+  recordEvent(runId, { event: 'failure', category, hash, cycle: cycleForEvent });
   allowClaudeSilently();
 }
 

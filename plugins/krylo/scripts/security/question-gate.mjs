@@ -9,7 +9,9 @@
 
 import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
 import { normalizeClaudeHookPayload, emitClaudePreToolDecision, allowClaudeSilently } from '../host/claude/hook-transport.mjs';
-import { saveState } from '../lib/state.mjs';
+import { loadState, saveState } from '../lib/state.mjs';
+import { withFileLock } from '../lib/lock.mjs';
+import { runLockPath } from '../lib/paths.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 
 const GRANT_HINT =
@@ -29,24 +31,39 @@ async function main() {
   });
   if (!run.active) allowClaudeSilently();
 
-  const state = run.state;
-  const grants = Array.isArray(state.questionGate.grants) ? state.questionGate.grants : [];
-  const available = grants.find((g) => g.status === 'available');
+  const runId = run.state.runId;
 
-  if (available) {
-    // `used` was already counted at grant time by update-state.mjs.
-    available.status = 'consumed';
-    available.consumedAt = new Date().toISOString();
-    const saved = saveState(state);
-    recordEvent(state.runId, { event: 'question-gate', category: available.category, status: 'allowed' });
-    if (!saved.ok) {
-      // State could not be persisted; still allow — the question is safe.
-      emitClaudePreToolDecision('allow', `KRYLO exceptional question token consumed (${available.category}); state persistence failed.`);
-    }
-    emitClaudePreToolDecision('allow', `KRYLO exceptional question token consumed (${available.category}).`);
+  // Consume under the run's exclusive lock, re-reading state fresh once
+  // acquired (security-hardening checkpoint, SECURITY BLOCKER 2): the same
+  // synchronization domain approval consumption uses, so two concurrent
+  // AskUserQuestion calls can never both consume the same single-use token,
+  // and this can never race a concurrent migration-persist or another
+  // mutation and silently lose it.
+  let consumedCategory = null;
+  try {
+    withFileLock(runLockPath(runId), () => {
+      const reloaded = loadState(runId);
+      if (!reloaded.ok) return;
+      const state = reloaded.value;
+      const grants = Array.isArray(state.questionGate.grants) ? state.questionGate.grants : [];
+      const available = grants.find((g) => g.status === 'available');
+      if (!available) return;
+      // `used` was already counted at grant time by update-state.mjs.
+      available.status = 'consumed';
+      available.consumedAt = new Date().toISOString();
+      saveState(state);
+      consumedCategory = available.category;
+    });
+  } catch {
+    // Lock contention: fall through to deny below, same as "no grant available".
   }
 
-  recordEvent(state.runId, { event: 'question-gate', status: 'denied' });
+  if (consumedCategory) {
+    recordEvent(runId, { event: 'question-gate', category: consumedCategory, status: 'allowed' });
+    emitClaudePreToolDecision('allow', `KRYLO exceptional question token consumed (${consumedCategory}).`);
+  }
+
+  recordEvent(runId, { event: 'question-gate', status: 'denied' });
   emitClaudePreToolDecision('deny', GRANT_HINT);
 }
 

@@ -12,7 +12,9 @@
 
 import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
 import { normalizeClaudeHookPayload, emitClaudeStopBlock, allowClaudeSilently } from '../host/claude/hook-transport.mjs';
-import { saveState, clearActiveRunPointerForState, completionEval } from '../lib/state.mjs';
+import { loadState, saveState, clearActiveRunPointerForState, completionEval } from '../lib/state.mjs';
+import { withFileLock } from '../lib/lock.mjs';
+import { runLockPath } from '../lib/paths.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { assessStagnation } from './stagnation.mjs';
 
@@ -76,34 +78,56 @@ async function main() {
   });
   if (!run.active) allowClaudeSilently();
 
-  const state = run.state;
+  const runId = run.state.runId;
 
-  // Completion gate satisfied: allow the stop. The model remains responsible
-  // for setting VERIFIED_COMPLETE explicitly through update-state.mjs.
-  const evalResult = completionEval(state);
-  if (evalResult.complete) allowClaudeSilently();
+  // The whole decide-then-mutate sequence runs under the run's exclusive
+  // lock, re-reading state fresh once acquired (security-hardening
+  // checkpoint, SECURITY BLOCKER 2): completion/budget/stagnation decisions
+  // must see current data, and the resulting mutation (stopBlocks/cycle
+  // increment, or a terminal-state finalize) can never race a concurrent
+  // migration-persist or another mutation. Only the final Claude Hook output
+  // call happens outside the lock.
+  let outcome = { kind: 'allow' };
+  try {
+    withFileLock(runLockPath(runId), () => {
+      const reloaded = loadState(runId);
+      if (!reloaded.ok) return;
+      const state = reloaded.value;
 
-  // Budget exhaustion: deterministic terminal state, allow the stop.
-  if (state.orbit.cycle >= state.orbit.budget || state.orbit.stopBlocks >= state.orbit.budget) {
-    finalize(state, 'ITERATION_LIMIT_REACHED', 'ITERATION_LIMIT');
-    allowClaudeSilently();
+      // Completion gate satisfied: allow the stop. The model remains
+      // responsible for setting VERIFIED_COMPLETE explicitly through
+      // update-state.mjs.
+      const evalResult = completionEval(state);
+      if (evalResult.complete) return;
+
+      // Budget exhaustion: deterministic terminal state, allow the stop.
+      if (state.orbit.cycle >= state.orbit.budget || state.orbit.stopBlocks >= state.orbit.budget) {
+        finalize(state, 'ITERATION_LIMIT_REACHED', 'ITERATION_LIMIT');
+        return;
+      }
+
+      // Stagnation: no useful action remains — stop safely.
+      if (assessStagnation(state).recommendation === 'isolate-or-stop') {
+        finalize(state, 'SAFE_BLOCKED', 'BLOCKED');
+        return;
+      }
+
+      // Otherwise force continuation with the Orbit delta. Every block
+      // consumes budget, so this loop is strictly bounded.
+      state.orbit.stopBlocks += 1;
+      state.orbit.cycle += 1;
+      const saved = saveState(state);
+      if (!saved.ok) return;
+      recordEvent(runId, { event: 'stop-block', cycle: saved.value.orbit.cycle });
+      outcome = { kind: 'block', delta: buildDelta(saved.value, evalResult) };
+    });
+  } catch {
+    // Fail safe for completion claims, but never trap the user: any
+    // internal error (including lock contention) allows the stop.
   }
 
-  // Stagnation: no useful action remains — stop safely.
-  if (assessStagnation(state).recommendation === 'isolate-or-stop') {
-    finalize(state, 'SAFE_BLOCKED', 'BLOCKED');
-    allowClaudeSilently();
-  }
-
-  // Otherwise force continuation with the Orbit delta. Every block consumes
-  // budget, so this loop is strictly bounded.
-  state.orbit.stopBlocks += 1;
-  state.orbit.cycle += 1;
-  const saved = saveState(state);
-  if (!saved.ok) allowClaudeSilently();
-  recordEvent(state.runId, { event: 'stop-block', cycle: state.orbit.cycle });
-
-  emitClaudeStopBlock(buildDelta(saved.value, evalResult));
+  if (outcome.kind === 'block') emitClaudeStopBlock(outcome.delta);
+  allowClaudeSilently();
 }
 
 main().catch(() => allowClaudeSilently());
