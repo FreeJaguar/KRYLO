@@ -45,6 +45,52 @@ export const DATA_ROOT_REASON =
   'The KRYLO runtime data directory (run state, approvals, pointers, wrapper config) is integrity-protected. ' +
   'It may only be modified through the KRYLO runtime scripts, never directly.';
 
+// A conservative cap: fast for any legitimate command (measured ~4ms at
+// this size against the real policy patterns) and far below the sizes
+// (100K-1M chars) where the measured superlinear regex cost becomes a real
+// latency/availability concern.
+const MAX_BASH_COMMAND_LENGTH = 10_000;
+
+export const OVERSIZED_COMMAND_REASON =
+  `A Bash command this large (over ${MAX_BASH_COMMAND_LENGTH.toLocaleString('en-US')} characters) cannot be safely classified and is denied. ` +
+  'Split it into smaller steps.';
+
+export const HOOK_ENTRYPOINT_REASON =
+  'This script is a KRYLO Hook entrypoint, invoked only by the host platform\'s own Hook dispatch -- it must never ' +
+  'be executed directly. In particular, a risk approval may only be granted by a genuine top-level human chat ' +
+  'message (see docs/adr/0024-host-controlled-human-approval-boundary.md), never by running the approval hook script.';
+
+// Hook entrypoints (registered in skills/run/SKILL.md's frontmatter, never
+// meant to be invoked by anything other than the host's own Hook dispatch)
+// vs. the runtime CLIs the model IS meant to call directly
+// (init-run.mjs/read-state.mjs/update-state.mjs/cleanup.mjs/doctor.mjs/
+// audit-tool.mjs/validate-runtime.mjs). Security-hardening checkpoint,
+// SECURITY BLOCKER 1 follow-on: independent review found that
+// human-approval-gate.mjs's security property (only a genuine
+// UserPromptSubmit event grants an approval) is meaningless on its own,
+// because the script is an ordinary executable the model's own Bash tool
+// can invoke directly with fabricated stdin, achieving the exact same
+// state mutation without any human ever having typed anything. The same
+// applies in spirit to every other Hook entrypoint (a model could forge a
+// PostToolUse/SubagentStart/Stop payload to manipulate telemetry, agent
+// records, or Orbit bookkeeping). Denying direct invocation of these
+// specific scripts closes the concrete, reproducible bypass; it is a
+// text-matching defense-in-depth layer with the same category of
+// limitation as touchesDataRoot() below (a sufficiently obfuscated
+// invocation -- indirection through another interpreter, string
+// concatenation, a copied/renamed file -- is not caught by design; see
+// docs/adr/0024-host-controlled-human-approval-boundary.md for the
+// residual-risk statement).
+const HOOK_ENTRYPOINT_FILENAMES = [
+  'question-gate.mjs',
+  'risk-gate.mjs',
+  'posttool-telemetry.mjs',
+  'fingerprint.mjs',
+  'agent-events.mjs',
+  'stop-gate.mjs',
+  'human-approval-gate.mjs',
+];
+
 /**
  * KRYLO's own control plane (state.json, current-run.json, wrapper-config.json)
  * must not be writable through direct tool calls, or a prompt-injected model
@@ -146,6 +192,20 @@ function touchesDataRoot({ toolName, toolInput, cwd, dataRoot }) {
   }
 }
 
+/**
+ * Deny a Bash command that directly executes a KRYLO Hook entrypoint (see
+ * HOOK_ENTRYPOINT_FILENAMES above). Only Bash is checked: a Hook entrypoint
+ * being merely read/opened via Write/Edit's file_path is not itself a
+ * dangerous execution, and touchesDataRoot() already protects the data it
+ * would mutate.
+ */
+function touchesHookEntrypoint({ toolName, toolInput }) {
+  if (String(toolName ?? '') !== 'Bash') return false;
+  const command = typeof toolInput?.command === 'string' ? toolInput.command.toLowerCase() : '';
+  if (command === '') return false;
+  return HOOK_ENTRYPOINT_FILENAMES.some((filename) => command.includes(filename.toLowerCase()));
+}
+
 function loadPolicy() {
   const raw = fs.readFileSync(POLICY_PATH, 'utf8');
   return JSON.parse(raw);
@@ -239,8 +299,27 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot } = {}) 
   const resolvedDataRoot = typeof dataRoot === 'string' && dataRoot.trim() !== '' ? dataRoot : getDataRoot();
   const policy = loadPolicy();
 
+  // Independent security review measured that production-policy.json's
+  // multi-segment lazy-quantifier regex patterns (matched against the full
+  // Bash command text) scale superlinearly with input size -- ~25 seconds
+  // at the 1MB stdin ceiling readStdinJson() otherwise allows, close enough
+  // to a real PreToolUse Hook timeout budget to be a genuine availability
+  // risk (and, if a host's actual timeout behavior for an unresponsive Hook
+  // ever turns out to be permissive, a fail-open risk too). No legitimate
+  // Bash command a model constructs needs to be anywhere near this long;
+  // deny outright rather than attempting to classify (never merely
+  // truncate before matching, which could hide a real dangerous command
+  // that happens to appear later in an otherwise-padded string).
+  if (name === 'Bash' && typeof input.command === 'string' && input.command.length > MAX_BASH_COMMAND_LENGTH) {
+    return { action: 'deny', category: 'oversized-command', reason: OVERSIZED_COMMAND_REASON };
+  }
+
   if (touchesDataRoot({ toolName: name, toolInput: input, cwd, dataRoot: resolvedDataRoot })) {
     return { action: 'deny', category: 'data-root-protection', reason: DATA_ROOT_REASON };
+  }
+
+  if (touchesHookEntrypoint({ toolName: name, toolInput: input })) {
+    return { action: 'deny', category: 'hook-entrypoint-protection', reason: HOOK_ENTRYPOINT_REASON };
   }
 
   if (name === 'Bash') {
