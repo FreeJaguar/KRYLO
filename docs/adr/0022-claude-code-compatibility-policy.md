@@ -30,6 +30,26 @@ No CHANGELOG entry through the current released version extends the underlying a
 
 This bump is a real cross-reference to check going forward: ADR-0016 (`subagentStatusLine`, requires 2.1.207) was deferred solely because the previous 2.1.197 floor was below that requirement. The new floor is now above it — this ADR does not itself implement `subagentStatusLine` (out of this checkpoint's scope), but ADR-0016 should be revisited as a now-unblocked, not-yet-implemented opportunity.
 
+### Critical discovery during the final verification checkpoint: npm has not published past 2.1.197
+
+Attempting `npm install -g @anthropic-ai/claude-code@2.1.223` in this checkpoint failed outright:
+
+```
+npm error code E404
+npm error 404 No match found for version 2.1.223
+```
+
+Direct verification (`npm view @anthropic-ai/claude-code versions`/`dist-tags`, checked live during this session) confirmed the npm registry's `latest`, `next`, and every other dist-tag for this package currently resolve to **2.1.197** — the exact same version this project pinned before this whole checkpoint began — and no version above it has ever been published there. Cross-checked against GitHub: `v2.1.197` was released 2026-06-30; GitHub Releases have continued steadily since (v2.1.223 published 2026-08-06; v2.1.241, the CHANGELOG's current top entry, published 2026-08-23 — the day before this checkpoint). **The npm registry has been roughly two months and 44 versions behind the upstream GitHub release cadence.** This means:
+
+- Every CHANGELOG-cited version this ADR and ADR-0025 rely on (2.1.211, 2.1.221, 2.1.223) is real, genuinely released, and downloadable directly from GitHub Releases as a checksummed binary (`SHASUMS256.txt` + detached `.sig` per release) — this is not a documentation error or a hallucinated version number.
+- It is, however, **not installable via the standard `npm install -g @anthropic-ai/claude-code@<version>` command** that most users' own update path (and `claude update`'s own self-update mechanism, which explicitly falls back to `npm view` and fails the same way in this environment) likely relies on.
+- `validate-plugin.yml`/`release.yml`'s pin (as previously written) would have failed with the exact 404 above the first time either workflow actually ran — a real, previously undetected break in this project's own CI, introduced by this checkpoint's earlier version bump and only caught by this final verification pass.
+- `claude-code-compat.yml`'s `@latest` install is unaffected in the sense that it will not fail, but it is currently not testing anything newer than the pinned floor either, since npm's own `@latest` tag is the same 2.1.197 — its whole purpose (catching drift against the actually-current CLI) is temporarily degraded until npm publishing resumes. No code change was made for this: it is intentionally unpinned and will self-correct once npm catches up, with no maintainer action required.
+
+**Decision**: keep the pinned floor at **2.1.223** (the version this ADR's and ADR-0025's security reasoning is anchored to, and which was live-verified against a real running binary during this checkpoint — see ADR-0025's verification log), but change how `validate-plugin.yml` and `release.yml` install it: both now download the exact GitHub release binary for the runner's platform (`claude-linux-x64.tar.gz`) directly, verifying its published SHA-256 checksum before ever executing it, rather than through npm. This keeps the floor meaningful and CI actually installable, instead of either silently reverting the floor to 2.1.197 or leaving a workflow step that would 404 on its first real run.
+
+This is disclosed as a genuinely open, unresolved product question, not a decision made unilaterally on the maintainer's behalf: if most real KRYLO users update Claude Code via `npm`/`claude update` (which currently caps at 2.1.197), then a "minimum supported" floor above that is not actually reachable by those users through their normal update path, regardless of what CI installs. Whether to also document/prefer the GitHub-binary install path in KRYLO's own user-facing setup guidance, revert the floor until npm catches up, or accept this gap as temporary and npm-registry-side, is a maintainer decision this ADR does not make on its own.
+
 ## Decision
 
 Two separate, independently-scoped checks:

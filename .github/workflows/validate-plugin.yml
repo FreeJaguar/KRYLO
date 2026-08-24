@@ -22,8 +22,23 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
-      - name: Install pinned Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code@2.1.223
+      # The npm registry for @anthropic-ai/claude-code has not published a
+      # version past 2.1.197 (confirmed via `npm view @anthropic-ai/claude-code
+      # versions`/`dist-tags` during this checkpoint's live verification), while
+      # upstream's GitHub Releases are current (v2.1.223 published 2026-08-06,
+      # with real, checksummed binaries). `npm install -g
+      # @anthropic-ai/claude-code@2.1.223` would fail with a 404 here. Until
+      # npm publishing catches up, install the pinned floor from the upstream
+      # GitHub release binary instead, verifying its published SHA-256 before
+      # ever executing it.
+      - name: Install pinned Claude Code CLI (2.1.223, GitHub release binary -- npm has not published past 2.1.197)
+        run: |
+          curl -fsSL -o claude-linux-x64.tar.gz "https://github.com/anthropics/claude-code/releases/download/v2.1.223/claude-linux-x64.tar.gz"
+          echo "0b516307190edfb776501e5c12a32d7d0c0b01d1110fa6539fd187a8482ad24f  claude-linux-x64.tar.gz" | sha256sum -c -
+          tar -xzf claude-linux-x64.tar.gz
+          sudo install -m 0755 claude /usr/local/bin/claude
+          rm -f claude claude-linux-x64.tar.gz
+          claude --version
       - name: Validate plugin manifest (strict)
         run: claude plugin validate --strict plugins/krylo
       - name: Validate marketplace manifest (strict)

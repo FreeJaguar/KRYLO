@@ -23,8 +23,17 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
-      - name: Install pinned Claude Code CLI
-        run: npm install -g @anthropic-ai/claude-code@2.1.223
+      # See validate-plugin.yml for why this installs from the upstream GitHub
+      # release binary (checksum-verified) rather than npm: the npm registry
+      # has not published a version past 2.1.197 as of this checkpoint.
+      - name: Install pinned Claude Code CLI (2.1.223, GitHub release binary -- npm has not published past 2.1.197)
+        run: |
+          curl -fsSL -o claude-linux-x64.tar.gz "https://github.com/anthropics/claude-code/releases/download/v2.1.223/claude-linux-x64.tar.gz"
+          echo "0b516307190edfb776501e5c12a32d7d0c0b01d1110fa6539fd187a8482ad24f  claude-linux-x64.tar.gz" | sha256sum -c -
+          tar -xzf claude-linux-x64.tar.gz
+          sudo install -m 0755 claude /usr/local/bin/claude
+          rm -f claude claude-linux-x64.tar.gz
+          claude --version
       - name: Validate plugin and marketplace (strict)
         run: |
           claude plugin validate --strict plugins/krylo
