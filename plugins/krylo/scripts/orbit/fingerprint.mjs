@@ -9,6 +9,7 @@
 // Fail mode: fail OPEN (telemetry-style hook) — always exit 0.
 
 import crypto from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 
 import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
 import { normalizeClaudeHookPayload, allowClaudeSilently } from '../host/claude/hook-transport.mjs';
@@ -60,32 +61,23 @@ function categorize(toolName, text) {
   return 'other';
 }
 
-async function main() {
-  const input = await readStdinJson();
-  if (!input.ok) allowClaudeSilently();
-  const normalized = normalizeClaudeHookPayload(input.value);
-  if (!normalized.ok) allowClaudeSilently();
-  const payload = normalized.payload;
-
-  const run = resolveActiveRun({
-    projectRoot: normalized.identity.projectRoot,
-    host: normalized.identity.host,
-    hostSessionId: normalized.identity.hostSessionId,
-  });
-  if (!run.active) allowClaudeSilently();
-
-  const runId = run.state.runId;
-  const toolName = String(payload.tool_name ?? 'unknown');
-  const failureText = extractFailureText(payload);
+/**
+ * Record one failure's fingerprint against an already-resolved active run.
+ * Exported (rather than folded into main()) so a test can drive it directly
+ * against an isolated fixture without needing a real stdin/subprocess to
+ * exercise a saveState() failure deterministically.
+ *
+ * Only records the telemetry event if the mutation was actually persisted
+ * (saveState() returned ok) -- otherwise this would claim a fingerprint was
+ * recorded (a "failure" telemetry event, cycle number and all) for a
+ * mutation that a lock timeout, a failed reload, or (security-hardening
+ * checkpoint) a failed pre-migration backup write actually discarded.
+ */
+export function recordFailureFingerprint(runId, toolName, failureText) {
   const signature = normalizeSignature(toolName, failureText);
   const hash = crypto.createHash('sha256').update(signature, 'utf8').digest('hex').slice(0, 16);
   const category = categorize(toolName, failureText);
 
-  // Mutate under the run's exclusive lock, re-reading state fresh once
-  // acquired (security-hardening checkpoint, SECURITY BLOCKER 2): a stale
-  // pre-lock read of orbit.fingerprints/cycle would risk losing a
-  // concurrent update, and this can never race a concurrent migration-
-  // persist or another mutation.
   let cycleForEvent = null;
   try {
     withFileLock(runLockPath(runId), () => {
@@ -106,18 +98,41 @@ async function main() {
           lastSeenCycle: state.orbit.cycle,
         });
       }
-      saveState(state);
-      cycleForEvent = state.orbit.cycle;
+      const saved = saveState(state);
+      if (saved.ok) cycleForEvent = state.orbit.cycle;
     });
   } catch {
     // Fail open: fingerprinting must never block or crash the tool call.
   }
 
-  // Only record the event if the mutation was actually persisted (not on a
-  // lock timeout or a failed reload) -- otherwise this would log a
-  // "failure" event for a fingerprint that was never actually saved.
   if (cycleForEvent !== null) recordEvent(runId, { event: 'failure', category, hash, cycle: cycleForEvent });
+}
+
+async function main() {
+  const input = await readStdinJson();
+  if (!input.ok) allowClaudeSilently();
+  const normalized = normalizeClaudeHookPayload(input.value);
+  if (!normalized.ok) allowClaudeSilently();
+  const payload = normalized.payload;
+
+  const run = resolveActiveRun({
+    projectRoot: normalized.identity.projectRoot,
+    host: normalized.identity.host,
+    hostSessionId: normalized.identity.hostSessionId,
+  });
+  if (!run.active) allowClaudeSilently();
+
+  const toolName = String(payload.tool_name ?? 'unknown');
+  const failureText = extractFailureText(payload);
+  recordFailureFingerprint(run.state.runId, toolName, failureText);
   allowClaudeSilently();
 }
 
-main().catch(() => allowClaudeSilently());
+// Only auto-run when this file is executed directly as the Hook entrypoint
+// (`node fingerprint.mjs`), never when it is imported for
+// recordFailureFingerprint() -- otherwise importing this module (e.g. from a
+// test) would itself start reading the importing process's real stdin and
+// hang waiting for input that never arrives.
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch(() => allowClaudeSilently());
+}
