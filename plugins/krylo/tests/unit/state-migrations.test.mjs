@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -213,6 +213,88 @@ test('saveState(loadState(...).value) performs the one-time backup-then-persist,
   }
 });
 
+test('saveState fails safely and preserves the original file when the pre-migration backup write itself fails', async () => {
+  // Migration backup safety: "file does not exist" (a brand-new run -- fine,
+  // nothing to back up) and "backup write failed" (a real I/O error) must
+  // not be treated as the same condition. A failed backup write must refuse
+  // the save entirely rather than silently proceeding to overwrite the
+  // original -- the whole point of the backup is to preserve a recoverable
+  // copy of the pre-migration document, and overwriting the original after
+  // failing to create that copy would destroy the only trace of it.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-state-migrations-'));
+  const prev = process.env.KRYLO_DATA_ROOT;
+  process.env.KRYLO_DATA_ROOT = dir;
+  try {
+    const { loadState, saveState } = await import('../../scripts/lib/state.mjs');
+    const legacy = validLegacyFixture();
+    const runDir = path.join(dir, 'runs', legacy.runId);
+    fs.mkdirSync(runDir, { recursive: true });
+    const statePath = path.join(runDir, 'state.json');
+    const originalRaw = JSON.stringify(legacy);
+    fs.writeFileSync(statePath, originalRaw, 'utf8');
+
+    const loaded = loadState(legacy.runId);
+    assert.equal(loaded.ok, true);
+
+    const realWriteFileSync = fs.writeFileSync;
+    mock.method(fs, 'writeFileSync', (target, ...rest) => {
+      // Only the pre-migration backup write (a plain path string) is made to
+      // fail; writeJsonAtomic's own internal writeFileSync call (which
+      // always writes through an open file descriptor, a number, never a
+      // path string) must be left completely alone.
+      if (typeof target === 'string' && target.includes('state.pre-migration-')) {
+        throw new Error('simulated disk failure writing the pre-migration backup');
+      }
+      return realWriteFileSync.call(fs, target, ...rest);
+    });
+
+    try {
+      const saved = saveState(loaded.value);
+      assert.equal(saved.ok, false);
+      assert.equal(saved.error, 'backup-failed');
+    } finally {
+      mock.restoreAll();
+    }
+
+    // The original file must be completely untouched: same exact bytes as
+    // before the failed save attempt.
+    assert.equal(fs.readFileSync(statePath, 'utf8'), originalRaw);
+    assert.equal(fs.readdirSync(runDir).filter((f) => f.startsWith('state.pre-migration-')).length, 0);
+  } finally {
+    if (prev === undefined) delete process.env.KRYLO_DATA_ROOT;
+    else process.env.KRYLO_DATA_ROOT = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('saveState treats "no prior file" (a brand-new run) as distinct from "backup failed": no backup attempted, save succeeds', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-state-migrations-'));
+  const prev = process.env.KRYLO_DATA_ROOT;
+  process.env.KRYLO_DATA_ROOT = dir;
+  try {
+    const { createInitialState, saveState } = await import('../../scripts/lib/state.mjs');
+    const state = createInitialState({
+      goalText: 'brand new run, nothing to back up',
+      hostIdentity: { host: 'claude', hostSessionId: 'session-new' },
+      projectDir: dir,
+      lane: 'PATCH',
+      risk: 'low',
+      complexity: 'trivial',
+      runId: 'run-brandnew001',
+    });
+    const runDir = path.join(dir, 'runs', state.runId);
+
+    const saved = saveState(state);
+    assert.equal(saved.ok, true, 'a brand-new run with no prior file must save successfully, not be refused as a backup failure');
+    assert.ok(fs.existsSync(path.join(runDir, 'state.json')));
+    assert.equal(fs.readdirSync(runDir).filter((f) => f.startsWith('state.pre-migration-')).length, 0, 'no backup should ever be attempted when there was no prior file');
+  } finally {
+    if (prev === undefined) delete process.env.KRYLO_DATA_ROOT;
+    else process.env.KRYLO_DATA_ROOT = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('an unsupported schema version on disk is refused without destructive overwrite', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-state-migrations-'));
   const prev = process.env.KRYLO_DATA_ROOT;
@@ -297,15 +379,21 @@ test('real concurrency: many concurrent unlocked bare reads never corrupt or dup
   }
 });
 
-test('real concurrency: migration racing approval consumption never resurrects a consumed approval', async () => {
+test('real concurrency: migration racing the native-ask risk gate still migrates safely, and a persisted local approval record never authorizes execution', async () => {
+  // Native permission approval (docs/adr/0025-native-permission-approval.md):
+  // risk-gate.mjs no longer loads, consumes, or saves riskApprovals state at
+  // all -- authorization is delegated to Claude Code's own permissionDecision:
+  // "ask". This test keeps the valuable part of the original regression (a
+  // real migration-persisting mutation racing many unlocked bare reads of a
+  // legacy fixture must still migrate safely, exactly once) and replaces the
+  // now-obsolete "approval consumption must survive the race" assertion with
+  // the new invariant: even a legacy fixture carrying an already-'approved',
+  // unconsumed riskApprovals record must still get 'ask' from the risk gate,
+  // never 'allow' -- a local approval record can never, by itself, authorize
+  // the action, race or no race.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-state-migrations-'));
   const projectDir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-state-migrations-proj-'));
   try {
-    // A legacy 1.0.0 fixture with one ALREADY-APPROVED, unconsumed approval
-    // -- the exact shape reported as risky: Process A could migrate this in
-    // memory from a stale pre-consumption read and persist it after Process
-    // B has already consumed the approval under lock, silently un-consuming
-    // it.
     const projectRootHash = computeProjectRootHash(projectDir);
     const legacy = {
       ...validLegacyFixture(),
@@ -326,7 +414,7 @@ test('real concurrency: migration racing approval consumption never resurrects a
         consumedAt: null,
         fingerprint: null,
         target: null,
-        summary: 'pre-approved push',
+        summary: 'a stale/historical local approval record',
       }],
     };
     const runDir = path.join(dir, 'runs', legacy.runId);
@@ -344,9 +432,12 @@ test('real concurrency: migration racing approval consumption never resurrects a
 
     const env = { ...process.env, CLAUDE_PLUGIN_DATA: dir, KRYLO_DATA_ROOT: dir, CLAUDE_SESSION_ID: 'hook-session' };
 
-    // 12 bare reads racing the real risk-gate Hook consuming the approval.
+    // 12 bare reads racing a real mutation (update-state.mjs) AND the
+    // risk-gate Hook (which no longer mutates state at all), all fired
+    // together.
     const reads = Array.from({ length: 12 }, () => spawnAsync(READ_STATE, ['--run', legacy.runId], { env }));
-    const consumption = new Promise((resolve) => {
+    const mutation = spawnAsync(UPDATE_STATE, ['--run', legacy.runId, '--add-criterion', 'race condition check'], { env });
+    const gateAttempt = new Promise((resolve) => {
       const child = spawn(process.execPath, [RISK_GATE], { env });
       let stdout = '';
       child.stdout.on('data', (d) => { stdout += d; });
@@ -357,23 +448,24 @@ test('real concurrency: migration racing approval consumption never resurrects a
       }));
     });
 
-    const [consumeResult] = await Promise.all([consumption, ...reads]);
+    const [mutationResult, gateResult] = await Promise.all([mutation, gateAttempt, ...reads]);
 
-    let decision = null;
-    try { decision = JSON.parse(consumeResult.stdout.trim()); } catch { /* silent allow prints nothing */ }
-    assert.ok(decision, 'the risk gate must have produced a decision (the approval should have been consumed)');
-    assert.equal(decision.hookSpecificOutput.permissionDecision, 'allow');
+    assert.equal(mutationResult.status, 0, mutationResult.stderr);
+    let gateDecision = null;
+    try { gateDecision = JSON.parse(gateResult.stdout.trim()); } catch { /* ignore */ }
+    assert.ok(gateDecision, 'the risk gate must have produced a decision for a require-approval class');
+    assert.equal(gateDecision.hookSpecificOutput.permissionDecision, 'ask', 'a persisted local approval record must never authorize execution, race or no race');
 
     const onDisk = JSON.parse(fs.readFileSync(statePath, 'utf8'));
     assert.equal(onDisk.schemaVersion, '1.1.0');
-    assert.equal(onDisk.riskApprovals[0].status, 'consumed', 'a consumed approval must never be reverted to approved by a racing migration');
-    assert.ok(onDisk.riskApprovals[0].consumedAt);
+    assert.equal(onDisk.riskApprovals[0].status, 'approved', 'the risk gate must not have touched the local approval record at all');
+    assert.equal(onDisk.acceptanceCriteria.length, 1, 'the real mutation must not have been lost to a racing bare read');
 
     const backups = fs.readdirSync(runDir).filter((f) => /^state\.pre-migration-1\.0\.0-\d+\.json$/.test(f));
-    assert.equal(backups.length, 1);
+    assert.equal(backups.length, 1, 'exactly one backup, however many reads raced the single real mutation');
 
-    // A second, independent attempt to consume the same (now-consumed)
-    // approval must be refused -- single-use survives the race too.
+    // A second, independent attempt gets exactly the same ask decision
+    // (there is no single-use state left at this layer to exhaust).
     const secondAttempt = await new Promise((resolve) => {
       const child = spawn(process.execPath, [RISK_GATE], { env });
       let out = '';
@@ -386,8 +478,8 @@ test('real concurrency: migration racing approval consumption never resurrects a
     });
     let secondDecision = null;
     try { secondDecision = JSON.parse(secondAttempt.trim()); } catch { /* ignore */ }
-    assert.ok(secondDecision, 'a second attempt against a consumed approval must not silently allow');
-    assert.equal(secondDecision.hookSpecificOutput.permissionDecision, 'deny');
+    assert.ok(secondDecision);
+    assert.equal(secondDecision.hookSpecificOutput.permissionDecision, 'ask');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(projectDir, { recursive: true, force: true });

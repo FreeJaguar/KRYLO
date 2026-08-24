@@ -248,6 +248,41 @@ test('CLI: update-state.mjs with exact session A absent (B active) refuses safel
   }
 });
 
+test('legacy GLOBAL pointer migration refuses adopting a different session\'s run under an explicit caller session', () => {
+  const dataDir = mkTempDir('krylo-iso-legacy-global-');
+  const projectDir = mkTempDir('krylo-iso-proj-');
+  try {
+    withDataRoot(dataDir, () => {
+      const projectRootHash = computeProjectRootHash(projectDir);
+      // Pre-0.1.1 global pointer, recorded as belonging to a specific session.
+      const legacyPath = path.join(dataDir, 'current-run.json');
+      fs.writeFileSync(legacyPath, JSON.stringify({
+        runId: 'run-legacyglobal01', projectRootHash, sessionId: 'session-owner', updatedAt: new Date().toISOString(),
+      }));
+
+      // A caller with a DIFFERENT explicit session must never adopt it.
+      const result = readActiveRunPointer({ projectRootHash, host: 'claude', hostSessionId: 'session-intruder' });
+      assert.equal(result.ok, false);
+      assert.equal(result.error, 'not-found');
+
+      // The legacy pointer must be left exactly as it was: not deleted, not
+      // adopted under the intruder's session.
+      assert.ok(fs.existsSync(legacyPath), 'a refused migration must not delete the legacy pointer');
+      const stillLegacy = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
+      assert.equal(stillLegacy.runId, 'run-legacyglobal01');
+      assert.ok(!fs.existsSync(path.join(dataDir, 'active-runs', projectRootHash, 'claude', 'session-intruder.json')));
+
+      // The rightful owner's own session can still legitimately migrate it.
+      const owned = readActiveRunPointer({ projectRootHash, host: 'claude', hostSessionId: 'session-owner' });
+      assert.equal(owned.ok, true);
+      assert.equal(owned.value.runId, 'run-legacyglobal01');
+    });
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  }
+});
+
 test('legacy migration remains safe: a genuinely unknown session still adopts the single legacy pointer', () => {
   const dataDir = mkTempDir('krylo-iso-legacy-');
   const projectDir = mkTempDir('krylo-iso-proj-');

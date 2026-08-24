@@ -682,19 +682,22 @@ function preserveCorruptState(statePath, failure) {
  * (a distinct, non-'corrupted' error) and the original file is left exactly
  * as it was -- never renamed away, never guessed at, never overwritten.
  *
- * loadState() never writes to disk. This is deliberate (security-hardening
- * checkpoint, SECURITY BLOCKER 2): persisting a migration is a state.json
- * mutation, and this function is called from many places that hold no lock
- * at all (read-state.mjs, statusline/doctor/stagnation convenience readers,
- * every Hook's initial resolveActiveRun() check). If loadState() itself
- * wrote the migrated document, two concurrent unlocked (or differently-
- * locked) callers could race: one persists a migrated copy computed from a
- * stale read, after another has already locked, loaded, mutated (e.g.
- * consumed an approval), and saved -- silently reverting that mutation.
- * Since loadState() only ever returns an in-memory value now, the one and
- * only place a migration is actually written to disk is saveState(), which
- * every real mutator already calls from within the run's exclusive lock
- * (scripts/lib/lock.mjs, runLockPath) -- see saveState() below.
+ * loadState() never writes a MIGRATED document to disk -- that is a
+ * distinct claim from "never writes at all" (the corrupt/invalid-state
+ * preservation write above is a real exception, and remains one). This is
+ * deliberate (security-hardening checkpoint, SECURITY BLOCKER 2):
+ * persisting a migration is a state.json mutation, and this function is
+ * called from many places that hold no lock at all (read-state.mjs,
+ * statusline/doctor/stagnation convenience readers, every Hook's initial
+ * resolveActiveRun() check). If loadState() itself wrote the migrated
+ * document, two concurrent unlocked (or differently-locked) callers could
+ * race: one persists a migrated copy computed from a stale read, after
+ * another has already locked, loaded, mutated, and saved -- silently
+ * reverting that mutation. Since loadState() only ever returns an in-memory
+ * migrated value, the one and only place a migration is actually committed
+ * to disk is saveState(), which every real mutator already calls from
+ * within the run's exclusive lock (scripts/lib/lock.mjs, runLockPath) --
+ * see saveState() below.
  */
 export function loadState(runId) {
   const statePath = runStatePath(runId);
@@ -737,6 +740,16 @@ export function loadState(runId) {
  * withFileLock(runLockPath(runId), ...)), so it is exactly as serialized as
  * every other state mutation -- no separate or recursive lock is acquired
  * here, and none is needed.
+ *
+ * Migration backup safety: "no prior file exists" (a brand-new run -- there
+ * is nothing to back up, and none is attempted) and "the backup write
+ * itself failed" (a real I/O error -- permissions, disk full, ...) are
+ * deliberately NOT the same code path. Only the read of the existing file is
+ * allowed to fail silently (nothing to back up); if a prior file exists and
+ * needs backing up but the backup write throws, this refuses the save
+ * entirely rather than falling through to overwrite the original -- losing
+ * the original after failing to preserve a copy of it would be exactly the
+ * data loss the backup exists to prevent.
  */
 export function saveState(state) {
   const updated = { ...state, updatedAt: nowIso() };
@@ -746,18 +759,33 @@ export function saveState(state) {
   }
   const statePath = runStatePath(updated.runId);
 
+  let currentRaw = null;
   try {
-    const currentRaw = fs.readFileSync(statePath, 'utf8');
-    const currentParsed = JSON.parse(currentRaw);
+    currentRaw = fs.readFileSync(statePath, 'utf8');
+  } catch {
+    // No existing file (a brand-new run): nothing to back up, and the
+    // absence of a file is never itself a failure.
+    currentRaw = null;
+  }
+
+  if (currentRaw !== null) {
+    let currentParsed = null;
+    try {
+      currentParsed = JSON.parse(currentRaw);
+    } catch {
+      currentParsed = null;
+    }
     if (isString(currentParsed?.schemaVersion) && currentParsed.schemaVersion !== updated.schemaVersion) {
       const backupPath = path.join(path.dirname(statePath), `state.pre-migration-${currentParsed.schemaVersion}-${Date.now()}.json`);
-      // Exact original on-disk bytes, not the migrated value, so the backup
-      // is a faithful record of what was actually there before this save.
-      fs.writeFileSync(backupPath, currentRaw, 'utf8');
+      try {
+        // Exact original on-disk bytes, not the migrated value, so the
+        // backup is a faithful record of what was actually there before
+        // this save.
+        fs.writeFileSync(backupPath, currentRaw, 'utf8');
+      } catch (err) {
+        return { ok: false, error: 'backup-failed', details: err?.message || 'unknown' };
+      }
     }
-  } catch {
-    // No existing file (a brand-new run), or it isn't parseable -- either
-    // way there is nothing meaningful to back up before this write.
   }
 
   writeJsonAtomic(statePath, updated);
@@ -845,7 +873,15 @@ function migrateLegacyGlobalPointer(projectRootHash, hostSessionId) {
   if (!legacy.ok || !legacy.value || legacy.value.projectRootHash !== projectRootHash) {
     return null;
   }
-  const adoptedSessionId = hostSessionId || legacy.value.sessionId || 'legacy';
+  const legacySessionId = isString(legacy.value.sessionId) ? legacy.value.sessionId : null;
+  // The legacy pointer names its own session. If the caller's explicit
+  // session is a different, identifiable session, adopting the pointer under
+  // the caller would silently hand it another session's run -- refuse instead
+  // and leave the legacy pointer exactly as it is for its rightful session.
+  if (hostSessionId && legacySessionId && legacySessionId !== hostSessionId) {
+    return null;
+  }
+  const adoptedSessionId = hostSessionId || legacySessionId || 'legacy';
   const value = {
     runId: legacy.value.runId,
     projectRootHash,
