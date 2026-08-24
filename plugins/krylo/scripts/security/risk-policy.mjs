@@ -26,6 +26,7 @@
 // to the model as free text.
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -51,12 +52,60 @@ export const DATA_ROOT_REASON =
  * mutations go through the runtime CLIs, which never embed the data-root path
  * in the command line.
  */
+/**
+ * A Bash command can reference the data root using a shell shorthand that
+ * expands to the same location at execution time (`~`, `$HOME`, `${HOME}`,
+ * the Windows `%USERPROFILE%`) instead of spelling out the literal resolved
+ * path. Substring-matching the raw command text alone would miss these, so
+ * this also checks a version of the command with those forms expanded to
+ * the real home directory -- lowercased and tried with both path-separator
+ * styles, the same way the resolved data root itself already is.
+ */
+function homeExpandedVariants(command, home) {
+  if (!home) return [];
+  const homeLower = String(home).toLowerCase();
+  const withHomeReplaced = String(command)
+    .replace(/~[/\\]/g, `${homeLower}/`)
+    .replace(/\$\{?home\}?/gi, homeLower)
+    .replace(/%userprofile%/gi, homeLower);
+  return [withHomeReplaced, withHomeReplaced.replace(/\\/g, '/'), withHomeReplaced.replace(/\//g, '\\')];
+}
+
+/**
+ * Resolve a path through any symlinks, best-effort. fs.realpathSync throws
+ * for a path whose final component does not exist yet (a common case: a new
+ * file about to be created); this walks up to the nearest existing ancestor,
+ * resolves *that* through symlinks, and re-appends the not-yet-existing
+ * suffix, so a not-yet-created file inside a symlinked directory still
+ * resolves to where it would actually land.
+ */
+function realpathBestEffort(candidatePath) {
+  let current = candidatePath;
+  const suffix = [];
+  for (;;) {
+    try {
+      const real = fs.realpathSync(current);
+      return suffix.length > 0 ? path.join(real, ...suffix.reverse()) : real;
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return candidatePath; // reached the filesystem root; give up gracefully
+      suffix.push(path.basename(current));
+      current = parent;
+    }
+  }
+}
+
 function touchesDataRoot({ toolName, toolInput, cwd, dataRoot }) {
   const variants = [
     dataRoot,
     dataRoot.split(path.sep).join('/'),
     '.claude/plugins/data/krylo',
     '.claude\\plugins\\data\\krylo',
+    // The multi-host Foundation's generic (non-Claude-specific) data-root
+    // fallback (scripts/lib/paths.mjs::getDataRoot()) -- covered both as a
+    // relative fragment and, for Bash, via home-shorthand expansion below.
+    '.krylo/data',
+    '.krylo\\data',
     'current-run.json',
     'wrapper-config.json',
   ].map((v) => v.toLowerCase());
@@ -66,7 +115,9 @@ function touchesDataRoot({ toolName, toolInput, cwd, dataRoot }) {
 
   if (name === 'Bash') {
     const command = String(input.command ?? '').toLowerCase();
-    return variants.some((v) => command.includes(v));
+    if (variants.some((v) => command.includes(v))) return true;
+    const expanded = homeExpandedVariants(command, os.homedir());
+    return expanded.some((e) => variants.some((v) => e.toLowerCase().includes(v)));
   }
 
   const target = typeof input.file_path === 'string'
@@ -80,7 +131,16 @@ function touchesDataRoot({ toolName, toolInput, cwd, dataRoot }) {
   try {
     const resolved = path.resolve(cwd || process.cwd(), target).toLowerCase();
     const rootLower = path.resolve(dataRoot).toLowerCase();
-    return resolved === rootLower || resolved.startsWith(rootLower + path.sep.toLowerCase());
+    if (resolved === rootLower || resolved.startsWith(rootLower + path.sep.toLowerCase())) return true;
+    // path.resolve() alone never follows symlinks: a symlink outside the
+    // data root that points into it would otherwise escape this check, even
+    // though writing through it lands inside the data root for real. Resolve
+    // both sides through any symlinks (best-effort for a target that does
+    // not exist yet, e.g. a new file about to be created) before the final
+    // comparison.
+    const realResolved = realpathBestEffort(path.resolve(cwd || process.cwd(), target)).toLowerCase();
+    const realRoot = realpathBestEffort(path.resolve(dataRoot)).toLowerCase();
+    return realResolved === realRoot || realResolved.startsWith(realRoot + path.sep.toLowerCase());
   } catch {
     return false;
   }

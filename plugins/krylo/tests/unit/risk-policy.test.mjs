@@ -96,6 +96,84 @@ test('shared risk policy denies direct writes into the KRYLO data root', () => {
   assert.equal(result.category, 'data-root-protection');
 });
 
+test('shared risk policy denies a Bash command referencing the data root via ~/.krylo/data (tilde shorthand)', () => {
+  // ADDITIONAL HARDENING (security-hardening checkpoint): the new
+  // multi-host design introduces ~/.krylo/data as the future shared data
+  // root. A model could reference it in a Bash command using the tilde
+  // shorthand, or $HOME/%USERPROFILE% env-var expansion, rather than the
+  // literal resolved absolute path -- the shell still expands it to the
+  // same location, so the protection must not be bypassable just because
+  // the command text spells the path conventionally instead of literally.
+  const dataRoot = path.join(os.homedir(), '.krylo', 'data');
+  const result = classifyRiskAction({
+    toolName: 'Bash',
+    toolInput: { command: 'rm -rf ~/.krylo/data/runs' },
+    cwd: process.cwd(),
+    dataRoot,
+  });
+  assert.equal(result.action, 'deny');
+  assert.equal(result.category, 'data-root-protection');
+});
+
+test('shared risk policy denies a Bash command referencing the data root via $HOME (POSIX env var)', () => {
+  const dataRoot = path.join(os.homedir(), '.krylo', 'data');
+  const result = classifyRiskAction({
+    toolName: 'Bash',
+    toolInput: { command: 'cat $HOME/.krylo/data/runs/x/state.json' },
+    cwd: process.cwd(),
+    dataRoot,
+  });
+  assert.equal(result.action, 'deny');
+  assert.equal(result.category, 'data-root-protection');
+});
+
+test('shared risk policy denies a Bash command referencing the data root via %USERPROFILE% (Windows env var)', () => {
+  const dataRoot = path.join(os.homedir(), '.krylo', 'data');
+  const result = classifyRiskAction({
+    toolName: 'Bash',
+    toolInput: { command: 'type %USERPROFILE%\\.krylo\\data\\runs\\x\\state.json' },
+    cwd: process.cwd(),
+    dataRoot,
+  });
+  assert.equal(result.action, 'deny');
+  assert.equal(result.category, 'data-root-protection');
+});
+
+test('shared risk policy denies a Write reaching the data root through a symlinked directory (escape via symlink)', () => {
+  // ADDITIONAL HARDENING (security-hardening checkpoint): path.resolve()
+  // alone does not follow symlinks, so a symlink OUTSIDE the data root that
+  // points INTO it would previously escape detection -- the nominal
+  // (unresolved) path never starts with the data root's own literal path,
+  // even though writing through the symlink lands inside it for real.
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-symlink-test-'));
+  try {
+    const dataRoot = path.join(base, 'real-data-root');
+    fs.mkdirSync(dataRoot, { recursive: true });
+    const outsideDir = path.join(base, 'looks-harmless');
+    fs.mkdirSync(outsideDir, { recursive: true });
+    const linkPath = path.join(outsideDir, 'link-to-data-root');
+    try {
+      fs.symlinkSync(dataRoot, linkPath, 'junction');
+    } catch {
+      // Symlink/junction creation can require elevated privileges in some
+      // environments; skip rather than fail the suite on an unrelated
+      // permissions gap.
+      return;
+    }
+
+    const result = classifyRiskAction({
+      toolName: 'Write',
+      toolInput: { file_path: path.join(linkPath, 'runs', 'x', 'state.json') },
+      cwd: outsideDir,
+      dataRoot,
+    });
+    assert.equal(result.action, 'deny');
+    assert.equal(result.category, 'data-root-protection');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test('shared risk policy denies a Bash command naming the wrapper config in the data root', () => {
   const dataRoot = tempDataRoot();
   const command = `echo '{"originalCommand":["evil"]}' > ${dataRoot.replace(/\\/g, '/')}/wrapper-config.json`;
