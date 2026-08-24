@@ -6,7 +6,7 @@ Accepted
 
 ## Context
 
-`validate-plugin.yml` installs `@anthropic-ai/claude-code@2.1.223` (the minimum supported version) and runs strict plugin/marketplace validation against it. That pin is deliberate: it is the release-producing, PR-blocking compatibility floor, and it must never silently drift to whatever CLI version happens to be current when the workflow runs — an unpinned `@latest` install in that job would make the same commit pass or fail non-deterministically as upstream ships new CLI releases, and a breaking upstream schema change could block every PR with no actionable signal.
+`validate-plugin.yml` installs Claude Code CLI `2.1.223` (the minimum supported version -- as a checksum-verified GitHub release binary, not an npm package; see this document's "Critical discovery" section below for why) and runs strict plugin/marketplace validation against it. That pin is deliberate: it is the release-producing, PR-blocking compatibility floor, and it must never silently drift to whatever CLI version happens to be current when the workflow runs — an unpinned `@latest` install in that job would make the same commit pass or fail non-deterministically as upstream ships new CLI releases, and a breaking upstream schema change could block every PR with no actionable signal.
 
 At the same time, KRYLO only benefits users if it keeps working on the CLI they actually have installed, which is normally newer than the pinned floor. Nothing in the pinned job exercises that.
 
@@ -54,7 +54,7 @@ This is disclosed as a genuinely open, unresolved product question, not a decisi
 
 Two separate, independently-scoped checks:
 
-1. **Pinned floor (`validate-plugin.yml`, unchanged)** — runs on every push to `main` and every PR, installs `@anthropic-ai/claude-code@2.1.223` exactly, and is a required, PR-blocking check. This version is the documented minimum supported Claude Code release and changes only through an explicit ADR update, never automatically.
+1. **Pinned floor (`validate-plugin.yml`)** — runs on every push to `main` and every PR, installs Claude Code CLI `2.1.223` exactly (as a checksum-verified GitHub release binary -- see "Critical discovery" above; the npm-based install this step used before this checkpoint is gone, not merely unchanged), and is a required, PR-blocking check. This version is the documented minimum supported Claude Code release and changes only through an explicit ADR update, never automatically.
 2. **Current-version compatibility (`claude-code-compat.yml`, new)** — runs on a weekly schedule and on manual `workflow_dispatch`, installs `@anthropic-ai/claude-code@latest` (intentionally unpinned — that is the entire point of the check), and runs the same strict plugin/marketplace validation plus the full test suite. It never runs on `push` or `pull_request` and is not a required check, so a failure here can never block a PR or a release.
 
 A failure of the current-version job:

@@ -1490,10 +1490,12 @@ Do not push.
 - Modify: `plugins/krylo/tests/hooks/risk-gate-approvals.test.mjs`
 - Modify: `plugins/krylo/tests/hooks/risk-gate-mcp.test.mjs`
 
-**Interfaces:**
-- `classifyRiskAction(input)` returns a host-neutral decision without process exit/stdout.
-- `consumeMatchingApproval(input)` performs the existing atomic, scoped, single-use approval consumption using generic KRYLO environment input.
-- Claude `risk-gate.mjs` translates the shared decision to Claude PreToolUse output.
+> **Superseded by ADR-0025 (native permission approval), security-hardening checkpoint.** `consumeMatchingApproval()` and the KRYLO-local approval-consumption design this section describes were deleted: a KRYLO-local approval record must never independently authorize execution, for any tool (ADR-0025's stated security requirement). A `require-approval` classification is instead translated into Claude Code's native `permissionDecision: "ask"` for the Bash tool's `git-push`/`git-force` classes only (outside `bypassPermissions` mode); every other tool/class/mode keeps a deterministic `deny`. Any future host adapter (Codex included) must follow `scripts/security/risk-gate.mjs`'s actual current design, not the interface and worked example below, which describe the mechanism this checkpoint removed. Left unedited beneath this note as an accurate historical record of the original extraction plan.
+
+**Interfaces (historical; see note above):**
+- `classifyRiskAction(input)` returns a host-neutral decision without process exit/stdout. (Still accurate — unchanged by ADR-0025.)
+- ~~`consumeMatchingApproval(input)` performs the existing atomic, scoped, single-use approval consumption using generic KRYLO environment input.~~ Deleted; see note above.
+- Claude `risk-gate.mjs` translates the shared decision to Claude PreToolUse output. (Still accurate — unchanged by ADR-0025.)
 
 ### Shared decision shape
 

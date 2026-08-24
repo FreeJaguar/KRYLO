@@ -444,7 +444,7 @@ test('real concurrency: migration racing the native-ask risk gate still migrates
       child.on('close', (code) => resolve({ status: code, stdout }));
       child.stdin.end(JSON.stringify({
         hook_event_name: 'PreToolUse', tool_name: 'Bash',
-        tool_input: { command: 'git push origin main' }, cwd: projectDir,
+        tool_input: { command: 'git push origin main' }, cwd: projectDir, permission_mode: 'auto',
       }));
     });
 
@@ -473,7 +473,7 @@ test('real concurrency: migration racing the native-ask risk gate still migrates
       child.on('close', () => resolve(out));
       child.stdin.end(JSON.stringify({
         hook_event_name: 'PreToolUse', tool_name: 'Bash',
-        tool_input: { command: 'git push origin main' }, cwd: projectDir,
+        tool_input: { command: 'git push origin main' }, cwd: projectDir, permission_mode: 'auto',
       }));
     });
     let secondDecision = null;

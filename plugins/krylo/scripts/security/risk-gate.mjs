@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// KRYLO risk gate (PreToolUse, matcher: Bash|PowerShell|Write|Edit|NotebookEdit|mcp__.*).
+// KRYLO risk gate (PreToolUse, matcher: Bash|PowerShell|Write|Edit|NotebookEdit|Read|Glob|Grep|mcp__.*).
 //
 // This is the Claude-specific adapter: it parses Claude's PreToolUse stdin
 // payload, normalizes it into a host-neutral identity, delegates the actual
@@ -18,8 +18,10 @@
 // KRYLO-APPROVE chat-phrase mechanism (ADR-0024, superseded).
 //
 // `ask` is used ONLY for the Bash tool, ONLY for the `git-push`/`git-force`
-// action classes, and ONLY when the payload's `permission_mode` is not
-// `bypassPermissions`. Current official Claude Code documentation (this
+// action classes, and ONLY when the payload's `permission_mode` is in the
+// `ASK_ELIGIBLE_PERMISSION_MODES` allowlist below (`auto`, `manual`) --
+// never merely "not `bypassPermissions`" (see that allowlist's own comment
+// for the polarity reasoning). Current official Claude Code documentation (this
 // project's own verified CHANGELOG, checked in full through the current
 // released version) confirms exactly one relevant guarantee, at v2.1.211
 // (ADR-0022's floor, further raised to v2.1.223 -- see below):
@@ -73,6 +75,20 @@ import { recordEvent } from '../lib/telemetry.mjs';
 import { classifyRiskAction } from './risk-policy.mjs';
 
 const NATIVE_ASK_ACTION_CLASSES = new Set(['git-push', 'git-force']);
+
+// Allowlist, not a denylist: independent security review found the original
+// `permission_mode !== 'bypassPermissions'` check inverted the polarity of
+// everything else in this decision (tool name and action class are both
+// allowlists) and fails toward `ask` -- the unproven direction -- whenever
+// `permission_mode` is absent, renamed, or a new mode is added upstream.
+// Only modes actually observed, live, to honor a Hook's `ask` decision
+// (docs/adr/0025-native-permission-approval.md's verification log: `manual`
+// tested explicitly; `auto` tested explicitly and also observed as the
+// real default for a non-interactive session with no --permission-mode flag
+// at all) are eligible. Everything else -- `bypassPermissions`, `plan`,
+// `acceptEdits`, `dontAsk`, an absent field, or any future/renamed mode --
+// falls through to the deterministic `deny` fail-safe.
+const ASK_ELIGIBLE_PERMISSION_MODES = new Set(['auto', 'manual']);
 
 /**
  * The stdin payload could not be read or normalized at all, so the tool
@@ -146,7 +162,7 @@ async function main() {
       // sets it, independent of session-id resolution.
       const eligibleForNativeAsk = toolName === 'Bash'
         && NATIVE_ASK_ACTION_CLASSES.has(decision.actionClass)
-        && payload.permission_mode !== 'bypassPermissions';
+        && ASK_ELIGIBLE_PERMISSION_MODES.has(payload.permission_mode);
 
       if (eligibleForNativeAsk) {
         recordEvent(state.runId, { event: 'risk-gate', category: decision.actionClass, status: 'ask' });

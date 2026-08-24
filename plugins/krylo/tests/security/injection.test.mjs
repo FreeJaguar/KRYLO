@@ -9,7 +9,11 @@ const RISK_GATE = 'security/risk-gate.mjs';
 const STOP_GATE = 'orbit/stop-gate.mjs';
 
 function bashPayload(cwd, command) {
-  return { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, cwd };
+  // permission_mode: 'auto' is the real, empirically-observed default for a
+  // non-interactive session with no --permission-mode flag; ASK_ELIGIBLE_
+  // PERMISSION_MODES in risk-gate.mjs is an allowlist, so a test asserting
+  // 'ask' must supply an eligible mode explicitly.
+  return { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, cwd, permission_mode: 'auto' };
 }
 
 function decision(res) {

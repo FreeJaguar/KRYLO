@@ -55,7 +55,7 @@ test('the run skill frontmatter declares all six required hook events against re
   }
   // AskUserQuestion and the write-surface matcher (extended to MCP tools for Item 2) must both be present.
   assert.ok(block.includes('AskUserQuestion'));
-  assert.ok(block.includes('Bash|PowerShell|Write|Edit|NotebookEdit|mcp__.*'));
+  assert.ok(block.includes('Bash|PowerShell|Write|Edit|NotebookEdit|Read|Glob|Grep|mcp__.*'));
 });
 
 test('no other KRYLO skill declares an interception hook', () => {

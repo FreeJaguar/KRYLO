@@ -43,6 +43,7 @@ test('a git push --force with a missing session_id is still gated while exactly 
       tool_name: 'Bash',
       tool_input: { command: 'git push --force origin main' },
       cwd: dataDir,
+      permission_mode: 'auto',
       // session_id deliberately omitted, CLAUDE_SESSION_ID deliberately unset
     }), dataDir);
     assert.equal(res.status, 0);
@@ -145,6 +146,7 @@ test('a missing session_id never binds to a different host\'s pointer (host is s
       tool_name: 'Bash',
       tool_input: { command: 'git push --force origin main' },
       cwd: dataDir,
+      permission_mode: 'auto',
     }), dataDir);
     // Same reasoning as above: a normal require-approval classification via
     // the ADR-0020 fallback now routes through the native ask prompt.

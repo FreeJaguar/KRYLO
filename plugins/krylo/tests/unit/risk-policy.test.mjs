@@ -71,6 +71,44 @@ test('shared risk policy denies a protected secret path for Write', () => {
   assert.equal(typeof result.reason, 'string');
 });
 
+test('shared risk policy denies a protected secret path for Read, Glob, and Grep (not just Bash/Write)', () => {
+  // Independent security review found that Read/Glob/Grep were entirely
+  // absent from the risk-gate matcher and from classifyRiskAction()'s
+  // tool-name branches: a model denied on `cat .env` via Bash could simply
+  // switch to Read(".env") and read the identical content ungated.
+  for (const toolName of ['Read', 'Glob', 'Grep']) {
+    const result = classifyRiskAction({
+      toolName,
+      toolInput: { file_path: '.env' },
+      cwd: process.cwd(),
+      dataRoot: tempDataRoot(),
+    });
+    assert.equal(result.action, 'deny', `expected deny for ${toolName}(.env)`);
+    assert.equal(result.category, 'sensitive-path');
+  }
+  // Grep/Glob commonly carry `path` rather than `file_path`.
+  const grepByPath = classifyRiskAction({
+    toolName: 'Grep',
+    toolInput: { path: '.env', pattern: 'SECRET' },
+    cwd: process.cwd(),
+    dataRoot: tempDataRoot(),
+  });
+  assert.equal(grepByPath.action, 'deny');
+  assert.equal(grepByPath.category, 'sensitive-path');
+});
+
+test('shared risk policy passes a benign Read/Glob/Grep target', () => {
+  for (const toolName of ['Read', 'Glob', 'Grep']) {
+    const result = classifyRiskAction({
+      toolName,
+      toolInput: { file_path: 'src/app.js', path: 'src/app.js' },
+      cwd: process.cwd(),
+      dataRoot: tempDataRoot(),
+    });
+    assert.equal(result.action, 'pass', `expected pass for benign ${toolName}`);
+  }
+});
+
 test('shared risk policy denies a Bash command that reads a protected secret path', () => {
   const result = classifyRiskAction({
     toolName: 'Bash',

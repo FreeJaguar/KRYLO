@@ -6,7 +6,13 @@ import { mkTempDataDir, createActiveRun, runHook, patchState, readState, cleanup
 const GATE = 'security/risk-gate.mjs';
 
 function bashPayload(cwd, command) {
-  return { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, cwd };
+  // permission_mode: 'auto' matches the real, empirically-observed default
+  // for a non-interactive Claude Code session with no --permission-mode
+  // flag (confirmed live against the real 2.1.223 binary during this
+  // checkpoint's verification pass) -- ASK_ELIGIBLE_PERMISSION_MODES in
+  // risk-gate.mjs is an allowlist, so an ask-path test must supply an
+  // eligible mode explicitly rather than relying on an absent field.
+  return { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, cwd, permission_mode: 'auto' };
 }
 
 function powershellPayload(cwd, command) {
@@ -96,6 +102,27 @@ test('risk-gate: every other production/destructive/publish/release/merge/secret
       assert.equal(decision(res), 'deny', `expected deny for: ${command}`);
       assert.ok(!res.json.hookSpecificOutput.permissionDecisionReason.includes(command),
         `reason must not echo the command: ${command}`);
+    }
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate: an unknown, absent, or future permission_mode falls back to deny, not ask (allowlist, not a denylist)', () => {
+  // Independent security review found the original check
+  // (`permission_mode !== 'bypassPermissions'`) was a denylist, inverted
+  // relative to the tool-name and action-class checks in the same
+  // expression (both allowlists) -- an absent field, a renamed mode, or a
+  // brand-new upstream mode would all fail toward the unconfirmed 'ask'
+  // path. ASK_ELIGIBLE_PERMISSION_MODES is now an allowlist: only modes
+  // actually verified live to honor a hook's ask decision are eligible.
+  const dataDir = mkTempDataDir();
+  try {
+    createActiveRun(dataDir);
+    for (const mode of [undefined, 'plan', 'acceptEdits', 'dontAsk', 'somethingNew']) {
+      const payload = { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'git push origin main' }, cwd: dataDir, ...(mode !== undefined ? { permission_mode: mode } : {}) };
+      const res = runHook(GATE, payload, dataDir);
+      assert.equal(decision(res), 'deny', `expected deny for permission_mode=${mode}`);
     }
   } finally {
     cleanup(dataDir);
@@ -223,6 +250,20 @@ test('risk-gate: sensitive file targets are denied for Write and Bash', () => {
     }
     const ok = runHook(GATE, writePayload(projectDir, 'src/app.js'), dataDir);
     assert.equal(decision(ok), null);
+
+    // Read/Glob/Grep must be gated too (HIGH finding, independent security
+    // review): a model denied on `cat .env` via Bash must not be able to
+    // read the identical content by switching to a different tool.
+    for (const toolName of ['Read', 'Glob', 'Grep']) {
+      const res = runHook(GATE, {
+        hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: { file_path: '.env' }, cwd: projectDir,
+      }, dataDir);
+      assert.equal(decision(res), 'deny', `expected deny for ${toolName}(.env)`);
+    }
+    const benignRead = runHook(GATE, {
+      hook_event_name: 'PreToolUse', tool_name: 'Read', tool_input: { file_path: 'src/app.js' }, cwd: projectDir,
+    }, dataDir);
+    assert.equal(decision(benignRead), null);
   } finally {
     cleanup(dataDir);
     cleanup(projectDir);

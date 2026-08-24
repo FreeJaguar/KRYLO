@@ -12,7 +12,7 @@ hooks:
         - type: command
           command: "node \"${CLAUDE_PLUGIN_ROOT}/scripts/security/question-gate.mjs\""
           timeout: 30
-    - matcher: "Bash|PowerShell|Write|Edit|NotebookEdit|mcp__.*"
+    - matcher: "Bash|PowerShell|Write|Edit|NotebookEdit|Read|Glob|Grep|mcp__.*"
       hooks:
         - type: command
           command: "node \"${CLAUDE_PLUGIN_ROOT}/scripts/security/risk-gate.mjs\""

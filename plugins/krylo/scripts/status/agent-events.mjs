@@ -69,8 +69,8 @@ async function main() {
         const label = pickString(payload, ['description', 'task_label', 'taskLabel']);
         if (label) agent.taskLabel = redactAndTruncate(label, 120);
         state.agents.push(agent);
-        saveState(state);
-        recorded = { event: 'agent-start', agentId: id, agentType, configuredModel, ...(resolvedModel ? { resolvedModel } : {}) };
+        const saved = saveState(state);
+        if (saved.ok) recorded = { event: 'agent-start', agentId: id, agentType, configuredModel, ...(resolvedModel ? { resolvedModel } : {}) };
       } else if (event === 'SubagentStop') {
         const running = [...state.agents].reverse().find((a) => a.status === 'running' && (a.type === agentType || agentType === 'unknown'));
         if (running) {
@@ -78,8 +78,8 @@ async function main() {
           running.status = statusField === 'failed' ? 'failed' : 'completed';
           running.endedAt = now;
           if (resolvedModel && !running.resolvedModel) running.resolvedModel = resolvedModel;
-          saveState(state);
-          recorded = { event: 'agent-stop', agentId: running.id, agentType: running.type, status: running.status };
+          const saved = saveState(state);
+          if (saved.ok) recorded = { event: 'agent-stop', agentId: running.id, agentType: running.type, status: running.status };
         }
       }
     });

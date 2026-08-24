@@ -314,6 +314,29 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot } = {}) 
     return { action: 'pass', category: 'pass' };
   }
 
+  // Independent security review found that reading a protected secret path
+  // was denied via Bash (`cat .env`) and via Write/Edit's file_path, but not
+  // via the Read/Glob/Grep tools at all -- SKILL.md's risk-gate matcher did
+  // not even list them, so a model blocked on `cat .env` could simply
+  // switch tools and read the same file through Read() unimpeded. Same
+  // check as Write/Edit/NotebookEdit above, against whichever path-shaped
+  // field each of these tools actually carries.
+  if (name === 'Read' || name === 'Glob' || name === 'Grep') {
+    const target = typeof input.file_path === 'string'
+      ? input.file_path
+      : typeof input.path === 'string'
+        ? input.path
+        : '';
+    if (target !== '' && matchesSensitivePath(policy, target)) {
+      return {
+        action: 'deny',
+        category: 'sensitive-path',
+        reason: `${policy.sensitivePaths.reason} This read target is a protected secret path.`,
+      };
+    }
+    return { action: 'pass', category: 'pass' };
+  }
+
   if (isMcpToolName(name)) {
     const match = classifyMcpTool(name);
     if (match) {
