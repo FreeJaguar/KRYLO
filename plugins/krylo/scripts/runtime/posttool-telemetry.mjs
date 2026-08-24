@@ -34,16 +34,23 @@ async function main() {
   // consumption and every other real mutator uses (security-hardening
   // checkpoint, SECURITY BLOCKER 2), so this can never race a concurrent
   // migration-persist or another mutation and silently lose either side.
+  let counterSaveFailed = false;
   try {
     withFileLock(runLockPath(runId), () => {
       const reloaded = loadState(runId);
       if (!reloaded.ok) return;
       const state = reloaded.value;
       state.toolCounters[toolName] = (state.toolCounters[toolName] ?? 0) + 1;
-      saveState(state);
+      const saved = saveState(state);
+      if (!saved.ok) counterSaveFailed = true;
     });
   } catch {
-    // Fail open: telemetry must never block or crash the tool call.
+    // Fail open: telemetry must never block or crash the tool call. This
+    // also covers a lock-acquisition failure (see scripts/lib/lock.mjs);
+    // record it as a distinguishable outcome below rather than a silent
+    // exit 0, so a real, repeated failure here is diagnosable instead of
+    // invisible.
+    counterSaveFailed = true;
   }
 
   const duration = Number(payload.duration_ms ?? payload.durationMs);
@@ -51,6 +58,11 @@ async function main() {
     event: 'tool',
     toolName,
     ...(Number.isFinite(duration) ? { durationMs: duration } : {}),
+    // The tool call itself genuinely happened either way (this event is
+    // about the tool-name/duration fact, not the counter) -- `status` only
+    // flags that the toolCounters increment specifically was not persisted,
+    // so a repeated pattern here is diagnosable rather than silently lost.
+    ...(counterSaveFailed ? { status: 'counter-not-persisted' } : {}),
   });
 
   allowClaudeSilently();
