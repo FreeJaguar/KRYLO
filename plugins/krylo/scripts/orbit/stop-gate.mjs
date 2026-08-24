@@ -94,6 +94,13 @@ async function main() {
       if (!reloaded.ok) return;
       const state = reloaded.value;
 
+      // The unlocked resolveActiveRun() read above could be stale: another
+      // process may have finalized this run and cleared its pointer between
+      // that read and acquiring this lock. Re-check under the lock so a
+      // spurious stopBlocks/cycle increment is never applied to an already-
+      // terminal run.
+      if (state.terminalState !== null) return;
+
       // Completion gate satisfied: allow the stop. The model remains
       // responsible for setting VERIFIED_COMPLETE explicitly through
       // update-state.mjs.

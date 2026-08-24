@@ -40,6 +40,7 @@ async function main() {
   // and this can never race a concurrent migration-persist or another
   // mutation and silently lose it.
   let consumedCategory = null;
+  let lockFailed = false;
   try {
     withFileLock(runLockPath(runId), () => {
       const reloaded = loadState(runId);
@@ -51,16 +52,31 @@ async function main() {
       // `used` was already counted at grant time by update-state.mjs.
       available.status = 'consumed';
       available.consumedAt = new Date().toISOString();
-      saveState(state);
-      consumedCategory = available.category;
+      const saved = saveState(state);
+      // Only report the token as consumed if it was actually persisted --
+      // otherwise the token remains available on disk and must not be
+      // treated (or logged) as spent.
+      if (saved.ok) consumedCategory = available.category;
     });
   } catch {
-    // Lock contention: fall through to deny below, same as "no grant available".
+    // Lock contention: this hook's own documented fail mode is "fail OPEN
+    // (allow) -- asking a human is always safe". Falling through to the
+    // normal deny-with-regrant-hint path below would instead tell the model
+    // to burn a NEW question-budget grant purely because of transient lock
+    // contention, silently exhausting a scarce, human-reviewed budget for a
+    // reason that has nothing to do with policy. Fail open explicitly here
+    // instead, with its own distinct reason.
+    lockFailed = true;
   }
 
   if (consumedCategory) {
     recordEvent(runId, { event: 'question-gate', category: consumedCategory, status: 'allowed' });
     emitClaudePreToolDecision('allow', `KRYLO exceptional question token consumed (${consumedCategory}).`);
+  }
+
+  if (lockFailed) {
+    recordEvent(runId, { event: 'question-gate', status: 'allowed-lock-contention' });
+    emitClaudePreToolDecision('allow', 'KRYLO question gate could not evaluate this request due to transient contention; allowed per its fail-open policy. Do not grant a new token for this.');
   }
 
   recordEvent(runId, { event: 'question-gate', status: 'denied' });

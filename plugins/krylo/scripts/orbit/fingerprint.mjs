@@ -113,7 +113,10 @@ async function main() {
     // Fail open: fingerprinting must never block or crash the tool call.
   }
 
-  recordEvent(runId, { event: 'failure', category, hash, cycle: cycleForEvent });
+  // Only record the event if the mutation was actually persisted (not on a
+  // lock timeout or a failed reload) -- otherwise this would log a
+  // "failure" event for a fingerprint that was never actually saved.
+  if (cycleForEvent !== null) recordEvent(runId, { event: 'failure', category, hash, cycle: cycleForEvent });
   allowClaudeSilently();
 }
 

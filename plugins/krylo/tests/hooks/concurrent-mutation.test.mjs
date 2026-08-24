@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { mkTempDataDir, createActiveRun, readState, cleanup, SCRIPTS_ROOT } from './helpers.mjs';
 
 const POSTTOOL_TELEMETRY = path.join(SCRIPTS_ROOT, 'runtime', 'posttool-telemetry.mjs');
+const AGENT_EVENTS = path.join(SCRIPTS_ROOT, 'status', 'agent-events.mjs');
 
 function spawnAsync(scriptPath, { input, env }) {
   return new Promise((resolve) => {
@@ -60,6 +61,30 @@ test('real concurrency: many concurrent posttool-telemetry hook invocations neve
       N,
       `expected exactly ${N} increments with no lost updates under real concurrency, got ${state.toolCounters.Grep}`,
     );
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('real concurrency: many concurrent SubagentStart events each get a distinct agent id (no collision, none lost)', async () => {
+  const dataDir = mkTempDataDir('krylo-concurrent-mut-');
+  try {
+    const { statePath } = createActiveRun(dataDir);
+    const env = { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, KRYLO_DATA_ROOT: dataDir, CLAUDE_SESSION_ID: 'hook-session' };
+
+    const N = 15;
+    const calls = Array.from({ length: N }, () => spawnAsync(AGENT_EVENTS, {
+      input: JSON.stringify({ hook_event_name: 'SubagentStart', agent_type: 'krylo:builder', model: 'sonnet', cwd: dataDir }),
+      env,
+    }));
+
+    const results = await Promise.all(calls);
+    for (const r of results) assert.equal(r.status, 0);
+
+    const state = readState(statePath);
+    assert.equal(state.agents.length, N, `expected exactly ${N} recorded agents with none lost, got ${state.agents.length}`);
+    const ids = state.agents.map((a) => a.id);
+    assert.equal(new Set(ids).size, N, 'every concurrently-created agent must get its own distinct id, with no collisions');
   } finally {
     cleanup(dataDir);
   }
