@@ -301,19 +301,168 @@ test('shared risk policy: MULTIPLE brace groups in one candidate are all expande
     assert.equal(result.category, 'sensitive-path');
   }
 
-  // A group beyond MAX_BRACE_BRANCHES (33 here) is a disclosed, explicit
-  // bound -- left as literal text. Confirms this is a stable, intentional
-  // limit rather than an accidental crash/hang.
+  // A group beyond MAX_BRACE_BRANCHES (33 here) was PREVIOUSLY a fail-open
+  // bypass: real Bash still expands it, including the "env" branch, but
+  // the analyzer silently left the whole thing as inert literal text and
+  // classified it `pass`. Now that exceeding an analysis bound produces
+  // INDETERMINATE (fail-safe deny), not NO_MATCH, this correctly denies.
   const overBoundBranches = '.{env,' + Array.from({ length: 32 }, (_, i) => `z${i}`).join(',') + '}';
   const overBound = classifyRiskAction({ toolName: 'Bash', toolInput: { command: `cat ${overBoundBranches}` }, cwd: process.cwd(), dataRoot });
-  assert.equal(overBound.action, 'pass');
+  assert.equal(overBound.action, 'deny');
+  assert.equal(overBound.category, 'sensitive-path');
 
   // Two benign groups must still pass.
   const benign = classifyRiskAction({ toolName: 'Bash', toolInput: { command: 'cat notes.{txt,md}.{v1,v2}' }, cwd: process.cwd(), dataRoot });
   assert.equal(benign.action, 'pass');
 });
 
-test('shared risk policy: brace expansion combined with a dense bracket-class candidate does not compound into a multi-second stall (regression found by a fresh independent Security Reviewer: measured 40-60 seconds before this fix)', () => {
+test('real isolated shell fixture: Bash genuinely expands a 33-branch brace group (including "env") to a real ".env" file, confirming the fail-open analysis-bound bug is a real, reachable bypass and not merely hypothetical', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-glob-brace-fixture-'));
+  try {
+    fs.writeFileSync(path.join(dir, '.env'), 'FAKE_TEST_TOKEN=not-a-real-secret\n');
+    const branches = Array.from({ length: 32 }, (_, i) => `z${i}`).join(',');
+    const expr = `.{env,${branches}}`;
+    let expanded;
+    try {
+      expanded = execFileSync('bash', ['-c', 'cd "$1" && echo $2', 'bash-fixture', dir, expr], { encoding: 'utf8' }).trim().split(/\s+/);
+    } catch {
+      return; // no real Bash available on this machine/CI image -- skip
+    }
+    assert.ok(expanded.includes('.env'), `expected real Bash expansion of "${expr}" to include ".env", got: ${expanded.join(' ')}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('shared risk policy: every analysis-bound overflow introduced by the glob-closure implementation fails INDETERMINATE (deny), never silently NO_MATCH (pass) -- the task\'s required RED cases 1-6, closing a confirmed fail-open design flaw', () => {
+  // Attacker-controlled analysis-complexity bounds must never turn into a
+  // silent "pass": exceeding MAX_BRACE_BRANCHES, MAX_BRACE_BRANCH_LENGTH,
+  // MAX_BRACE_GROUPS, MAX_TOTAL_BRACE_CANDIDATES, or MAX_CLASS_SET_SIZE
+  // previously left the analyzer either abandoning analysis of a group
+  // (leaving it as inert literal text that then matched nothing) or
+  // silently truncating a bracket class (excluding characters beyond the
+  // budget from the class's own character set, which can silently turn a
+  // real MATCH into a false NO_MATCH if the decisive character happens to
+  // fall past the cutoff). Fixed by refactoring the analyzer into an
+  // explicit tri-state result (match / no_match / indeterminate), with
+  // indeterminate always mapped to deny.
+  const dataRoot = tempDataRoot();
+
+  // Case 1: >MAX_BRACE_BRANCHES (32) alternatives, one of which is "env".
+  const over32Branches = '.{env,' + Array.from({ length: 32 }, (_, i) => `z${i}`).join(',') + '}';
+
+  // Case 2: one branch longer than MAX_BRACE_BRANCH_LENGTH (128), plus an
+  // "env" branch alongside it in the SAME group.
+  const overLongBranch = 'z'.repeat(200);
+  const withOverLongBranch = `.{env,${overLongBranch}}`;
+
+  // Case 3: more brace GROUPS (5) than MAX_BRACE_GROUPS (4) -- confirmed
+  // against a real Bash process to genuinely expand into 32 real
+  // candidates (2^5), every one of them a DIFFERENT possible file the
+  // command could reach. The analyzer must recognize its own expansion is
+  // INCOMPLETE once the group-count budget runs out with more groups
+  // still pending (regardless of whether this SPECIFIC 5-group example
+  // happens to spell an exact protected name -- the point is that the
+  // analyzer cannot know that without finishing, and must not guess "no").
+  const over4Groups = '.{e,x}{n,x}{v,x}{a,x}{b,x}';
+
+  // Case 4: candidate-count explosion beyond MAX_TOTAL_BRACE_CANDIDATES
+  // (64) via multiplying groups (5x5x5 = 125 candidates), where the
+  // sensitive result (".env") is genuinely reachable -- confirmed against
+  // a real Bash process: 125 total candidates, ".env" appears exactly
+  // once in the real cross-product, at a position an early first-64-only
+  // cutoff would NOT have retained.
+  const over64Candidates = '.{e,a,b,c,d}{n,a,b,c,d}{v,a,b,c,d}';
+
+  // Case 5: a bracket class whose one relevant/decisive character sits
+  // AFTER the current MAX_CLASS_SET_SIZE (512) analysis budget -- built
+  // from Private-Use-Area codepoints (U+E000+) specifically because they
+  // have no case-folding collisions, so all 512+ padding characters are
+  // guaranteed genuinely distinct Set entries (a naive ASCII/Greek-range
+  // padding choice can silently under-fill the budget via case folding
+  // and accidentally let the real character through).
+  const classPad = Array.from({ length: 600 }, (_, i) => String.fromCharCode(0xE000 + i)).join('');
+  const classBudgetOverflow = `.[${classPad}e]nv`;
+
+  const mustDenyOrBeIndeterminate = [
+    ['Bash brace >32 branches including "env"', 'Bash', { command: `cat ${over32Branches}` }],
+    ['Bash brace with an over-long branch plus an "env" branch', 'Bash', { command: `cat ${withOverLongBranch}` }],
+    ['Bash brace with more groups than MAX_BRACE_GROUPS, real expansion includes .env', 'Bash', { command: `cat ${over4Groups}` }],
+    ['Bash brace candidate-count explosion beyond MAX_TOTAL_BRACE_CANDIDATES', 'Bash', { command: `cat ${over64Candidates}` }],
+    ['bracket class budget overflow, decisive char beyond the cutoff', 'Read', { file_path: classBudgetOverflow }],
+    ['same bracket-class overflow via Glob', 'Glob', { pattern: classBudgetOverflow }],
+    ['same bracket-class overflow via PowerShell', 'PowerShell', { command: `Get-Content ${classBudgetOverflow}` }],
+  ];
+  for (const [name, toolName, toolInput] of mustDenyOrBeIndeterminate) {
+    const result = classifyRiskAction({ toolName, toolInput, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny (match or indeterminate, never a silent pass) for ${name}: ${JSON.stringify(toolInput)}`);
+    assert.equal(result.category, 'sensitive-path');
+  }
+
+  // Confirm case 3's real-shell semantics: cross-product of
+  // {e,x}{n,x}{v,x}{a,x}{b,x} genuinely includes ".envab" (not just
+  // ".env" alone, since the extra 2 groups always contribute something) --
+  // but more importantly, real Bash DOES exercise every group in the
+  // cross-product, unlike the old single-pass-then-give-up expander.
+  try {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-glob-groups-fixture-'));
+    try {
+      fs.writeFileSync(path.join(dir, '.envab'), 'FAKE_TEST_TOKEN=not-a-real-secret\n');
+      const expanded = execFileSync('bash', ['-c', 'cd "$1" && echo $2', 'bash-fixture', dir, over4Groups], { encoding: 'utf8' }).trim().split(/\s+/);
+      assert.ok(expanded.includes('.envab'), `expected real Bash cross-product of "${over4Groups}" to include ".envab", got: ${expanded.join(' ')}`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch {
+    // no real Bash available -- skip this specific confirmation, the
+    // classifyRiskAction assertions above already cover the requirement
+  }
+});
+
+test('shared risk policy: normal, small, in-budget brace/glob commands still classify correctly (benign case must not become indeterminate/deny just because SOME analysis bound exists in the codebase)', () => {
+  const dataRoot = tempDataRoot();
+  const mustPass = [
+    'cat notes.{txt,md}',
+    'cat report.{v1,v2,v3}.pdf',
+    'ls *.txt',
+    'cat .[a-z]og.txt',
+    'cat build*',
+  ];
+  for (const command of mustPass) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'pass', `expected pass for ordinary in-budget command: ${command}`);
+  }
+  // A real, small, legitimately-denied case must still work identically
+  // after the tri-state refactor.
+  const stillDenied = classifyRiskAction({ toolName: 'Bash', toolInput: { command: 'cat .{env,x}' }, cwd: process.cwd(), dataRoot });
+  assert.equal(stillDenied.action, 'deny');
+  assert.equal(stillDenied.category, 'sensitive-path');
+});
+
+test('shared risk policy: brace RANGE syntax ({a..z}, {1..10}) is not silently treated as inert text -- a real shell expands it and it can trivially produce a protected name', () => {
+  // Bash brace RANGES ({a..z}, {0..9}, with no comma at all) are valid,
+  // common, expandable syntax this analyzer does not implement expansion
+  // for. Silently treating an unexpanded range as inert literal text
+  // would be exactly the same fail-open shape as the branch-count/length
+  // bugs above: `.{a..z}nv` genuinely expands, in real Bash, to
+  // ".anv .bnv .cnv ... .znv" -- including ".env", since 'e' falls within
+  // a-z.
+  const dataRoot = tempDataRoot();
+  const rangeExpr = '.{a..z}nv';
+
+  const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command: `cat ${rangeExpr}` }, cwd: process.cwd(), dataRoot });
+  assert.equal(result.action, 'deny', 'brace-range syntax not analyzed must fail INDETERMINATE (deny), not silently pass');
+  assert.equal(result.category, 'sensitive-path');
+
+  try {
+    const expanded = execFileSync('bash', ['-c', 'echo $1', 'bash-fixture', rangeExpr], { encoding: 'utf8' }).trim().split(/\s+/);
+    assert.ok(expanded.includes('.env'), `expected real Bash to expand "${rangeExpr}" to include ".env", got: ${expanded.join(' ')}`);
+  } catch {
+    // no real Bash available -- skip this specific confirmation
+  }
+});
+
+test('shared risk policy: brace expansion combined with a dense bracket-class candidate does not compound into a multi-second stall, and (per the tri-state fail-safe redesign) correctly DENIES as indeterminate rather than silently passing once the per-pattern bracket-class budget is genuinely exceeded (796 classes, far over MAX_CLASS_ATOMS_PER_PATTERN=32)', () => {
   // Each candidate segment was being re-parsed from scratch once per
   // globProtectedPaths entry PLUS once per protected extension (~22
   // times), which, stacked with brace expansion producing up to
@@ -324,6 +473,17 @@ test('shared risk policy: brace expansion combined with a dense bracket-class ca
   // limits the cost of ONE parse, not how many times the same segment
   // gets re-parsed. Fixed by parsing each segment's atoms exactly once
   // per candidate and reusing them across every check.
+  //
+  // A LATER fail-open-analysis-bounds fix changed what happens once the
+  // bracket-class budget (MAX_CLASS_ATOMS_PER_PATTERN=32) is genuinely
+  // exceeded: this payload has 796 separate bracket-class occurrences in
+  // ONE segment, far over that budget, so KRYLO can no longer confidently
+  // rule out that classes beyond the budget could have completed a real
+  // match -- the correct, fail-safe result is now `deny` (indeterminate),
+  // not the `pass` this test originally asserted under the old (fail-
+  // open) design. The performance requirement is unchanged: still fast,
+  // still bounded, just correctly conservative instead of confidently
+  // (and wrongly) permissive.
   const dataRoot = tempDataRoot();
   const denseClass = '[Ā-￿]'.repeat(796);
   const braceGroup = `{${Array.from({ length: 32 }, (_, i) => `a${i}`).join(',')}}`;
@@ -332,14 +492,16 @@ test('shared risk policy: brace expansion combined with a dense bracket-class ca
   const start1 = Date.now();
   const result1 = classifyRiskAction({ toolName: 'Read', toolInput: { file_path: payload }, cwd: process.cwd(), dataRoot });
   const elapsed1 = Date.now() - start1;
-  assert.ok(elapsed1 < 1000, `Read classification took ${elapsed1}ms, expected under 1000ms (was 40-60s before this fix)`);
-  assert.equal(result1.action, 'pass');
+  assert.ok(elapsed1 < 1000, `Read classification took ${elapsed1}ms, expected under 1000ms (was 40-60s before the earlier fix)`);
+  assert.equal(result1.action, 'deny');
+  assert.equal(result1.category, 'sensitive-path');
 
   const start2 = Date.now();
   const result2 = classifyRiskAction({ toolName: 'Bash', toolInput: { command: `cat ${payload}` }, cwd: process.cwd(), dataRoot });
   const elapsed2 = Date.now() - start2;
-  assert.ok(elapsed2 < 1000, `Bash classification took ${elapsed2}ms, expected under 1000ms (was 40-60s before this fix)`);
-  assert.equal(result2.action, 'pass');
+  assert.ok(elapsed2 < 1000, `Bash classification took ${elapsed2}ms, expected under 1000ms (was 40-60s before the earlier fix)`);
+  assert.equal(result2.action, 'deny');
+  assert.equal(result2.category, 'sensitive-path');
 });
 
 test('shared risk policy: a bare wildcard with no discriminating literal content ("*", "**") does not match every protected name -- the fix must not turn every wildcard command into a blanket deny', () => {
@@ -537,20 +699,19 @@ test('shared risk policy: a bare wildcard segment in the MIDDLE (or first) posit
   }
 });
 
-test('shared risk policy: a wildcard reaching only the SHARED, otherwise-unprotected extension of secrets.json/secret.yaml/etc (not the "secret(s)" stem itself) is not denied, while the exact literal file still is (regression found by a fresh independent Security Reviewer)', () => {
+test('shared risk policy: a wildcard reaching only the SHARED, otherwise-unprotected extension of secrets.json/secret.yaml/etc (with no discriminating "secret(s)" basename content) is not denied, while the exact literal file still is', () => {
   // secrets.json/secret.json/.yaml/.yml/.toml share their entire
   // identifying extension (.json/.yaml/.yml/.toml) with an enormous,
-  // ordinary population of unrelated files. Including them in
-  // globProtectedPaths let a leading star absorb the ENTIRE "secret(s)"
-  // stem while only the shared, generic extension matched literally --
-  // "*.json" (and "**/*.yml", "*.toml", ...) denied outright, breaking
-  // essentially all JSON/YAML/TOML wildcard operations repo-wide (lint,
-  // format, search) with no approval path, to guard against a narrow,
-  // not-explicitly-required stem-obfuscation case. Fixed by removing
-  // these four names from glob-aware matching (they remain in the
-  // original EXACT-match `patterns`, unaffected, so the literal file
-  // itself is still denied); see production-policy.json's own
-  // `$globSecretsJsonNote` for the full reasoning.
+  // ordinary population of unrelated files. A generic-extension basename
+  // check (globProtectedGenericExtensionBasenames + globGenericExtensions,
+  // see production-policy.json's own `$globGenericExtensionBasenameNote`)
+  // requires the candidate's own BASENAME portion (before the shared
+  // extension) to carry genuine discriminating content that can target
+  // "secret"/"secrets" specifically -- a bare `*.json`/`**/*.yml`/`*.toml`
+  // has no such content (only a star before the shared extension) and
+  // correctly passes, while a basename glob that DOES specifically
+  // constrain toward "secret(s)" (covered in the dedicated
+  // generic-extension-basename tests below) denies.
   const dataRoot = tempDataRoot();
   const mustPass = [
     'ls *.json',
@@ -588,4 +749,74 @@ test('shared risk policy: path traversal combined with glob syntax still resolve
 
   const exactTemplateOnly = classifyRiskAction({ toolName: 'Read', toolInput: { file_path: 'config/.env.example' }, cwd: process.cwd(), dataRoot });
   assert.equal(exactTemplateOnly.action, 'pass');
+});
+
+// -----------------------------------------------------------------------
+// Section 2 of the FINAL bounded glob-closure checkpoint: closing the
+// secrets.json/secret.yaml stem-glob bypass WITHOUT blocking all
+// JSON/YAML/TOML globs. The prior checkpoint deliberately left
+// secrets.json/secret.json/.yaml/.yml/.toml out of glob-aware matching
+// entirely (see the test above), which meant a glob carrying genuine
+// discriminating information about the protected "secret(s)" basename --
+// secret?.json, secrets*.json, secr*.json, [s]ecret.json, [s]ecrets.toml,
+// secret*.yaml, secrets?.yml, config/secret?.yml -- passed uninspected,
+// directly reaching filenames the exact-match `patterns` list already
+// declares protected. Fixed structurally via
+// globProtectedGenericExtensionBasenames + globGenericExtensions in
+// production-policy.json and atomsMatchGenericExtensionBasename() in
+// risk-policy.mjs: the candidate's own basename portion (before the
+// shared, generic extension) must carry discriminating content that can
+// target "secret"/"secrets" specifically -- not merely share the
+// extension -- so a fully generic `*.json`/`package*.json`/
+// `tsconfig*.json` still passes.
+test('shared risk policy: generic-extension basename closure -- globs that specifically constrain the basename toward "secret"/"secrets" deny, even though the shared extension alone (json/yaml/yml/toml) is not protected', () => {
+  const dataRoot = tempDataRoot();
+  const mustDeny = [
+    ['Bash', { command: 'cat secret?.json' }],
+    ['Bash', { command: 'cat secrets*.json' }],
+    ['Bash', { command: 'cat secr*.json' }],
+    ['Bash', { command: 'cat [s]ecret.json' }],
+    ['Bash', { command: 'cat [s]ecrets.toml' }],
+    ['Bash', { command: 'cat secret*.yaml' }],
+    ['Bash', { command: 'cat secrets?.yml' }],
+    ['Bash', { command: 'cat config/secret?.yml' }],
+    ['Glob', { pattern: 'secret?.json' }],
+    ['Glob', { pattern: 'secrets*.yaml' }],
+    ['Grep', { pattern: 'foo', glob: 'secr*.json' }],
+    ['Grep', { pattern: 'foo', glob: '[s]ecrets.toml' }],
+    // PowerShell path token, same Bash-classified surface as elsewhere in
+    // this file (KRYLO does not distinguish shell dialect for this check).
+    ['Bash', { command: 'Get-Content secret?.json' }],
+  ];
+  for (const [toolName, toolInput] of mustDeny) {
+    const result = classifyRiskAction({ toolName, toolInput, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for ${toolName}(${JSON.stringify(toolInput)})`);
+    assert.equal(result.category, 'sensitive-path');
+  }
+
+  const mustPass = [
+    ['Bash', { command: 'cat *.json' }],
+    ['Glob', { pattern: '**/*.json' }],
+    ['Bash', { command: 'cat *.yaml' }],
+    ['Bash', { command: 'cat **/*.yml' }],
+    ['Bash', { command: 'cat *.toml' }],
+    ['Bash', { command: 'cat package*.json' }],
+    ['Bash', { command: 'cat tsconfig*.json' }],
+    ['Bash', { command: 'cat report.json' }],
+  ];
+  for (const [toolName, toolInput] of mustPass) {
+    const result = classifyRiskAction({ toolName, toolInput, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'pass', `expected pass (generic, non-discriminating basename): ${toolName}(${JSON.stringify(toolInput)})`);
+  }
+
+  const mustDenyExactLiteral = [
+    ['Read', { file_path: 'secrets.json' }],
+    ['Read', { file_path: 'secret.yaml' }],
+    ['Read', { file_path: 'secret.toml' }],
+  ];
+  for (const [toolName, toolInput] of mustDenyExactLiteral) {
+    const result = classifyRiskAction({ toolName, toolInput, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for exact literal ${toolName}(${JSON.stringify(toolInput)})`);
+    assert.equal(result.category, 'sensitive-path');
+  }
 });

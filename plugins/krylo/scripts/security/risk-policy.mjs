@@ -559,29 +559,31 @@ function matchesSensitivePath(policy, text) {
 //      not depend on the attacker's overall pattern length).
 // -----------------------------------------------------------------------
 
-const MAX_SUFFIX_SEARCH_ATOMS = 64;
-// Independent review found a genuine ~19-second stall: Read/Write/Edit/
-// NotebookEdit/Glob/Grep path-shaped fields have no equivalent of
-// MAX_BASH_COMMAND_LENGTH, so an attacker-controlled ~990,000-character
-// candidate (well within the 1MB Hook-stdin cap) containing hundreds of
-// thousands of bracket-class range specs, each individually bounded but
-// with no limit on how many a body can contain, drove total work into the
-// hundreds of millions of Set insertions. MAX_CLASS_SET_SIZE bounds a
-// single bracket class's total distinct-character budget regardless of
-// body length or repeated ranges.
+// -----------------------------------------------------------------------
+// A fresh, focused review of the whole glob-closure feature found the
+// ROOT design flaw underlying several of the fixes above: every analysis
+// bound (brace branches, brace-branch length, brace groups, total
+// brace-expanded candidates, bracket-class character budget, bracket-
+// class count per pattern) treated "budget exceeded" as either an inert
+// literal (the text is left unexpanded, then almost certainly matches
+// nothing) or a silently-truncated result (a bracket class missing some
+// of its real characters) -- both of which resolve to a silent NO_MATCH
+// when the TRUE, unbounded analysis might have found a match. That is
+// fail-open: an attacker only has to exceed whichever budget is smallest
+// to make KRYLO analyze nothing and pass. Concretely, a brace group with
+// 33 branches (one over MAX_BRACE_BRANCHES) including "env" was
+// classified `pass`, even though real Bash still expands it and includes
+// `.env`.
 //
-// An earlier version of this fix ALSO added a whole-candidate length cap
-// (skip the glob-aware check entirely above some length). A further
-// independent review found that was itself a fail-OPEN bypass, not a
-// bound: padding a candidate with harmless leading segments just past the
-// cap (`./` repeated 2100 times, then the real `.e*`) evaded the glob
-// check entirely, reopening every case this fix exists to close. Removed
-// in favor of the real fix: only the TRAILING segments a protected path
-// can possibly match against are ever examined at all (see
-// globCouldTargetSensitivePath's own `maxProtectedPathSegments` slicing),
-// combined with parsing each segment exactly once (see atomsMatchLiteral's
-// own comment) -- neither the number nor the length of any LEADING
-// segments has any bearing on cost once only the tail is considered.
+// The functions below are refactored around an explicit TRI-STATE
+// result: MATCH, NO_MATCH, or INDETERMINATE. classifyRiskAction's own
+// isSensitivePath() maps MATCH and INDETERMINATE alike to a deny -- an
+// attacker-controlled complexity/budget limit must never turn into pass.
+// Every bound below still exists and is still enforced (this remains
+// bounded, ReDoS-free, deterministic analysis of ordinary, in-scope glob
+// syntax, not a general shell interpreter); what changed is only what
+// happens when a bound is actually hit: fail-safe deny, not silent pass.
+// -----------------------------------------------------------------------
 const MAX_CLASS_SET_SIZE = 512;
 // A realistic glob for one of KRYLO's own protected names never needs
 // anywhere near this many bracket-class occurrences; caps the cost of
@@ -602,10 +604,22 @@ const MAX_BRACE_BRANCH_LENGTH = 128;
 const MAX_BRACE_GROUPS = 4;
 const MAX_TOTAL_BRACE_CANDIDATES = 64;
 
+// Parses a glob pattern into atoms. Returns `{ atoms, indeterminate }`:
+// `indeterminate` is true whenever an analysis budget below was actually
+// exhausted with real, unexamined pattern content remaining -- meaning
+// the returned atoms are a known-INCOMPLETE picture of the pattern, not a
+// confident "this is genuinely all there is to it". A caller that gets
+// back `indeterminate: true` must treat the overall result as
+// INDETERMINATE (fail-safe deny) rather than trusting a NO_MATCH computed
+// from incomplete atoms, which is exactly the fail-open shape a fresh
+// review found: a bracket-class budget cutoff could silently exclude the
+// one character that would have made a real match, turning a true MATCH
+// into an false NO_MATCH.
 function parseGlobAtoms(pattern) {
   const atoms = [];
   let i = 0;
   let classAtomCount = 0;
+  let indeterminate = false;
   while (i < pattern.length) {
     const ch = pattern[i];
     if (ch === '*') {
@@ -616,19 +630,23 @@ function parseGlobAtoms(pattern) {
       atoms.push({ type: 'any' });
       i += 1;
     } else if (ch === '[' && classAtomCount >= MAX_CLASS_ATOMS_PER_PATTERN) {
-      // Already at the per-pattern bracket-class budget: treat any
-      // further '[' as a literal character rather than parsing (and
-      // costing) another class. A legitimate glob for a protected name
-      // never needs more than a handful of bracket classes.
+      // Already at the per-pattern bracket-class budget. A legitimate
+      // glob for a protected name never needs more than a handful of
+      // bracket classes, but we genuinely do not know what this one would
+      // have contributed -- flag indeterminate rather than silently
+      // treating '[' as an inert literal character (which previously let
+      // the pattern fall through to a confident, but potentially wrong,
+      // NO_MATCH).
+      indeterminate = true;
       atoms.push({ type: 'lit', ch: '[' });
       i += 1;
     } else if (ch === '[') {
       const close = pattern.indexOf(']', i + 1);
       if (close === -1) {
         // No closing ']' -- an unterminated bracket expression is not a
-        // valid glob class; treat the '[' as a literal character, the
-        // same way a real shell does when a bracket expression is
-        // malformed, rather than throwing or looping.
+        // valid glob class in any supported shell either; treating the
+        // '[' as a literal character here matches real shell behavior
+        // exactly, not merely a convenient truncation.
         atoms.push({ type: 'lit', ch: '[' });
         i += 1;
         continue;
@@ -642,34 +660,40 @@ function parseGlobAtoms(pattern) {
       }
       const set = new Set();
       let j = 0;
-      // Independent review found the per-range 1024-codepoint cap below
-      // does not bound the TOTAL cost of a bracket body containing MANY
-      // range specs back to back (e.g. a minimal-to-maximal codepoint
-      // range repeated 330,000 times inside one class) -- each range is
-      // individually capped, but
-      // there is no limit on how many capped ranges the body can contain,
-      // measured taking ~19 SECONDS for a ~990,000-character candidate on
-      // a Read/Write/Glob/Grep path field (none of which has the Bash/
-      // PowerShell MAX_BASH_COMMAND_LENGTH guard). A bracket class needing
-      // more than MAX_CLASS_SET_SIZE distinct characters has no realistic
-      // legitimate use in this policy's protected-name matching, so once
-      // the set reaches that size, the rest of the body is simply not
-      // examined -- bounding total cost regardless of body length.
-      while (j < body.length && set.size < MAX_CLASS_SET_SIZE) {
+      let classIndeterminate = false;
+      // A bracket class needing more than MAX_CLASS_SET_SIZE distinct
+      // characters has no realistic legitimate use in this policy's
+      // protected-name matching, so this remains bounded -- but unlike an
+      // earlier version, exhausting the budget WITH BODY STILL REMAINING
+      // now flags the whole analysis indeterminate (fail-safe deny)
+      // instead of silently matching against only the characters that
+      // happened to fit before the cutoff.
+      while (j < body.length) {
+        if (set.size >= MAX_CLASS_SET_SIZE) {
+          classIndeterminate = true;
+          break;
+        }
         // A bounded range (a-z): expand up to 1024 code points per range
         // so a pathological range spec cannot itself become a cost sink.
+        // If the range itself would need more than that many code points,
+        // the same indeterminate flag applies -- we do not know whether
+        // the true (unbounded) range would have included a decisive
+        // character beyond the 1024 we examined.
         if (body[j + 1] === '-' && j + 2 < body.length) {
           const lo = Math.min(body.charCodeAt(j), body.charCodeAt(j + 2));
           const hi = Math.max(body.charCodeAt(j), body.charCodeAt(j + 2));
-          for (let c = lo; c <= hi && c - lo < 1024 && set.size < MAX_CLASS_SET_SIZE; c += 1) {
+          let c = lo;
+          for (; c <= hi && c - lo < 1024 && set.size < MAX_CLASS_SET_SIZE; c += 1) {
             set.add(String.fromCharCode(c).toLowerCase());
           }
+          if (c <= hi) classIndeterminate = true;
           j += 3;
         } else {
           set.add(body[j].toLowerCase());
           j += 1;
         }
       }
+      if (classIndeterminate) indeterminate = true;
       atoms.push({ type: 'class', set, negate });
       i = close + 1;
     } else {
@@ -677,7 +701,7 @@ function parseGlobAtoms(pattern) {
       i += 1;
     }
   }
-  return atoms;
+  return { atoms, indeterminate };
 }
 
 function atomMatchesChar(atom, ch) {
@@ -759,31 +783,77 @@ function atomsMatchLiteral(atoms, literalSegment) {
   return globAtomsMatchLiteral(atoms, literalSegment.toLowerCase());
 }
 
-// Does some SUFFIX of candidateSegment (as a glob) fully match
-// suffixLiteral (e.g. ".pem")? Bounded to the last MAX_SUFFIX_SEARCH_ATOMS
-// atoms -- independent of the candidate's overall length, since a real
-// extension glob never needs more trailing wiggle room than that, and
-// consecutive `*` already collapsed to one atom during parsing.
+// Does some SUFFIX of the atoms (as a glob) fully match suffixLiteral
+// (e.g. ".pem")? Independent review found the original version bounded
+// this search to a fixed MAX_SUFFIX_SEARCH_ATOMS=64 window -- a genuine
+// fail-open risk if a pattern could ever need more trailing "wiggle room"
+// than that. This version is PROVABLY COMPLETE instead of merely
+// generously bounded, with no arbitrary constant at all: walking k
+// backward from atoms.length, every non-star atom included in the slice
+// mandatorily consumes exactly one character of the (fixed-length)
+// target literal -- so once the running count of non-star atoms in the
+// slice exceeds the target's own length, that slice (and, since the
+// count only grows as k decreases, every slice for a SMALLER k too) is
+// mathematically impossible to match, and the search can stop. This
+// naturally bounds total cost to roughly the target length (a handful of
+// atoms for the longest protected extension) regardless of how long or
+// complex the attacker's overall pattern is, without ever needing to
+// guess whether a match might exist further back.
 //
-// Independent review found the discriminating-content guard was only
-// checked against the FULL atom list, not each SUFFIX slice actually
-// tested in the loop below -- so `build*`, `ls -la ~/proj*`, or any other
-// ordinary prefix-then-star command (which plainly HAS discriminating
-// content overall) still matched via the degenerate trailing-star-only
-// slice (`atoms.slice(k)` for k = the position of the final `*`, which by
-// itself carries none), hard-denying routine wildcard commands with no
-// approval path -- the exact blanket-wildcard outcome this checkpoint's
-// task explicitly prohibits, just displaced from a bare `*` to `x*`. The
-// guard must apply to the SLICE being tested, not merely the pattern as a
-// whole, since a slice with real content overall can still contain a
-// suffix that is purely wildcard.
+// (Also fixes the earlier discriminating-content guard bug: `build*`
+// previously matched via the degenerate trailing-star-only slice, which
+// by itself carries no discriminating signal even though the pattern as
+// a whole plainly does -- the guard below is checked per slice, not once
+// against the whole pattern.)
 function atomsMatchExtensionSuffix(atoms, suffixLiteral) {
   const literal = suffixLiteral.toLowerCase();
-  const searchFrom = Math.max(0, atoms.length - MAX_SUFFIX_SEARCH_ATOMS);
-  for (let k = atoms.length; k >= searchFrom; k -= 1) {
+  let nonStarCount = 0;
+  for (let k = atoms.length; k >= 0; k -= 1) {
+    if (k < atoms.length && atoms[k].type !== 'star') {
+      nonStarCount += 1;
+      if (nonStarCount > literal.length) break;
+    }
     const slice = atoms.slice(k);
-    if (!hasDiscriminatingContent(slice)) continue;
-    if (globAtomsMatchLiteral(slice, literal)) return true;
+    if (hasDiscriminatingContent(slice) && globAtomsMatchLiteral(slice, literal)) return true;
+  }
+  return false;
+}
+
+// Closes the secrets.json/secret.yaml "generic extension" bypass:
+// globProtectedExtensions above unconditionally protects an extension
+// regardless of basename, which is correct for pem/pfx/p12/key/keystore/jks
+// (no broad legitimate use), but json/yaml/yml/toml are extremely common
+// extensions used by countless unrelated files -- protecting the whole
+// extension the same way would deny '*.json'/'**/*.yml'/'*.toml' outright.
+// Instead, a SEPARATE policy list (globProtectedGenericExtensionBasenames +
+// globGenericExtensions) requires the candidate's own BASENAME portion
+// (everything before the shared extension) to carry genuine discriminating
+// content that can itself target one of the protected basenames
+// ("secret"/"secrets"): a bare `*.json` has no discriminating basename
+// content at all and passes, while `secret?.json`/`secrets*.json`/
+// `secr*.json`/`[s]ecret.json` all specifically constrain the basename
+// toward "secret"/"secrets" and deny.
+//
+// Symmetric to atomsMatchExtensionSuffix's provably-complete backward
+// search: walk the split point between "basename" and "extension" forward
+// from the start, tracking a running count of non-star atoms consumed by
+// the candidate basename slice; once that count exceeds the protected
+// basename's own length, every LARGER split point only adds more
+// mandatory characters and can never match either -- so the search can
+// stop, with no fixed bound and no risk of silently giving up early.
+function atomsMatchGenericExtensionBasename(atoms, basenameLiteral, extensionSuffixLiteral) {
+  const basename = basenameLiteral.toLowerCase();
+  let nonStarCount = 0;
+  for (let p = 0; p <= atoms.length; p += 1) {
+    if (p > 0 && atoms[p - 1].type !== 'star') {
+      nonStarCount += 1;
+      if (nonStarCount > basename.length) break;
+    }
+    const prefix = atoms.slice(0, p);
+    if (!hasDiscriminatingContent(prefix)) continue;
+    if (!globAtomsMatchLiteral(prefix, basename)) continue;
+    const remainder = atoms.slice(p);
+    if (atomsMatchExtensionSuffix(remainder, extensionSuffixLiteral)) return true;
   }
   return false;
 }
@@ -799,68 +869,84 @@ function atomsMatchExtensionSuffix(atoms, suffixLiteral) {
 // Bounded, simple Bash brace-expansion support: a single, non-nested
 // `{a,b,c}` group is expanded into its literal alternatives (each
 // re-checked through the same glob-aware path). Deliberately narrow, per
-// this checkpoint's own instruction not to build a shell interpreter:
-// nested braces, more than MAX_BRACE_BRANCHES alternatives, or an
-// over-long branch fall through untouched (treated as ordinary text,
-// which the existing exact matcher and the rest of this function still
-// see normally).
-// Expand the first, non-nested `{a,b,c}` group found in `text`. Returns
-// `null` (not a one-element array) when there is nothing valid to expand,
-// so the iterative driver below can tell "no group here" apart from "one
-// literal candidate" and stop cleanly.
+// this checkpoint's own instruction not to build a shell interpreter --
+// but every construct genuinely out of scope (nesting, a brace RANGE like
+// `{a..z}`/`{1..10}`, too many branches, an over-long branch) now reports
+// `indeterminate`, not `inert`: a fresh review found treating these as
+// inert literal text was itself fail-open, since a real shell still
+// expands every one of them and any could produce a protected name
+// (`.{a..z}nv` genuinely expands, in real Bash, to include `.env`).
+// `inert` is reserved for constructs that are GENUINELY not brace syntax
+// in any supported shell either (no closing `}` at all, or a body with
+// neither a comma nor a range operator) -- there, "no expansion occurs"
+// is a fact about real shell behavior, not an analysis shortcut.
 function expandFirstBraceGroup(text) {
   const open = text.indexOf('{');
-  if (open === -1) return null;
+  if (open === -1) return { status: 'inert' };
   const close = text.indexOf('}', open + 1);
-  if (close === -1) return null;
+  if (close === -1) return { status: 'inert' }; // unterminated: not valid brace syntax in a real shell either
   const body = text.slice(open + 1, close);
-  if (body.includes('{') || body.includes('}')) return null; // no nesting
+  if (body.includes('{') || body.includes('}')) {
+    return { status: 'indeterminate' }; // nested braces ARE valid, expandable bash syntax we do not implement
+  }
+  // A brace RANGE ({a..z}, {0..9}, {1..10..2}) has no comma at all but is
+  // valid, common, expandable bash syntax -- flagged indeterminate rather
+  // than falling through to "no comma -> inert" below.
+  if (/^[^,]*\.\.[^,]*$/.test(body)) {
+    return { status: 'indeterminate' };
+  }
   const branches = body.split(',');
-  if (branches.length < 2 || branches.length > MAX_BRACE_BRANCHES) return null;
-  if (branches.some((b) => b.length > MAX_BRACE_BRANCH_LENGTH)) return null;
+  if (branches.length < 2) return { status: 'inert' }; // neither a comma-list nor a range: genuinely not brace syntax
+  if (branches.length > MAX_BRACE_BRANCHES) return { status: 'indeterminate' };
+  if (branches.some((b) => b.length > MAX_BRACE_BRANCH_LENGTH)) return { status: 'indeterminate' };
   const prefix = text.slice(0, open);
   const suffix = text.slice(close + 1);
-  return branches.map((b) => `${prefix}${b}${suffix}`);
+  return { status: 'expanded', candidates: branches.map((b) => `${prefix}${b}${suffix}`) };
 }
 
-// Independent review found the original single-pass version only ever
-// expanded the FIRST `{...}` group in the text, leaving a SECOND group
-// (`.e{n,m}{v,w}`) or a group beyond MAX_BRACE_BRANCHES/
-// MAX_BRACE_BRANCH_LENGTH (`.{env,z0,...,z31}`, 33 branches) in the
-// output UNEXPANDED -- with literal `{`/`}` characters still in the
-// candidate, which then matched nothing, even though a real shell
-// expands every group and Bash has no such branch-count limit. Iterates
-// to a fixed point (every reachable, in-bounds group gets expanded, in
-// any candidate produced by a previous round), bounded by
-// MAX_BRACE_GROUPS rounds and a hard MAX_TOTAL_BRACE_CANDIDATES ceiling
-// on the total candidate count so two or more groups cannot combine into
-// a combinatorial explosion. A group that is out of bounds (too many
-// branches, an over-long branch, or nesting) is left as literal text in
-// whichever candidate contains it, exactly like the original single-pass
-// version -- it is not silently dropped, just not expanded.
+// Iterates expandFirstBraceGroup() to a fixed point so MULTIPLE groups in
+// one candidate (`.e{n,m}{v,w}`) are all expanded, not just the first --
+// an earlier review found the original single-pass version left any
+// SECOND group unexpanded (literal `{`/`}` still present, matching
+// nothing), even though a real shell expands every group in a word.
+// Bounded by MAX_BRACE_GROUPS rounds and a hard
+// MAX_TOTAL_BRACE_CANDIDATES ceiling so two or more groups cannot combine
+// into a combinatorial explosion -- but per the tri-state redesign above,
+// exhausting EITHER bound while a genuinely expandable (or indeterminate)
+// group still remains now reports `indeterminate` for the whole
+// candidate, not a silent "here's what we got so far".
 function expandSimpleBraceGroup(text) {
   let candidates = [text];
   for (let round = 0; round < MAX_BRACE_GROUPS; round += 1) {
     let expandedAnything = false;
     const next = [];
     for (const candidate of candidates) {
-      const expanded = expandFirstBraceGroup(candidate);
-      if (expanded === null) {
+      const result = expandFirstBraceGroup(candidate);
+      if (result.status === 'indeterminate') return { status: 'indeterminate' };
+      if (result.status === 'inert') {
         next.push(candidate);
         continue;
       }
       expandedAnything = true;
-      for (const branch of expanded) {
+      for (const branch of result.candidates) {
         next.push(branch);
-        if (next.length >= MAX_TOTAL_BRACE_CANDIDATES) {
-          return next;
-        }
+        if (next.length > MAX_TOTAL_BRACE_CANDIDATES) return { status: 'indeterminate' };
       }
     }
     candidates = next;
     if (!expandedAnything) break;
   }
-  return candidates;
+  // MAX_BRACE_GROUPS rounds are exhausted (or expansion legitimately
+  // stopped early) -- if any candidate STILL contains a group we would
+  // expand or flag indeterminate, our picture of the possible outcomes is
+  // incomplete, and the whole result must be indeterminate rather than a
+  // confident "here is the full candidate set".
+  const stillExpandable = candidates.some((c) => {
+    const r = expandFirstBraceGroup(c);
+    return r.status === 'expanded' || r.status === 'indeterminate';
+  });
+  if (stillExpandable) return { status: 'indeterminate' };
+  return { status: 'expanded', candidates };
 }
 
 /**
@@ -870,44 +956,64 @@ function expandSimpleBraceGroup(text) {
  * `globProtectedExtensions`). Complements matchesSensitivePath() (exact
  * literal matching, unchanged) rather than replacing it.
  *
+ * Returns one of three string results -- MATCH, NO_MATCH, or
+ * INDETERMINATE -- rather than a boolean. A fresh review's own explicit
+ * security rule: MATCH and INDETERMINATE both deny; only a confident
+ * NO_MATCH continues normal classification. An attacker-controlled
+ * complexity/budget limit inside this function must never silently
+ * resolve to NO_MATCH just because analysis stopped -- see the
+ * `GLOB_MATCH`/`GLOB_NO_MATCH`/`GLOB_INDETERMINATE` constants below and
+ * every "indeterminate" flag threaded through the helpers above.
+ *
  * A glob that can ALSO match an exempted public template name (e.g.
  * `.env*` also matches `.env.example`) is still denied here: the template
  * exception in matchesSensitivePath() only ever applies to an EXACT,
  * literal template filename with no glob metacharacters at all, since
  * this function only runs when a glob metacharacter is present.
  */
+const GLOB_MATCH = 'match';
+const GLOB_NO_MATCH = 'no_match';
+const GLOB_INDETERMINATE = 'indeterminate';
+
 function globCouldTargetSensitivePath(policy, text) {
-  if (typeof text !== 'string' || text === '') return false;
+  if (typeof text !== 'string' || text === '') return GLOB_NO_MATCH;
   // Independent review found brace expansion below was unreachable for a
   // BRACE-ONLY pattern (`.{env,x}` contains no `*`/`?`/`[` at all), even
   // though a real shell expands it unconditionally -- `{` is now part of
   // this initial gate too.
-  if (!/[*?[{]/.test(text)) return false; // no glob/brace metacharacter: nothing for this check to do
-  const candidates = expandSimpleBraceGroup(text);
+  if (!/[*?[{]/.test(text)) return GLOB_NO_MATCH; // no glob/brace metacharacter: nothing for this check to do
+  const expansion = expandSimpleBraceGroup(text);
+  if (expansion.status === GLOB_INDETERMINATE) return GLOB_INDETERMINATE;
+  const candidates = expansion.candidates;
   const globProtectedPaths = Array.isArray(policy.sensitivePaths.globProtectedPaths)
     ? policy.sensitivePaths.globProtectedPaths
     : [];
   const globProtectedExtensions = Array.isArray(policy.sensitivePaths.globProtectedExtensions)
     ? policy.sensitivePaths.globProtectedExtensions
     : [];
-  // A further independent review found the length cap that used to sit
-  // here (and the per-candidate one below) was a fail-OPEN bypass, not a
-  // safety bound: `Read{file_path: './'.repeat(2100) + '.e*'}` padded the
-  // candidate just past the cap and evaded the glob check entirely,
-  // reopening every case this fix exists to close. The actual cost driver
-  // was never the candidate's overall length -- only the TRAILING
-  // segments a protected path can possibly match against ever matter (the
-  // longest, `.config/gh/hosts.yml`, needs 3), and re-parsing was already
-  // eliminated below -- so only the last `maxProtectedPathSegments`
+  const globProtectedGenericExtensionBasenames = Array.isArray(
+    policy.sensitivePaths.globProtectedGenericExtensionBasenames,
+  )
+    ? policy.sensitivePaths.globProtectedGenericExtensionBasenames
+    : [];
+  const globGenericExtensions = Array.isArray(policy.sensitivePaths.globGenericExtensions)
+    ? policy.sensitivePaths.globGenericExtensions
+    : [];
+  // Independent review found a whole-candidate length cap that used to
+  // sit here was a fail-OPEN bypass, not a safety bound: padding a
+  // candidate with harmless leading segments just past the cap evaded
+  // the glob check entirely. The actual cost driver was never the
+  // candidate's overall length -- only the TRAILING segments a protected
+  // path can possibly match against ever matter (the longest,
+  // `.config/gh/hosts.yml`, needs 3), and re-parsing is done exactly once
+  // per segment below -- so only the last `maxProtectedPathSegments`
   // segments are ever parsed or examined at all, regardless of how many
-  // (or how long) the leading segments are. Measured: the original
-  // 990,000-character single-segment stall now resolves in ~0.1s with NO
-  // length bail-out of any kind, and the padding-bypass repro above
-  // correctly denies again.
+  // (or how long) the leading segments are.
   const maxProtectedPathSegments = globProtectedPaths.reduce(
     (max, protectedPath) => Math.max(max, protectedPath.split('/').length),
     1,
   );
+  let sawIndeterminateSegment = false;
   for (const candidate of candidates) {
     const allSegments = candidate.replace(/\\/g, '/').split('/').filter((s) => s !== '');
     if (allSegments.length === 0) continue;
@@ -919,7 +1025,9 @@ function globCouldTargetSensitivePath(policy, text) {
     // extension (roughly 22 times), which, stacked with brace expansion's
     // up to MAX_BRACE_BRANCHES candidates, multiplied into a 40-60 second
     // stall for a bracket-class-heavy candidate.
-    const segmentAtoms = segments.map((segment) => parseGlobAtoms(segment));
+    const segmentParses = segments.map((segment) => parseGlobAtoms(segment));
+    if (segmentParses.some((p) => p.indeterminate)) sawIndeterminateSegment = true;
+    const segmentAtoms = segmentParses.map((p) => p.atoms);
     for (const protectedPath of globProtectedPaths) {
       const protectedSegments = protectedPath.split('/');
       if (segments.length < protectedSegments.length) continue;
@@ -976,19 +1084,32 @@ function globCouldTargetSensitivePath(policy, text) {
         break;
       }
       if (matchesAll) {
-        return true;
+        return GLOB_MATCH;
       }
     }
     const lastSegmentAtoms = segmentAtoms[segmentAtoms.length - 1];
     for (const ext of globProtectedExtensions) {
-      if (atomsMatchExtensionSuffix(lastSegmentAtoms, `.${ext}`)) return true;
+      if (atomsMatchExtensionSuffix(lastSegmentAtoms, `.${ext}`)) return GLOB_MATCH;
+    }
+    for (const ext of globGenericExtensions) {
+      for (const protectedBasename of globProtectedGenericExtensionBasenames) {
+        if (atomsMatchGenericExtensionBasename(lastSegmentAtoms, protectedBasename, `.${ext}`)) {
+          return GLOB_MATCH;
+        }
+      }
     }
   }
-  return false;
+  // A bracket-class or per-pattern-class-count budget was exhausted on
+  // some examined segment, with no confirmed MATCH found elsewhere: we
+  // cannot rule out that the unexamined portion of that class would have
+  // completed a real match, so this is INDETERMINATE (fail-safe deny),
+  // not a confident NO_MATCH.
+  return sawIndeterminateSegment ? GLOB_INDETERMINATE : GLOB_NO_MATCH;
 }
 
 function isSensitivePath(policy, text) {
-  return matchesSensitivePath(policy, text) || globCouldTargetSensitivePath(policy, text);
+  if (matchesSensitivePath(policy, text)) return true;
+  return globCouldTargetSensitivePath(policy, text) !== GLOB_NO_MATCH;
 }
 
 /**
