@@ -54,12 +54,16 @@ Every runtime CLI call below resolves `${PLUGIN_ROOT}` from the Codex-provided `
    node "${PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --set-criterion AC-1=proven --evidence EV-1
    ```
 
+## Cross-Harness (optional second opinion -- currently unusable from Codex)
+
+9. `cross-harness-run.mjs` (`docs/adr/0030-cross-harness-advisory-workers.md`) lets a run request one bounded, read-only, advisory review from the opposite provider's CLI. On the Claude host this actually works (Claude's native `ask` prompt gates it). **On this Codex host it does not**: the command is a `require-approval` action, and this Skill's own security contract above means every `require-approval` action denies deterministically on Codex regardless of tool or permission mode -- so a Cross-Harness invocation from here always fails closed before a worker is ever spawned, exactly like any other gated action. Do not attempt it as a workaround for the approval boundary above; treat the deterministic denial as expected, not a bug.
+
 ## Orbit and completion
 
-9. When criteria or valid findings remain, continue through KRYLO Orbit (`${PLUGIN_ROOT}/references/orbit-policy.md`): `--orbit-cycle` per cycle, `--record-progress`/`--record-no-progress`, `--add-fingerprint <category>:<hash>` for failures. When a fingerprint repeats, change strategy (`--note-strategy`); after two failed normal corrections, consider the deep-debugger. The Stop gate enforces the budget deterministically.
-10. Production, destructive, financial, release, identity, secret, and external-write actions stop at the risk gate -- and, on Codex, are additionally denied outright at the tool level regardless (this Skill's own security contract above). Record them with `--request-approval <actionClass> --summary "<summary>"` and end with `--terminal RISK_APPROVAL_REQUIRED` instead of attempting the action.
-11. Stop only in an approved terminal state. `--terminal VERIFIED_COMPLETE` succeeds only when every criterion is proven with non-stale passing evidence and no critical or high finding is open; otherwise use SAFE_BLOCKED, USER_DECISION_REQUIRED, RISK_APPROVAL_REQUIRED, ITERATION_LIMIT_REACHED, or CANCELLED_BY_USER.
-12. Produce the final report per `${PLUGIN_ROOT}/references/final-report-template.md`, listing actual agents, resolved models when available (never inferred), tools, evidence, Orbit data, risks, and actions intentionally not performed.
+10. When criteria or valid findings remain, continue through KRYLO Orbit (`${PLUGIN_ROOT}/references/orbit-policy.md`): `--orbit-cycle` per cycle, `--record-progress`/`--record-no-progress`, `--add-fingerprint <category>:<hash>` for failures. When a fingerprint repeats, change strategy (`--note-strategy`); after two failed normal corrections, consider the deep-debugger. The Stop gate enforces the budget deterministically.
+11. Production, destructive, financial, release, identity, secret, and external-write actions stop at the risk gate -- and, on Codex, are additionally denied outright at the tool level regardless (this Skill's own security contract above). Record them with `--request-approval <actionClass> --summary "<summary>"` and end with `--terminal RISK_APPROVAL_REQUIRED` instead of attempting the action.
+12. Stop only in an approved terminal state. `--terminal VERIFIED_COMPLETE` succeeds only when every criterion is proven with non-stale passing evidence and no critical or high finding is open; otherwise use SAFE_BLOCKED, USER_DECISION_REQUIRED, RISK_APPROVAL_REQUIRED, ITERATION_LIMIT_REACHED, or CANCELLED_BY_USER.
+13. Produce the final report per `${PLUGIN_ROOT}/references/final-report-template.md`, listing actual agents, resolved models when available (never inferred), tools, evidence, Orbit data, risks, and actions intentionally not performed.
 
 If the user explicitly invokes `$krylo-run` again while this run is still active, the host Hook will tell you (via its own context message) that an existing run is already active -- continue that run; never start a second one over it.
 

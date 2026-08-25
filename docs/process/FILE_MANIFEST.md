@@ -45,6 +45,12 @@ docs/process/CODEX_HOST_IMPLEMENTATION_PLAN.md        # implemented: reconciles 
                                                        # against re-verified current official Codex docs
 docs/codex-capability-matrix.md                       # implemented: per-capability locally-passed /
                                                        # statically-inspected / deferred evidence record
+docs/adr/0030-cross-harness-advisory-workers.md       # accepted: optional, read-only, depth-1,
+                                                       # advisory-only opposite-provider workers
+docs/process/CROSS_HARNESS_IMPLEMENTATION_PLAN.md     # implemented: Cross-Harness v1 design/CLI-contract
+                                                       # reconciliation against real installed CLIs
+docs/claude-capability-matrix.md                      # implemented: Claude-side Cross-Harness capability
+                                                       # evidence record (worker CLI, spawn platform fix)
 ```
 
 ## Plugin root
@@ -123,6 +129,16 @@ plugins/krylo/scripts/setup/remove-alias.mjs
 plugins/krylo/scripts/setup/doctor.mjs
 plugins/krylo/scripts/audit/audit-tool.mjs
 plugins/krylo/scripts/validation/validate-runtime.mjs
+plugins/krylo/scripts/lib/cross-harness.mjs            # implemented (ADR-0030: request/depth/role
+                                                        # validation, egress classification, context-packet
+                                                        # builder, worker-result schema validation)
+plugins/krylo/scripts/lib/spawn-platform.mjs           # implemented (cross-platform shell:false-safe
+                                                        # child-process invocation; fixes a real Windows
+                                                        # .cmd-shim EINVAL failure found building Cross-Harness)
+plugins/krylo/scripts/runtime/cross-harness-run.mjs    # implemented (the only executable surface a Skill
+                                                        # invokes to request a Cross-Harness worker)
+plugins/krylo/scripts/host/cross-harness/claude-worker.mjs  # implemented (Claude provider adapter)
+plugins/krylo/scripts/host/cross-harness/codex-worker.mjs   # implemented (Codex provider adapter)
 ```
 
 ## Schemas and policy data
@@ -162,7 +178,12 @@ plugins/krylo/tests/security/injection.test.mjs
 plugins/krylo/tests/security/external-adapters.test.mjs   # + (delta) mattpocock-skills/omniroute/code-review-graph
 plugins/krylo/tests/status/*.test.mjs        # statusline, agent-events, wrapper
 plugins/krylo/tests/setup/*.test.mjs         # alias, doctor
-plugins/krylo/tests/governance/*.test.mjs    # audit, policy-consistency, agents
+plugins/krylo/tests/governance/*.test.mjs    # audit, policy-consistency, agents, cross-harness-policy
+plugins/krylo/tests/security/cross-harness-process.test.mjs   # + argv/env injection safety
+plugins/krylo/tests/unit/cross-harness.test.mjs                # + coordinator: depth/roles/egress/packet/result
+plugins/krylo/tests/unit/spawn-platform.test.mjs                # + Windows shell:false-safe spawn wrapper
+plugins/krylo/tests/hooks/cross-harness-run.test.mjs            # + end-to-end CLI, real fake-worker fixtures
+plugins/krylo/tests/fixtures/cross-harness/                     # + deterministic fake Claude/Codex worker CLI
 plugins/krylo/evals/evals.json
 plugins/krylo/evals/expected-behaviors.md
 ```

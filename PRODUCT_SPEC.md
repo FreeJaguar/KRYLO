@@ -84,7 +84,14 @@ KRYLO v0.1.0 will not:
 - Ship a real Codex CLI plugin (`.codex-plugin/plugin.json`, explicit-only `krylo-run` Skill, Codex Hook transport) reusing Shared Core, per `docs/adr/0029-codex-host-packaging-and-approval-boundary.md`.
 - Preserve every Claude host guarantee unchanged (regression-proven, `docs/codex-capability-matrix.md` and the full test suite).
 - Document every Codex capability gap with an explicit safe fallback rather than overclaim parity with Claude -- most notably, `require-approval` denies deterministically on Codex instead of using a native approval prompt, since current Codex `PreToolUse` output does not support one.
-- Cross-Harness advisory workers, scheduled upstream/ecosystem maintenance workflows, full VS Code project-hook enforcement setup, and the `0.2.0` version bump itself remain explicitly out of scope for this checkpoint and are tracked as separate, later work.
+- Scheduled upstream/ecosystem maintenance workflows, full VS Code project-hook enforcement setup, and the `0.2.0` version bump itself remain explicitly out of scope for this checkpoint and are tracked as separate, later work.
+
+## Goals for 0.2 (Cross-Harness)
+
+- Let a KRYLO run on one native host request an optional, bounded, read-only, advisory second opinion from the OPPOSITE provider's own CLI, per `docs/adr/0030-cross-harness-advisory-workers.md`.
+- Keep the native host the sole writer and sole completion authority; a Cross-Harness worker's result is advisory evidence only.
+- Code-enforce recursion depth 1, reuse the existing native-approval/deterministic-deny boundary for data egress with no new local approval mechanism, and degrade safely (never block normal KRYLO operation) whenever the opposite provider is missing, unauthenticated, unsupported, or times out.
+- Ecosystem Maintenance and the `0.2.0` version bump remain explicitly out of scope for this checkpoint and are tracked as separate, later work.
 
 ## User-visible terminal states
 

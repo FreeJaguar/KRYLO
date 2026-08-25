@@ -98,10 +98,24 @@ A host adapter (Claude Host, Codex Host) translates platform-specific session, H
 Controls:
 
 - Shared Core owns risk classification, approvals, and completion policy; a host adapter may only translate metadata into host-neutral contracts, never redefine that policy.
-- The Claude Host is implemented and released. The Codex Host is implemented (`docs/adr/0029-codex-host-packaging-and-approval-boundary.md`) but not yet published; no cross-harness or cross-provider data flow exists until a separate, approved plan is implemented and verified.
+- The Claude Host is implemented and released. The Codex Host is implemented (`docs/adr/0029-codex-host-packaging-and-approval-boundary.md`) but not yet published. Cross-provider data flow (Cross-Harness, `docs/adr/0030-cross-harness-advisory-workers.md`) is implemented: optional, read-only, depth-1, advisory-only, and gated through the existing approval boundary -- see the dedicated threat entry below.
 - Shared Core modules do not read host-specific environment variables or Hook payload fields directly (`docs/adr/0023-multi-host-product-and-shared-core.md`); an automated `hostIsolation` check (`npm run validate:runtime`) scans `scripts/lib/` for Claude-specific identifiers on every validation run.
 - The Codex Host's `require-approval` boundary is a documented capability-driven asymmetry, not a silent weakening: because current Codex `PreToolUse` output does not support a native `ask` decision, and the rules/`PreToolUse`/`approval_policy` execution order is not documented upstream, KRYLO denies every `require-approval` action deterministically on Codex rather than trust an unverified mechanism (`docs/codex-capability-matrix.md`).
 - A new host adapter's PreToolUse deny path must never emit a decision shape the target host has confirmed unsupported (Codex: `permissionDecision:"ask"`, legacy `decision:"approve"`, `continue:false`, `stopReason`, `suppressOutput`) -- `risk-gate-codex.mjs`/`permission-request-codex.mjs` have no code path capable of producing any of them.
+
+### Cross-provider data egress
+
+Threat:
+Cross-Harness (`docs/adr/0030-cross-harness-advisory-workers.md`) sends bounded repository context to a second model provider's own CLI as an advisory worker; that worker's untrusted output, or a recursive/unbounded invocation, could be used to exfiltrate data, escalate privilege, or degrade the run's security guarantees.
+
+Controls:
+
+- Invocation is optional, depth-1, and code-enforced (both an environment marker checked before any other logic, and independent request validation) -- never trusts prompt text alone to prevent recursion.
+- The invocation itself is a `require-approval` action gated through KRYLO's existing native-ask/deterministic-deny boundary; no new local approval mechanism exists that a prompt-injected model could forge.
+- The context packet excludes secret/credential-shaped paths and is redacted and size-bounded before it ever leaves the process; only repository-relative logical paths are included.
+- The worker receives no write-capable tool, no MCP access, no data root, and an explicit environment allowlist (never the parent's full environment or any credential).
+- The worker's output is schema-validated and untrusted: it cannot itself prove a criterion, resolve an approval, set completion, or cause an automatic patch/command to run.
+- Process spawning uses argv arrays with `shell:false`; task/context content is sent via stdin, never argv.
 
 ### Premature or false completion
 

@@ -139,7 +139,22 @@ test('Codex host adapter is isolated from the Claude Skill-scoped hook design (A
   assert.doesNotMatch(hooksConfigText, /codex/i, 'Claude\'s plugin-wide hooks.json must remain empty and unaffected by Codex support (ADR-0021)');
 
   const skillText = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', 'run', 'SKILL.md'), 'utf8');
-  assert.doesNotMatch(skillText, /codex/i, 'the Claude run skill must not reference Codex');
+  // The original invariant here was "the Claude run skill must not
+  // reference Codex at all" -- a proxy for "Claude/Codex host wiring stays
+  // decoupled." docs/adr/0030-cross-harness-advisory-workers.md introduces
+  // a deliberate, reviewed exception: the Skill's Cross-Harness section
+  // legitimately names Codex once, as the opposite provider a Claude-native
+  // run may spawn an advisory worker from -- that is the feature working
+  // as designed, not coupling. What the invariant must still catch is any
+  // BROADER reference (Codex-specific hook payload fields, session
+  // handling, flags, etc. hardcoded into the Claude skill) -- so this now
+  // asserts the mention is confined to exactly the Cross-Harness section
+  // and stays at the single expected occurrence, not an unbounded/growing
+  // coupling.
+  const crossHarnessSection = /## Cross-Harness[\s\S]*?(?=\n## |$)/.exec(skillText)?.[0] ?? '';
+  const outsideCrossHarness = skillText.replace(crossHarnessSection, '');
+  assert.doesNotMatch(outsideCrossHarness, /codex/i, 'Codex must not be referenced anywhere in the Claude run skill outside the Cross-Harness section');
+  assert.ok((crossHarnessSection.match(/codex/gi) || []).length <= 2, 'the Cross-Harness section must stay within its two expected Codex mentions (naming the opposite provider, and its availability caveat), not grow into broader coupling');
 
   // Codex's own hook registration must live in a SEPARATE file its manifest
   // explicitly points to, never falling back to (and therefore never risking
