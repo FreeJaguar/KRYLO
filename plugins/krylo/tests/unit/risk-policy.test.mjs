@@ -381,6 +381,33 @@ test('shared risk policy passes a benign file write', () => {
   assert.equal(result.action, 'pass');
 });
 
+test('shared risk policy invariant: Write/Edit/NotebookEdit/Read/Glob/Grep and an unrecognized tool name can NEVER produce require-approval', () => {
+  // risk-gate.mjs's native-ask eligibility (ADR-0027) relies on this
+  // invariant to know Bash/PowerShell/MCP are the only tool surfaces that
+  // ever need to reach the ask/deny branch at all -- independent review
+  // found this invariant lived only in a code comment. Locking it here
+  // means a future change that adds a require-approval path for one of
+  // these tools surfaces as a failing test, not a silent gap in
+  // risk-gate.mjs's NATIVE_ASK_ELIGIBLE_TOOLS set.
+  const dataRoot = tempDataRoot();
+  const cwd = process.cwd();
+  const cases = [
+    ['Write', { file_path: 'src/app.js' }],
+    ['Write', { file_path: '.env' }], // even the sensitive-path deny case
+    ['Edit', { file_path: 'src/app.js' }],
+    ['NotebookEdit', { notebook_path: 'nb.ipynb' }],
+    ['Read', { file_path: 'src/app.js' }],
+    ['Read', { file_path: '.env' }],
+    ['Glob', { pattern: '**/*.js' }],
+    ['Grep', { pattern: 'TODO', glob: '**/*.js' }],
+    ['SomeFutureToolKrylODoesNotYetClassify', { anything: 'x' }],
+  ];
+  for (const [toolName, toolInput] of cases) {
+    const result = classifyRiskAction({ toolName, toolInput, cwd, dataRoot });
+    assert.notEqual(result.action, 'require-approval', `${toolName} must never produce require-approval`);
+  }
+});
+
 test('shared risk policy hard-denies an unknown MCP server (not merely require-approval)', () => {
   // Restore-native-approval checkpoint: `deny` and `require-approval` are
   // distinct KRYLO policy outcomes. An entirely unrecognized MCP server has

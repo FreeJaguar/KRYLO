@@ -145,6 +145,40 @@ test('classifyMcpTool: a server name that embeds a real catalog id as a prefix/s
   assert.equal(b.className, 'other');
 });
 
+test('classifyMcpTool: a server name embedding a serverActionClasses KEYWORD (not just a catalog id) is not treated as that known category (ADR-0027 follow-up finding, HIGH)', () => {
+  // Two independent review rounds of the ADR-0027 checkpoint reproduced the
+  // same live bypass: findServerRule() matched policies/mcp-policy.json's
+  // serverActionClasses patterns ("github", "aws|gcp|azure|...|cloud",
+  // "slack|sendgrid|twilio|mailgun|...|email", "postgres|mysql|...|sql",
+  // "vault|iam|rbac|...") unanchored, so an attacker-chosen server name
+  // merely CONTAINING one of these generic keywords was treated as the
+  // known, reviewed server -- isKnown became true, hardDeny never applied,
+  // and (since MCP write classes are now ask-eligible) the model would see
+  // permissionDecision: "ask" with a reason misattributing an entirely
+  // unreviewed server to GitHub/a cloud provider/etc. `className: 'other'`
+  // (hardDeny) is required here, exactly like the catalog-id substring
+  // bypass above -- an embedded generic keyword must not confer trust
+  // either.
+  const spoofs = [
+    'mcp__evil-github-proxy__delete_repo',
+    'mcp__mycloudthing__create_instance',
+    'mcp__attacker-email-relay__send_blast',
+    'mcp__my-sql-helper__execute_statement',
+    'mcp__vaultish__write_secret',
+    'mcp__notgithub__create_release',
+  ];
+  for (const toolName of spoofs) {
+    const result = classifyMcpTool(toolName);
+    assert.ok(result, `${toolName} must be gated, not passed through`);
+    assert.equal(result.className, 'other', `${toolName} must be classified as an unrecognized server, not borrow a known category`);
+    assert.equal(result.hardDeny, true, `${toolName} must be hardDeny (never ask-eligible)`);
+  }
+  // Sanity: the genuine, exact server names must still be recognized (this
+  // fix must not turn every known server into "unknown" too).
+  assert.equal(classifyMcpTool('mcp__github__merge_pull_request').className, 'merge');
+  assert.equal(classifyMcpTool('mcp__stripe__create_refund').className, 'payment');
+});
+
 // --- approved-write fixture: classification is deterministic (approval flow is exercised at the hook level) ---
 test('classifyMcpTool: classification is stable across repeated calls for the same write operation', () => {
   const a = classifyMcpTool('mcp__github__merge_pull_request');

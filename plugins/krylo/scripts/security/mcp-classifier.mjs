@@ -73,10 +73,31 @@ function catalogBlocksServer(catalog, server) {
   });
 }
 
-function findServerRule(mcpPolicy, server) {
+/**
+ * `rule.match` is a simple `|`-delimited alternation of exact server-identity
+ * keywords (e.g. "stripe|paypal|braintree|adyen", or an already-anchored
+ * "^git$") -- never a partial-match pattern. Two independent review rounds
+ * found the original unanchored `new RegExp(rule.match, 'i').test(needle)`
+ * let an attacker-chosen server name borrow trust merely by CONTAINING one
+ * of these keywords (e.g. "evil-github-proxy" matched "github" and was
+ * treated as the known, reviewed GitHub server) -- the exact same bypass
+ * class `catalogKnowsServer()` above was already hardened against; this
+ * function had not been. Exact match only (after stripping the same
+ * -mcp/-cli suffix `catalogKnowsServer()` tolerates), never substring.
+ */
+function serverNameMatchesRule(rule, server) {
   const needle = server.toLowerCase();
+  const normalizedNeedle = normalizeServerCandidate(server);
+  const alternatives = rule.match.replace(/^\^/, '').replace(/\$$/, '').split('|');
+  return alternatives.some((alt) => {
+    const altLower = alt.toLowerCase();
+    return altLower === needle || altLower === normalizedNeedle;
+  });
+}
+
+function findServerRule(mcpPolicy, server) {
   for (const rule of mcpPolicy.serverActionClasses ?? []) {
-    if (new RegExp(rule.match, 'i').test(needle)) return rule;
+    if (serverNameMatchesRule(rule, server)) return rule;
   }
   return null;
 }

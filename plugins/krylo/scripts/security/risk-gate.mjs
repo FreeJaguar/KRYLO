@@ -170,10 +170,17 @@ async function main() {
       // undefined here and pass this check -- exactly the gap it exists to
       // close. The raw payload always carries the field when Claude Code
       // sets it, independent of session-id resolution.
-      const eligibleForNativeAsk = (NATIVE_ASK_ELIGIBLE_TOOLS.has(toolName) || isMcpToolName(toolName))
-        && ASK_ELIGIBLE_PERMISSION_MODES.has(payload.permission_mode);
+      // Two independent conditions, checked and reported separately
+      // (independent review found the combined boolean's deny message
+      // named only "permission mode" even when the real reason was an
+      // ineligible tool -- currently only ever true for a genuine
+      // classification bug, since risk-policy.mjs only ever returns
+      // require-approval for Bash/PowerShell/MCP, but a future change to
+      // that invariant must not make this message actively misleading).
+      const toolEligible = NATIVE_ASK_ELIGIBLE_TOOLS.has(toolName) || isMcpToolName(toolName);
+      const modeEligible = ASK_ELIGIBLE_PERMISSION_MODES.has(payload.permission_mode);
 
-      if (eligibleForNativeAsk) {
+      if (toolEligible && modeEligible) {
         recordEvent(state.runId, { event: 'risk-gate', category: decision.actionClass, status: 'ask' });
         emitClaudePreToolDecision(
           'ask',
@@ -181,9 +188,12 @@ async function main() {
         );
       } else {
         recordEvent(state.runId, { event: 'risk-gate', category: decision.actionClass, status: 'denied' });
+        const conditionText = !toolEligible
+          ? "This tool does not support the native approval prompt for this action."
+          : "This action's permission mode does not support the native approval prompt.";
         emitClaudePreToolDecision(
           'deny',
-          `${decision.reason} This action's permission mode does not support the native approval prompt. If a human should review and unblock it, record it with update-state.mjs --request-approval ${decision.actionClass} --summary "<safe summary>" and stop at RISK_APPROVAL_REQUIRED.`,
+          `${decision.reason} ${conditionText} If a human should review and unblock it, record it with update-state.mjs --request-approval ${decision.actionClass} --summary "<safe summary>" and stop at RISK_APPROVAL_REQUIRED.`,
         );
       }
     }

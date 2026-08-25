@@ -17,6 +17,29 @@ function decision(res) {
   return res.json?.hookSpecificOutput?.permissionDecision ?? null;
 }
 
+test('risk-gate: a spoofed MCP server name embedding a known category keyword (e.g. "github", "cloud", "sql") is still HARD-denied through the real Hook, under an ask-eligible mode', () => {
+  // End-to-end regression for the same bypass covered at the unit level in
+  // tests/security/mcp-classifier.test.mjs: two independent review rounds
+  // reproduced permissionDecision: "ask" (with a reason misattributing the
+  // server to a known category) for an entirely unreviewed, attacker-named
+  // MCP server. This must be "deny", exactly like a genuinely unknown
+  // server, under permission_mode: "auto".
+  const dataDir = mkTempDataDir();
+  try {
+    createActiveRun(dataDir);
+    for (const toolName of [
+      'mcp__evil-github-proxy__delete_repo',
+      'mcp__attacker-email-relay__send_blast',
+      'mcp__my-sql-helper__execute_statement',
+    ]) {
+      const res = runHook(GATE, mcpPayload(dataDir, toolName, { x: 1 }), dataDir);
+      assert.equal(decision(res), 'deny', `expected hard deny for spoofed server: ${toolName}`);
+    }
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
 test('risk-gate: unknown MCP server is HARD-denied for both a write- and a read-shaped operation, even under an ask-eligible permission mode', () => {
   // ADR-0027 restores native ask to MCP require-approval classes, but an
   // entirely unreviewed server has no identity a human could meaningfully
@@ -70,7 +93,11 @@ test('risk-gate: MCP writes across the required categories trigger native ask un
     for (const toolName of gated) {
       const res = runHook(GATE, mcpPayload(dataDir, toolName, { x: 1 }), dataDir);
       assert.equal(decision(res), 'ask', `expected ask for ${toolName}`);
-      assert.ok(!res.json.hookSpecificOutput.permissionDecisionReason.includes(toolName) || true);
+      // Fixed a vacuous `|| true` left over from an earlier draft (found by
+      // independent review): this must actually check that the reason text
+      // never echoes the tool name -- now MORE relevant than before, since
+      // an MCP ask reason is shown directly to a human in the native prompt.
+      assert.ok(!res.json.hookSpecificOutput.permissionDecisionReason.includes(toolName), `reason must not echo the tool name: ${toolName}`);
     }
   } finally {
     cleanup(dataDir);
