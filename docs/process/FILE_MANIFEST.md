@@ -56,7 +56,10 @@ plugins/krylo/.codex-plugin/plugin.json     # implemented (Codex CLI plugin mani
 plugins/krylo/hooks/codex-hooks.json        # implemented (PreToolUse/PermissionRequest/PostToolUse;
                                              # a separate file from hooks.json above by design -- see
                                              # its own $comment for why)
-plugins/krylo/skills/krylo-run/             # implemented (Codex explicit-only Skill: SKILL.md,
+plugins/krylo/codex/skills/krylo-run/       # implemented (Codex explicit-only Skill: SKILL.md,
+                                             # deliberately outside plugins/krylo/skills/ -- Claude's own
+                                             # auto-discovered directory -- per docs/adr/0029's second
+                                             # review round.
                                              # agents/openai.yaml)
 plugins/krylo/scripts/host/codex/           # implemented (context.mjs, hook-transport.mjs -- the
                                              # Codex-only environment/payload normalization layer)

@@ -12,7 +12,7 @@
 // --target skill|rules|all):
 //
 // --target skill: installs the krylo-run Skill (this repository's own
-//   plugins/krylo/skills/krylo-run/, verbatim -- never a second copy of
+//   plugins/krylo/codex/skills/krylo-run/, verbatim -- never a second copy of
 //   Core policy source) to the documented Codex user Skill location
 //   ($HOME/.agents/skills/krylo-run/), for the VS Code / standalone bridge
 //   (design doc Section 10.2). This alone gives explicit-invocation
@@ -70,7 +70,7 @@ function classifySkillOwnership(skillFile) {
 function planSkillInstall(apply) {
   const skillDestDir = path.join(homeDir(), '.agents', 'skills', 'krylo-run');
   const skillDestFile = path.join(skillDestDir, 'SKILL.md');
-  const skillSrcDir = path.join(pluginRoot(), 'skills', 'krylo-run');
+  const skillSrcDir = path.join(pluginRoot(), 'codex', 'skills', 'krylo-run');
 
   const existing = classifySkillOwnership(skillDestFile);
   if (existing === 'foreign') {

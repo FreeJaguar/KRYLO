@@ -17,18 +17,18 @@ Every runtime CLI call below resolves `${PLUGIN_ROOT}` from the Codex-provided `
 
 1. Read `${PLUGIN_ROOT}/references/operating-principles.md`, `${PLUGIN_ROOT}/references/lane-policy.md`, `${PLUGIN_ROOT}/references/risk-policy.md`, and `${PLUGIN_ROOT}/references/completion-contract.md`.
 2. Inspect the repository, then classify lane (PATCH, BUILD, DESIGN, PRODUCT, INCIDENT, MIGRATION, AUDIT, AI, PERFORMANCE), risk (low, medium, high), constraints, non-goals, and complexity. Load only the additional references the selected lane, risk, tools, security surface, design work, testing work, question decision, Orbit continuation, or final report actually require.
-3. Determine a session identifier: use the current Codex session's own identifier if the runtime exposes one to you directly; otherwise generate one stable random identifier at the start of this run and reuse it for every call below within this same task (never regenerate mid-run -- a changed session id would make KRYLO treat this as a different run).
+3. **Session identifier: always pass the literal, unmodified text `KRYLO_CODEX_SESSION`** as the `--session` value on every runtime CLI call below -- copy it exactly; do not generate, guess, or invent a session id yourself. Current Codex documentation does not expose the real session identifier to you directly (only to Hooks); KRYLO's own PreToolUse Hook substitutes the real one in place of this exact placeholder before each command actually runs. Using any other value breaks session binding for the rest of this run.
 4. Start the run (use a short normalized goal, never the raw prompt):
 
    ```text
-   node "${PLUGIN_ROOT}/scripts/runtime/init-run.mjs" --goal "<short goal>" --session "<session id from step 3>" --lane <LANE> --risk <risk>
+   node "${PLUGIN_ROOT}/scripts/runtime/init-run.mjs" --goal "<short goal>" --session "KRYLO_CODEX_SESSION" --lane <LANE> --risk <risk>
    ```
 
-   If a run for this project is already active, resume it instead: `node "${PLUGIN_ROOT}/scripts/runtime/read-state.mjs" --session "<session id>"`. Always pass the same `--session` value on every `update-state.mjs`/`read-state.mjs` call below.
+   If a run for this project is already active, resume it instead: `node "${PLUGIN_ROOT}/scripts/runtime/read-state.mjs" --session "KRYLO_CODEX_SESSION"`. Always pass the exact same literal `--session "KRYLO_CODEX_SESSION"` on every `update-state.mjs`/`read-state.mjs` call below -- never substitute it yourself.
 5. Compile observable acceptance criteria before modifying application code, and record each one:
 
    ```text
-   node "${PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --session "<session id>" --add-criterion "<criterion>"
+   node "${PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --session "KRYLO_CODEX_SESSION" --add-criterion "<criterion>"
    ```
 
 ## Execute
@@ -37,20 +37,20 @@ Every runtime CLI call below resolves `${PLUGIN_ROOT}` from the Codex-provided `
 7. Use safe, conventional, reversible defaults instead of asking routine questions. Grant an exceptional token before an allowed-category question:
 
    ```text
-   node "${PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --session "<session id>" --grant-question <category>
+   node "${PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --session "KRYLO_CODEX_SESSION" --grant-question <category>
    ```
 
    Allowed categories: missing-credential, destructive-production-action, material-business-decision, legal-or-compliance, privacy, financial, high-impact-security, no-safe-default.
 8. Track phases with `--phase EXECUTING|VERIFYING|REVIEWING|CORRECTING`, and record every verification result as evidence with real output summaries:
 
    ```text
-   node "${PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --session "<session id>" --add-evidence '{"type":"test","label":"unit tests","sourceTool":"npm test","result":"pass","summary":"<real counts>"}'
+   node "${PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --session "KRYLO_CODEX_SESSION" --add-evidence '{"type":"test","label":"unit tests","sourceTool":"npm test","result":"pass","summary":"<real counts>"}'
    ```
 
 9. Run applicable deterministic verification, then obtain independent review. Mark criteria proven only with passing evidence:
 
    ```text
-   node "${PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --session "<session id>" --set-criterion AC-1=proven --evidence EV-1
+   node "${PLUGIN_ROOT}/scripts/runtime/update-state.mjs" --session "KRYLO_CODEX_SESSION" --set-criterion AC-1=proven --evidence EV-1
    ```
 
 ## Orbit and completion

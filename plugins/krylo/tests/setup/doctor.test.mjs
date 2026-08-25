@@ -41,9 +41,12 @@ test('doctor: healthy environment -> exit 0, correct inventory, read-only', () =
     assert.equal(res.status, 0, res.stdout);
     assert.equal(res.json.ok, true);
     assert.equal(res.json.versions.krylo, '0.1.1');
-    // 6, not 5: the Codex Host checkpoint added skills/krylo-run/ alongside
-    // Claude's run/audit-tool/doctor/setup/status (docs/adr/0029-codex-host-packaging-and-approval-boundary.md).
-    assert.equal(res.json.components.skills, 6);
+    // 5, not 6: the Codex Skill (krylo-run) lives at codex/skills/krylo-run,
+    // deliberately outside Claude's own auto-discovered skills/ directory
+    // this doctor scan counts -- an independent review found it would
+    // otherwise become a 6th, model-invocable Claude skill, a real
+    // Claude-side regression (docs/adr/0029's second review round).
+    assert.equal(res.json.components.skills, 5);
     assert.equal(res.json.components.agents, 12);
     assert.equal(res.json.components.hooksHealthy, true);
     assert.equal(res.json.storage.writable, true);

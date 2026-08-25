@@ -91,6 +91,25 @@ export function emitCodexPreToolDeny(reason) {
 }
 
 /**
+ * Emit a PreToolUse allow decision with a rewritten command -- confirmed-
+ * supported per current official Codex hook docs (an "allow" decision may
+ * carry `updatedInput`). Used ONLY for the narrow, fixed KRYLO_CODEX_SESSION
+ * placeholder substitution (see risk-gate-codex.mjs) -- there is no general
+ * command-rewriting capability here, and this must never be used to alter
+ * a command's security-relevant content.
+ */
+export function emitCodexPreToolAllowWithRewrite(updatedInput) {
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'allow',
+      updatedInput,
+    },
+  }));
+  process.exit(0);
+}
+
+/**
  * Emit a PermissionRequest decision. Distinct output shape from PreToolUse
  * (decision.behavior, not permissionDecision) -- confirmed against current
  * official docs. Used only from the PermissionRequest hook.

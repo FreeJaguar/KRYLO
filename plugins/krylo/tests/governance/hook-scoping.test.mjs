@@ -59,16 +59,18 @@ test('the run skill frontmatter declares all six required hook events against re
 });
 
 test('no other KRYLO skill declares an interception hook', () => {
-  // 'krylo-run' is the Codex explicit-invocation Skill (docs/adr/0029-codex-host-packaging-and-approval-boundary.md).
-  // It intentionally has no `hooks:` frontmatter of its own -- Codex has no
-  // Skill-scoped hook lifecycle, so its hooks are registered plugin-wide via
-  // hooks/codex-hooks.json instead (checked by a separate test below), never
-  // through SKILL.md frontmatter the way Claude's `run` skill uses.
+  // The Codex explicit-invocation Skill ('krylo-run') lives entirely
+  // outside this directory (plugins/krylo/codex/skills/krylo-run, checked
+  // by a separate test below) -- an independent review found a Claude-
+  // shaped skill sitting inside Claude's own auto-discovered skills/ would
+  // itself become a 6th, model-invocable Claude skill, a real Claude-side
+  // regression (docs/adr/0029's second review round). So this directory
+  // listing is never exempted for it.
   const skillsDir = path.join(PLUGIN_ROOT, 'skills');
   const others = fs.readdirSync(skillsDir, { withFileTypes: true })
     .filter((e) => e.isDirectory() && e.name !== 'run')
     .map((e) => e.name);
-  assert.deepEqual(others.sort(), ['audit-tool', 'doctor', 'krylo-run', 'setup', 'status']);
+  assert.deepEqual(others.sort(), ['audit-tool', 'doctor', 'setup', 'status']);
   for (const skill of others) {
     const block = frontmatterBlock(path.join(skillsDir, skill, 'SKILL.md'));
     assert.ok(!/^hooks:/m.test(block), `${skill} must not declare hooks — only the run skill gates tool use`);
@@ -142,6 +144,28 @@ test('Codex host adapter is isolated from the Claude Skill-scoped hook design (A
   assert.ok(fs.existsSync(codexHooksPath), 'Codex hook registrations must live in their own file, not the shared hooks/hooks.json');
   const codexPluginManifest = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, '.codex-plugin', 'plugin.json'), 'utf8'));
   assert.equal(codexPluginManifest.hooks, './hooks/codex-hooks.json', 'the Codex manifest must explicitly reference its own hooks file, not rely on auto-discovery of hooks/hooks.json');
+});
+
+// Independent review plus direct byte inspection of the installed
+// codex-cli 0.120.0 binary (see docs/adr/0029's own review-finding
+// addendum) found two build-specific facts codex-hooks.json must respect:
+// (1) the binary's own embedded PreToolUse JSON schema constrains
+// tool_name to the literal const "Bash" for every command-hook invocation
+// -- a matcher that does not include "Bash" never fires on this build; (2)
+// "PermissionRequest" is absent from the binary's own embedded
+// HookEventNameWire enum entirely -- registering an event a build does not
+// recognize risks the whole hooks file failing to parse, silently dropping
+// PreToolUse/PostToolUse with it.
+test('codex-hooks.json matches the real installed binary\'s confirmed PreToolUse schema (tool_name const "Bash") and never registers an unconfirmed hook event', () => {
+  const codexHooksPath = path.join(PLUGIN_ROOT, 'hooks', 'codex-hooks.json');
+  const codexHooks = JSON.parse(fs.readFileSync(codexHooksPath, 'utf8'));
+  assert.match(codexHooks.PreToolUse[0].matcher, /(^|\|)Bash(\||$)/, 'the PreToolUse matcher must match the literal "Bash" tool_name real Codex builds send, not only speculative alternatives');
+  assert.ok(!('PermissionRequest' in codexHooks), 'PermissionRequest must not be registered until a build confirmed to support that hook event is verified (absent from the installed 0.120.0 build\'s own HookEventNameWire enum)');
+  const confirmedEvents = ['PreToolUse', 'PostToolUse', 'SessionStart', 'UserPromptSubmit', 'Stop'];
+  for (const registeredEvent of Object.keys(codexHooks)) {
+    if (registeredEvent.startsWith('$')) continue; // $comment
+    assert.ok(confirmedEvents.includes(registeredEvent), `${registeredEvent} is not in the installed build's own confirmed HookEventNameWire enum`);
+  }
 });
 
 test('/krylo:run remains user-invocable and not model-invocable', () => {
