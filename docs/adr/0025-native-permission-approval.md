@@ -89,4 +89,4 @@ ADR-0024 (host-controlled human-approval boundary). ADR-0024's KRYLO-APPROVE mec
 
 ## Superseded by
 
-None.
+`docs/adr/0027-restore-native-approval-for-all-require-approval-classes.md`, for the class/tool narrowing only (native ask restricted to Bash `git-push`/`git-force`). This ADR's core decision -- native, host-controlled approval replaces KRYLO-APPROVE; the permission-mode allowlist; the deletion of `human-approval-gate.mjs` and `consumeMatchingApproval()`/`isApprovalUsable()`; the security requirements below -- remains in force and unedited as an accurate historical record.

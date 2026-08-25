@@ -32,4 +32,4 @@ None.
 
 ## Superseded by
 
-None.
+`docs/adr/0027-restore-native-approval-for-all-require-approval-classes.md`, for the "gating outcome is not identical" Decision bullet only (PowerShell now shares Bash's native-ask path). This ADR's classification-parity decision -- the shared `toolName === 'Bash' || toolName === 'PowerShell'` branches and the destructive-delete pattern work -- remains in force and unedited as an accurate historical record.

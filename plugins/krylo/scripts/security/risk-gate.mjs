@@ -10,45 +10,41 @@
 // Fail mode: fail SAFE (deny) while a run is active; silent pass-through
 // when no KRYLO run is active for this project.
 //
-// Human approval boundary (docs/adr/0025-native-permission-approval.md):
+// Human approval boundary (docs/adr/0025-native-permission-approval.md,
+// restored to full require-approval-class coverage by
+// docs/adr/0027-restore-native-approval-for-all-require-approval-classes.md):
 // a `require-approval` classification is translated into Claude Code's own
 // native `permissionDecision: "ask"` -- putting the actual authorization
 // decision in the host's own permission UI, not in any KRYLO-local state a
 // prompt-injected model could forge or manipulate -- replacing the prior
 // KRYLO-APPROVE chat-phrase mechanism (ADR-0024, superseded).
 //
-// `ask` is used ONLY for the Bash tool, ONLY for the `git-push`/`git-force`
-// action classes, and ONLY when the payload's `permission_mode` is in the
-// `ASK_ELIGIBLE_PERMISSION_MODES` allowlist below (`auto`, `manual`, `default`) --
-// never merely "not `bypassPermissions`" (see that allowlist's own comment
-// for the polarity reasoning). Current official Claude Code documentation (this
-// project's own verified CHANGELOG, checked in full through the current
-// released version) confirms exactly one relevant guarantee, at v2.1.211
-// (ADR-0022's floor, further raised to v2.1.223 -- see below):
-// "Fixed auto mode overriding a PreToolUse hook's `ask` decision for
-// unsandboxed Bash -- a hook `ask` now floors the decision at a prompt."
-// That confirmation is scoped to Bash and to "auto mode"; it says nothing
-// about `bypassPermissions` (a session mode whose entire documented purpose
-// is skipping permission prompts, so trusting `ask` there would be
-// nonsensical regardless), about PowerShell, or about any MCP tool's
-// permission dialog. Per the task's own instruction not to invent runtime
-// contracts, `ask` is not used outside exactly what is confirmed.
+// `ask` is used for EVERY `require-approval` classification (all classes in
+// production-policy.json, and every genuinely-identified MCP write class --
+// see mcp-classifier.mjs's `hardDeny` flag for the malformed/unknown/blocked
+// exceptions, which stay `deny`), for the Bash, PowerShell, and MCP tool
+// surfaces (the only three that can ever produce a `require-approval`
+// classification -- see risk-policy.mjs), and ONLY when the payload's
+// `permission_mode` is in the `ASK_ELIGIBLE_PERMISSION_MODES` allowlist
+// below (`auto`, `manual`, `default`) -- never merely "not
+// `bypassPermissions`" (see that allowlist's own comment for the polarity
+// reasoning).
 //
-// Native `ask` is further narrowed to `git-push`/`git-force` only, not every
-// require-approval class. Independent security review found that
-// production-policy.json's classes vary hugely in severity (a routine
-// `git push` vs. `production-deploy`/`payment`/`iam-or-secrets`), yet
-// classifyRiskAction() already treated every one of them identically before
-// this checkpoint (the policy file's own per-class `decision` field has
-// never been read by the classifier). Extending a single-click native
-// prompt -- which the v2.1.211 CHANGELOG entry itself notes can be saved as
-// an "always allow" rule persisting across sessions and worktrees -- to the
-// most severe classes uniformly would be a real proportionality regression
-// versus the deliberately heavier `--request-approval`/`RISK_APPROVAL_REQUIRED`
-// human-review path those classes deserve. `git-push`/`git-force` are the
-// common, low-severity, high-frequency case `ask` genuinely fits; every
-// other require-approval class keeps the deterministic `deny` fail-safe
-// this module used for all of them before this checkpoint.
+// ADR-0025 originally narrowed native ask to Bash-only, `git-push`/
+// `git-force`-only, reasoning that (a) official confirmation of the
+// underlying `ask` guarantee was scoped to Bash and "auto mode" in the
+// v2.1.211 CHANGELOG, and (b) a single-click prompt was disproportionate for
+// severe classes. ADR-0027 supersedes that narrowing: current official
+// Claude Code documentation (code.claude.com/docs/hooks, permissions)
+// states that PreToolUse hooks run "before the permission prompt, for every
+// tool" and that `permissionDecision` is a single generic mechanism (allow/
+// deny/ask, plus an undocumented `defer`) -- the v2.1.211 fix was a
+// narrow bug fix for one specific auto-mode override on Bash, not evidence
+// that `ask` is unconfirmed for other tools. Leaving every other
+// `require-approval` class and tool as a hard `deny` was itself found to
+// violate KRYLO's own product contract: a policy outcome of
+// `require-approval` must have a real human-approval path, not a
+// deterministic block indistinguishable from a genuine `deny`.
 //
 // v2.1.223 (per this project's CHANGELOG, checked verbatim): "Fixed a Bash
 // permission bypass where a crafted command could hide parts of itself from
@@ -62,7 +58,9 @@
 // uses deterministic `deny`: those are not `require-approval` decisions
 // with a legitimate human-review outcome, they are KRYLO's own inability to
 // classify the action at all, and `deny` remains the unambiguous, fail-safe
-// response to that.
+// response to that. Sensitive-path, data-root, hook-entrypoint, and
+// oversized-command decisions are `deny`, not `require-approval`, and are
+// completely unaffected by this checkpoint -- they never reach the ask path.
 
 import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
 import {
@@ -73,8 +71,16 @@ import {
 } from '../host/claude/hook-transport.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { classifyRiskAction } from './risk-policy.mjs';
+import { isMcpToolName } from './mcp-classifier.mjs';
 
-const NATIVE_ASK_ACTION_CLASSES = new Set(['git-push', 'git-force']);
+// The only three tool surfaces that can ever produce a `require-approval`
+// classification (risk-policy.mjs: Write/Edit/NotebookEdit/Read/Glob/Grep
+// only ever produce `deny` or `pass`, never `require-approval`). No
+// class-based allowlist is needed any more -- ADR-0027 restores native ask
+// to every `require-approval` class, so eligibility here is purely about
+// which tool surface KRYLO can present a meaningful native prompt for, not
+// about picking and choosing which classes "deserve" one.
+const NATIVE_ASK_ELIGIBLE_TOOLS = new Set(['Bash', 'PowerShell']);
 
 // Allowlist, not a denylist: independent security review found the original
 // `permission_mode !== 'bypassPermissions'` check inverted the polarity of
@@ -146,11 +152,11 @@ async function main() {
 
     if (decision.action === 'require-approval') {
       // Authorization now belongs entirely to Claude Code's own native
-      // permission UI, narrowly (Bash, git-push/git-force only, not
-      // bypassPermissions -- see the header comment for why): no
-      // KRYLO-local approval record is looked up or consumed here, so a
-      // persisted riskApprovals entry (however it got there) can never by
-      // itself let this action through, for any tool or class.
+      // permission UI, for every require-approval class, on the Bash,
+      // PowerShell, and MCP tool surfaces (ADR-0027): no KRYLO-local
+      // approval record is looked up or consumed here, so a persisted
+      // riskApprovals entry (however it got there) can never by itself let
+      // this action through, for any tool or class.
       //
       // Structured as if/else (not two sequential ifs) so the native-ask
       // path never reaches the deny branch even in principle -- it must not
@@ -164,8 +170,7 @@ async function main() {
       // undefined here and pass this check -- exactly the gap it exists to
       // close. The raw payload always carries the field when Claude Code
       // sets it, independent of session-id resolution.
-      const eligibleForNativeAsk = toolName === 'Bash'
-        && NATIVE_ASK_ACTION_CLASSES.has(decision.actionClass)
+      const eligibleForNativeAsk = (NATIVE_ASK_ELIGIBLE_TOOLS.has(toolName) || isMcpToolName(toolName))
         && ASK_ELIGIBLE_PERMISSION_MODES.has(payload.permission_mode);
 
       if (eligibleForNativeAsk) {
@@ -178,7 +183,7 @@ async function main() {
         recordEvent(state.runId, { event: 'risk-gate', category: decision.actionClass, status: 'denied' });
         emitClaudePreToolDecision(
           'deny',
-          `${decision.reason} This action class does not yet use the native approval prompt for this tool/mode. If a human should review and unblock it, record it with update-state.mjs --request-approval ${decision.actionClass} --summary "<safe summary>" and stop at RISK_APPROVAL_REQUIRED.`,
+          `${decision.reason} This action's permission mode does not support the native approval prompt. If a human should review and unblock it, record it with update-state.mjs --request-approval ${decision.actionClass} --summary "<safe summary>" and stop at RISK_APPROVAL_REQUIRED.`,
         );
       }
     }

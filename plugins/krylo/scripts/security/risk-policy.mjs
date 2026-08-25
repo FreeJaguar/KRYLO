@@ -354,6 +354,15 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot } = {}) 
   if (isMcpToolName(name)) {
     const match = classifyMcpTool(name);
     if (match) {
+      // A malformed tool-name shape or an unknown/blocked MCP server has no
+      // identity a human could meaningfully approve or deny -- KRYLO's own
+      // `deny`/`require-approval` distinction (restore-native-approval
+      // checkpoint) puts these on the `deny` side, never routed through the
+      // native ask prompt just because MCP tools became ask-eligible for
+      // their genuine, identified require-approval write classes.
+      if (match.hardDeny) {
+        return { action: 'deny', category: match.className, reason: match.reason };
+      }
       return { action: 'require-approval', category: match.className, actionClass: match.className, reason: match.reason };
     }
     return { action: 'pass', category: 'mcp-pass' };

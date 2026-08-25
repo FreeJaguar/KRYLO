@@ -6,19 +6,23 @@ import { mkTempDataDir, createActiveRun, runHook, patchState, cleanup } from './
 const GATE = 'security/risk-gate.mjs';
 
 function mcpPayload(cwd, toolName, toolInput = {}) {
-  return { hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: toolInput, cwd };
+  // permission_mode: 'auto' -- ADR-0027 restores native ask to MCP
+  // require-approval classes too, so an ask-path test must supply an
+  // eligible mode explicitly (same reasoning as risk-gate.test.mjs's
+  // bashPayload()/powershellPayload()).
+  return { hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: toolInput, cwd, permission_mode: 'auto' };
 }
 
 function decision(res) {
   return res.json?.hookSpecificOutput?.permissionDecision ?? null;
 }
 
-test('risk-gate: unknown MCP server is denied for both a write- and a read-shaped operation', () => {
-  // Native ask (docs/adr/0025-native-permission-approval.md) is used ONLY
-  // for the Bash tool -- the official CHANGELOG confirmation is scoped
-  // explicitly to Bash, with no equivalent found for any MCP tool's
-  // permission dialog. MCP require-approval classes keep the deterministic
-  // `deny` fail-safe.
+test('risk-gate: unknown MCP server is HARD-denied for both a write- and a read-shaped operation, even under an ask-eligible permission mode', () => {
+  // ADR-0027 restores native ask to MCP require-approval classes, but an
+  // entirely unreviewed server has no identity a human could meaningfully
+  // approve -- mcp-classifier.mjs's `hardDeny` flag keeps this a `deny`
+  // classification (not `require-approval`), so it must never reach ask
+  // regardless of permission mode.
   const dataDir = mkTempDataDir();
   try {
     createActiveRun(dataDir);
@@ -44,7 +48,7 @@ test('risk-gate: known read-only-shaped operations on catalogued MCP servers pas
   }
 });
 
-test('risk-gate: MCP writes across the required categories are denied pending approval', () => {
+test('risk-gate: MCP writes across the required categories trigger native ask under an eligible permission mode (ADR-0027)', () => {
   const dataDir = mkTempDataDir();
   try {
     createActiveRun(dataDir);
@@ -65,8 +69,23 @@ test('risk-gate: MCP writes across the required categories are denied pending ap
     ];
     for (const toolName of gated) {
       const res = runHook(GATE, mcpPayload(dataDir, toolName, { x: 1 }), dataDir);
-      assert.equal(decision(res), 'deny', `expected deny for ${toolName}`);
+      assert.equal(decision(res), 'ask', `expected ask for ${toolName}`);
       assert.ok(!res.json.hookSpecificOutput.permissionDecisionReason.includes(toolName) || true);
+    }
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate: the same MCP writes fall back to deny under an ineligible permission mode', () => {
+  const dataDir = mkTempDataDir();
+  try {
+    createActiveRun(dataDir);
+    for (const toolName of ['mcp__github__merge_pull_request', 'mcp__stripe__create_refund']) {
+      const bypassRes = runHook(GATE, { ...mcpPayload(dataDir, toolName, { x: 1 }), permission_mode: 'bypassPermissions' }, dataDir);
+      assert.equal(decision(bypassRes), 'deny', `expected deny (bypassPermissions) for ${toolName}`);
+      const noModeRes = runHook(GATE, { hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: { x: 1 }, cwd: dataDir }, dataDir);
+      assert.equal(decision(noModeRes), 'deny', `expected deny (absent permission_mode) for ${toolName}`);
     }
   } finally {
     cleanup(dataDir);
@@ -75,11 +94,13 @@ test('risk-gate: MCP writes across the required categories are denied pending ap
 
 test('risk-gate: a pre-existing local "approved" record for an MCP action class cannot authorize execution on its own', () => {
   // Same native-permission-approval invariant as the Bash case
-  // (docs/adr/0025-native-permission-approval.md): a local riskApprovals
-  // record, however it got there, must never authorize execution -- MCP
-  // tools keep the deny fail-safe (no official ask confirmation exists for
-  // them), so this proves the local record doesn't even get a chance to
-  // matter: every attempt is denied regardless of its presence.
+  // (docs/adr/0025-native-permission-approval.md, ADR-0027): a local
+  // riskApprovals record, however it got there, must never authorize
+  // execution by itself. Now that MCP require-approval classes route
+  // through the native ask prompt, the authorization decision belongs to
+  // Claude Code's own permission UI -- the persisted local record is never
+  // read or consumed here regardless, so this proves its presence changes
+  // nothing: every attempt still routes through ask, not a silent allow.
   const dataDir = mkTempDataDir();
   try {
     const { statePath } = createActiveRun(dataDir);
@@ -102,10 +123,12 @@ test('risk-gate: a pre-existing local "approved" record for an MCP action class 
     });
 
     const first = runHook(GATE, mcpPayload(dataDir, 'mcp__github__merge_pull_request', { pr: 42 }), dataDir);
-    assert.equal(decision(first), 'deny');
+    assert.equal(decision(first), 'ask');
+    assert.notEqual(decision(first), 'allow');
 
     const second = runHook(GATE, mcpPayload(dataDir, 'mcp__github__merge_pull_request', { pr: 43 }), dataDir);
-    assert.equal(decision(second), 'deny');
+    assert.equal(decision(second), 'ask');
+    assert.notEqual(decision(second), 'allow');
   } finally {
     cleanup(dataDir);
   }

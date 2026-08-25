@@ -37,6 +37,38 @@ test('shared risk policy classifies git push without Claude Hook JSON', () => {
   assert.equal('hookSpecificOutput' in result, false);
 });
 
+test('shared risk policy classifies every one of the 12 production-policy.json approvalClasses correctly, by exact class name', () => {
+  // Task requirement (ADR-0027): review the complete require-approval class
+  // matrix and do not leave a class accidentally unreachable. This asserts
+  // the exact actionClass name for one representative command per class, so
+  // a class silently renamed or removed from the policy file surfaces as a
+  // test failure here, not merely as a missing test.
+  const cases = [
+    ['kubectl --context prod apply -f app.yaml', 'production-deploy'],
+    ['prisma migrate deploy', 'production-data-write'],
+    ['rm -rf /var/data', 'destructive-operation'],
+    ['npm publish', 'package-publish'],
+    ['gh release create v1.0.0', 'release'],
+    ['git push origin main', 'git-push'],
+    ['git push --force origin main', 'git-force'],
+    ['gh pr merge 42', 'merge'],
+    ['gh secret set DEPLOY_KEY', 'iam-or-secrets'],
+    ['stripe charges create --amount 100', 'payment'],
+    ['slack send "release is out"', 'external-message'],
+    ['npx omniroute start', 'external-write'],
+  ];
+  for (const [command, expectedClass] of cases) {
+    const result = classifyRiskAction({
+      toolName: 'Bash',
+      toolInput: { command },
+      cwd: process.cwd(),
+      dataRoot: tempDataRoot(),
+    });
+    assert.equal(result.action, 'require-approval', `expected require-approval for ${expectedClass}: ${command}`);
+    assert.equal(result.actionClass, expectedClass, `expected actionClass ${expectedClass} for: ${command}`);
+  }
+});
+
 test('shared risk policy classifies a git force-push as git-force, not the more general git-push', () => {
   const result = classifyRiskAction({
     toolName: 'Bash',
@@ -349,15 +381,20 @@ test('shared risk policy passes a benign file write', () => {
   assert.equal(result.action, 'pass');
 });
 
-test('shared risk policy denies an unknown MCP server', () => {
+test('shared risk policy hard-denies an unknown MCP server (not merely require-approval)', () => {
+  // Restore-native-approval checkpoint: `deny` and `require-approval` are
+  // distinct KRYLO policy outcomes. An entirely unrecognized MCP server has
+  // no identity a human could meaningfully approve, so it must stay a hard
+  // `deny` even now that known MCP write classes route through native ask
+  // -- otherwise widening `ask` to MCP tools would silently downgrade
+  // "we have never reviewed this server at all" to a single-click prompt.
   const result = classifyRiskAction({
     toolName: 'mcp__some_random_service__update_thing',
     toolInput: {},
     cwd: process.cwd(),
     dataRoot: tempDataRoot(),
   });
-  assert.equal(result.action, 'require-approval');
-  assert.equal(typeof result.actionClass, 'string');
+  assert.equal(result.action, 'deny');
 });
 
 test('shared risk policy passes a known read-only-shaped MCP operation', () => {

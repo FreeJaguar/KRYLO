@@ -16,7 +16,9 @@ function bashPayload(cwd, command) {
 }
 
 function powershellPayload(cwd, command) {
-  return { hook_event_name: 'PreToolUse', tool_name: 'PowerShell', tool_input: { command }, cwd };
+  // permission_mode: 'auto' -- same reasoning as bashPayload() above: an
+  // ask-path test must supply an eligible mode explicitly.
+  return { hook_event_name: 'PreToolUse', tool_name: 'PowerShell', tool_input: { command }, cwd, permission_mode: 'auto' };
 }
 
 function writePayload(cwd, filePath) {
@@ -27,13 +29,12 @@ function decision(res) {
   return res.json?.hookSpecificOutput?.permissionDecision ?? null;
 }
 
-// Native ask (docs/adr/0025-native-permission-approval.md) is narrowed to
-// git-push/git-force only: every other require-approval class keeps the
-// deterministic deny fail-safe regardless of severity (a proportionality
-// fix from independent security review -- a single-click native prompt,
-// which Claude Code can persist as an "always allow" rule, must not be the
-// SAME weight of gate for a routine git push as for production-deploy,
-// payment, or iam-or-secrets).
+// Native ask (docs/adr/0025-native-permission-approval.md, restored to full
+// require-approval-class coverage by ADR-0027) now applies to every
+// require-approval class, not only git-push/git-force -- KRYLO's own
+// product contract requires a real human-approval path for every class
+// policy classifies as require-approval, not a hard deny indistinguishable
+// from a true deny.
 const GIT_PUSH_OR_FORCE_COMMANDS = [
   ['git push origin main', 'git-push'],
   ['git -C /some/repo push origin main', 'git-push via -C (security finding 1)'],
@@ -64,6 +65,27 @@ const OTHER_GATED_COMMANDS = [
 
 const DENIED_COMMANDS = [...GIT_PUSH_OR_FORCE_COMMANDS, ...OTHER_GATED_COMMANDS];
 
+// One representative Bash command per production-policy.json approvalClasses
+// key, exhaustively -- the task's own explicit requirement ("for each class,
+// document and test whether the final outcome is ask/deny/allow; do not
+// leave a class accidentally unreachable"). Class names here are the exact
+// keys, not free-text labels, so a class silently renamed or removed from
+// the policy file would show up as a mismatch here, not just a missing test.
+const ALL_TWELVE_REQUIRE_APPROVAL_CLASSES = [
+  ['kubectl --context prod apply -f app.yaml', 'production-deploy'],
+  ['prisma migrate deploy', 'production-data-write'],
+  ['rm -rf /var/data', 'destructive-operation'],
+  ['npm publish', 'package-publish'],
+  ['gh release create v1.0.0', 'release'],
+  ['git push origin main', 'git-push'],
+  ['git push --force origin main', 'git-force'],
+  ['gh pr merge 42', 'merge'],
+  ['gh secret set DEPLOY_KEY', 'iam-or-secrets'],
+  ['stripe charges create --amount 100', 'payment'],
+  ['slack send "release is out"', 'external-message'],
+  ['npx omniroute start', 'external-write'],
+];
+
 const ALLOWED_COMMANDS = [
   'npm test',
   'git status',
@@ -71,6 +93,22 @@ const ALLOWED_COMMANDS = [
   'node script.mjs --check',
   'npx vitest run',
 ];
+
+test('risk-gate: every one of the 12 require-approval classes (ADR-0027) triggers ask under an eligible mode, and deny under an ineligible one -- no class is accidentally unreachable', () => {
+  const dataDir = mkTempDataDir();
+  try {
+    createActiveRun(dataDir);
+    for (const [command, className] of ALL_TWELVE_REQUIRE_APPROVAL_CLASSES) {
+      const askRes = runHook(GATE, bashPayload(dataDir, command), dataDir);
+      assert.equal(decision(askRes), 'ask', `expected ask for class ${className}: ${command}`);
+
+      const denyRes = runHook(GATE, { ...bashPayload(dataDir, command), permission_mode: 'bypassPermissions' }, dataDir);
+      assert.equal(decision(denyRes), 'deny', `expected deny (bypassPermissions) for class ${className}: ${command}`);
+    }
+  } finally {
+    cleanup(dataDir);
+  }
+});
 
 test('risk-gate: git push/force-push commands trigger a native ask prompt on Bash during an active run', () => {
   // Native permission approval (docs/adr/0025-native-permission-approval.md):
@@ -114,16 +152,35 @@ test('risk-gate: permission_mode "default" -- an undocumented sixth CLI value, l
   }
 });
 
-test('risk-gate: every other production/destructive/publish/release/merge/secrets class stays deny on Bash, even though it would qualify for ask if it were git-push/git-force', () => {
+test('risk-gate: every other production/destructive/publish/release/merge/secrets class ALSO triggers native ask on Bash, not just git-push/git-force (ADR-0027)', () => {
   const dataDir = mkTempDataDir();
   try {
     createActiveRun(dataDir);
     for (const [command] of OTHER_GATED_COMMANDS) {
       const res = runHook(GATE, bashPayload(dataDir, command), dataDir);
       assert.equal(res.status, 0, command);
-      assert.equal(decision(res), 'deny', `expected deny for: ${command}`);
+      assert.equal(decision(res), 'ask', `expected ask for: ${command}`);
       assert.ok(!res.json.hookSpecificOutput.permissionDecisionReason.includes(command),
         `reason must not echo the command: ${command}`);
+    }
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate: every require-approval class (git-push/git-force included) still falls back to deny when the permission mode is not ask-eligible', () => {
+  // Restoring native ask to every class (ADR-0027) must not weaken the
+  // existing fail-safe: an ineligible mode (bypassPermissions, an unknown
+  // mode, or an absent field) still denies every one of these classes, not
+  // only the two that were ask-eligible before this checkpoint.
+  const dataDir = mkTempDataDir();
+  try {
+    createActiveRun(dataDir);
+    for (const [command] of DENIED_COMMANDS) {
+      const bypassRes = runHook(GATE, { ...bashPayload(dataDir, command), permission_mode: 'bypassPermissions' }, dataDir);
+      assert.equal(decision(bypassRes), 'deny', `expected deny (bypassPermissions) for: ${command}`);
+      const noModeRes = runHook(GATE, { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command }, cwd: dataDir }, dataDir);
+      assert.equal(decision(noModeRes), 'deny', `expected deny (absent permission_mode) for: ${command}`);
     }
   } finally {
     cleanup(dataDir);
@@ -192,25 +249,32 @@ test('risk-gate: bypassPermissions still falls back to deny even when session_id
   }
 });
 
-test('risk-gate: the same production/destructive/publish commands are still gated (deny) via the PowerShell tool, same classification as Bash', () => {
-  // Native ask (docs/adr/0025-native-permission-approval.md) is used ONLY
-  // for Bash: the official CHANGELOG confirmation that auto-mode no longer
-  // overrides a hook's `ask` decision is scoped explicitly to "unsandboxed
-  // Bash" (v2.1.211). No equivalent confirmation exists for PowerShell, so
-  // it keeps the deterministic `deny` fail-safe -- strictly more
-  // conservative than an unconfirmed `ask`, never a bypass. Risk
-  // CLASSIFICATION itself is still identical for both tools (proven at the
-  // unit level in tests/unit/risk-policy.test.mjs); only the resulting
-  // Hook decision (ask vs deny) differs, and only because of a real,
-  // evidence-backed gap in official documentation.
+test('risk-gate: the same production/destructive/publish commands trigger native ask via the PowerShell tool too, same classification as Bash (ADR-0027, PowerShell risk parity)', () => {
+  // ADR-0027 restores PowerShell to equal footing with Bash for native ask:
+  // official documentation states PreToolUse hooks run before the
+  // permission prompt for every tool, and risk CLASSIFICATION was already
+  // identical for both tools (tests/unit/risk-policy.test.mjs) -- there is
+  // no principled reason for the resulting Hook decision to differ once the
+  // permission mode itself is eligible.
   const dataDir = mkTempDataDir();
   try {
     createActiveRun(dataDir);
     for (const [command] of DENIED_COMMANDS) {
       const res = runHook(GATE, powershellPayload(dataDir, command), dataDir);
       assert.equal(res.status, 0, command);
-      assert.equal(decision(res), 'deny', `expected deny for PowerShell: ${command}`);
+      assert.equal(decision(res), 'ask', `expected ask for PowerShell: ${command}`);
     }
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate: PowerShell require-approval classes still fall back to deny under an ineligible permission mode', () => {
+  const dataDir = mkTempDataDir();
+  try {
+    createActiveRun(dataDir);
+    const res = runHook(GATE, { ...powershellPayload(dataDir, 'git push origin main'), permission_mode: 'bypassPermissions' }, dataDir);
+    assert.equal(decision(res), 'deny');
   } finally {
     cleanup(dataDir);
   }
