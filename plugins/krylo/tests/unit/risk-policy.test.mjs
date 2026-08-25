@@ -429,6 +429,39 @@ test('shared risk policy denies a quoted sensitive path containing an internal s
   assert.equal(benign.action, 'pass');
 });
 
+test('shared risk policy denies quote-concatenated sensitive paths and a trailing-space/dot Windows path quirk (two further regressions found by a fresh Security Reviewer in the SAME quote-stripping fix)', () => {
+  // (1) Stripping only ONE outer matching pair of quotes (the round-4 fix)
+  // still left an interior/adjacent quote character in the token for
+  // `.env""` or `""".env` -- ordinary, valid shell quote-concatenation
+  // that a real shell still resolves to the literal file `.env` -- which
+  // broke the path-boundary anchors just the same. Fixed by removing every
+  // quote character from the token, not merely a single surrounding pair.
+  // (2) Confirmed against a real PowerShell process that Windows silently
+  // ignores a trailing space or dot on a path component (`Get-Content
+  // '.env '` reads the real `.env`), so appending either bypassed the
+  // pattern's own end-of-string anchor. Fixed by stripping trailing
+  // spaces/dots inside matchesSensitivePath(), the same way the NTFS ADS
+  // suffix already is.
+  const dataRoot = tempDataRoot();
+  const mustDeny = [
+    ['Bash', { command: 'cat .env""' }],
+    ['Bash', { command: 'cat "".env' }],
+    ['Bash', { command: "cat '.env '" }],
+    ['Bash', { command: 'cat .env.' }],
+    ['Read', { file_path: '.env ' }],
+  ];
+  for (const [toolName, toolInput] of mustDeny) {
+    const result = classifyRiskAction({ toolName, toolInput, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for ${toolName}(${JSON.stringify(toolInput)})`);
+    assert.equal(result.category, 'sensitive-path');
+  }
+
+  // The .env.example template exception must still work after trailing-dot
+  // trimming (trimming ".env.example" itself must not strip its own "e").
+  const template = classifyRiskAction({ toolName: 'Read', toolInput: { file_path: '.env.example' }, cwd: process.cwd(), dataRoot });
+  assert.equal(template.action, 'pass');
+});
+
 test('shared risk policy denies direct writes into the KRYLO data root', () => {
   const dataRoot = tempDataRoot();
   const result = classifyRiskAction({
@@ -691,51 +724,36 @@ test('shared risk policy denies the model writing/editing the KRYLO plugin\'s ow
     assert.equal(result.category, 'plugin-installation-protection');
   }
 
-  // Bash/PowerShell command TEXT is scanned for a pluginRoot reference, but
-  // ONLY combined with a write-shaped signal (redirection, sed -i, tee, cp,
-  // mv, or the PowerShell write cmdlets) -- a second independent review
-  // round found a first version scanning for ANY pluginRoot reference also
+  // Bash/PowerShell command TEXT is deliberately NOT scanned for this check
+  // at all (unlike Write/Edit/NotebookEdit above) -- this went through TWO
+  // more independent review rounds after the original design:
+  // (a) a first version scanned for ANY pluginRoot reference, which also
   // matched `skills/run/SKILL.md`'s own MANDATORY runtime CLI calls
   // (`node "<pluginRoot>/scripts/runtime/<script>.mjs"`), breaking KRYLO's
-  // own operation with no approval path (a real, reproduced Critical
-  // regression). A THIRD review round then found dropping the Bash/
-  // PowerShell arm entirely (rather than narrowing it) left the actual
-  // file-mutation threat unguarded for Bash/PowerShell (`echo x >>
-  // <pluginRoot>/policies/production-policy.json` classified as `pass`).
-  // The write-shaped-signal design closes that gap without repeating the
-  // Critical regression: a mandatory runtime CLI call contains neither a
-  // redirection operator nor a write-verb.
-  const bashWrite = classifyRiskAction({
+  // own operation with no approval path (Critical regression);
+  // (b) narrowing to "references pluginRoot AND matches a write-shaped
+  // signal list" (redirection/sed -i/tee/cp/mv/Set-Content/...) was then
+  // found to be WORSE than no check at all: it still denied legitimate
+  // calls (bare `>`/`cp`/`mv` appear as free text inside ordinary evidence
+  // strings and JSON payloads a real runtime CLI call routinely carries --
+  // Critical false positive), while missing nearly every actual write
+  // primitive (`node -e "...writeFileSync..."`, `perl -pi -e`,
+  // `python -c "open(...,'w')"`, `dd`, `truncate`, `rsync`, `curl -o`,
+  // PowerShell `[System.IO.File]::WriteAllText`, etc. all still passed).
+  // A regex over untokenized shell text cannot answer "is this a write to
+  // file X" for an interpreter-agnostic, unbounded set of write
+  // primitives -- removed rather than continuing to patch a control that
+  // was negative-value. See docs/adr/0028-foundation-final-closure.md's
+  // residual-limitations list for the disclosed gap this leaves.
+  const bashReference = classifyRiskAction({
     toolName: 'Bash',
     toolInput: { command: `echo x >> ${path.join(fakePluginRoot, 'policies', 'production-policy.json')}` },
     cwd: process.cwd(),
     dataRoot,
     pluginRoot: fakePluginRoot,
   });
-  assert.equal(bashWrite.action, 'deny', 'a Bash command that both references pluginRoot AND is write-shaped (redirection) must be denied');
-  assert.equal(bashWrite.category, 'plugin-installation-protection');
+  assert.notEqual(bashReference.action, 'deny', 'a Bash command merely referencing pluginRoot must NOT be denied by this check -- text-matching for "is this a write" was tried and found worse than no check (Critical false positives, ~19% real coverage)');
 
-  const bashSedWrite = classifyRiskAction({
-    toolName: 'Bash',
-    toolInput: { command: `sed -i 's/deny/pass/' ${path.join(fakePluginRoot, 'scripts', 'security', 'risk-policy.mjs')}` },
-    cwd: process.cwd(),
-    dataRoot,
-    pluginRoot: fakePluginRoot,
-  });
-  assert.equal(bashSedWrite.action, 'deny', 'a Bash in-place sed edit of an installed plugin file must be denied');
-
-  const powerShellWrite = classifyRiskAction({
-    toolName: 'PowerShell',
-    toolInput: { command: `Set-Content -Path "${path.join(fakePluginRoot, 'policies', 'production-policy.json')}" -Value '{}'` },
-    cwd: process.cwd(),
-    dataRoot,
-    pluginRoot: fakePluginRoot,
-  });
-  assert.equal(powerShellWrite.action, 'deny', 'a PowerShell Set-Content targeting an installed plugin file must be denied');
-
-  // A read-only Bash/PowerShell command that merely references pluginRoot
-  // (no write-shaped signal) must NOT be denied -- this is what keeps the
-  // model able to inspect its own installed policy.
   const bashRead = classifyRiskAction({
     toolName: 'Bash',
     toolInput: { command: `cat ${path.join(fakePluginRoot, 'policies', 'production-policy.json')}` },

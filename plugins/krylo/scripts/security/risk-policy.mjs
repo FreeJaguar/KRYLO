@@ -343,38 +343,41 @@ function touchesPluginInstallation({ toolName, toolInput, cwd, pluginRoot }) {
   //
   // A later review found that dropping the Bash/PowerShell arm entirely
   // left a real gap open: `echo x >> <pluginRoot>/policies/production-
-  // policy.json`, `sed -i ... <pluginRoot>/scripts/security/risk-policy.mjs`,
-  // or the PowerShell equivalents (Set-Content/Add-Content/Out-File/
-  // Copy-Item/Move-Item/New-Item -Value) all mutate the exact files this
-  // check exists to protect, and touchesHookEntrypoint() only covers the
-  // six known hook-entrypoint filenames, not policy JSON or the run
-  // skill. The narrower, correct signal is not "mentions pluginRoot" but
-  // "mentions pluginRoot AND is shaped like a write" -- a mandatory runtime
-  // CLI invocation never contains a redirection operator or a write-verb
-  // like `sed -i`/`tee`/`cp`/`mv`/`Set-Content`, so this does not repeat
-  // the earlier self-inflicted regression.
-  const WRITE_SHAPED_SIGNALS = [
-    />>?(?!=)/,
-    /\bsed\b[^|;&\n]*-i\b/i,
-    /\btee\b/i,
-    /\bcp\b/i,
-    /\bmv\b/i,
-    /\bset-content\b/i,
-    /\badd-content\b/i,
-    /\bout-file\b/i,
-    /\bcopy-item\b/i,
-    /\bmove-item\b/i,
-    /\bnew-item\b[^|;&\n]*-value\b/i,
-  ];
-  if (name === 'Bash' || name === 'PowerShell') {
-    const command = String(input.command ?? '').toLowerCase();
-    if (command === '') return false;
-    const mentionsRoot = command.includes(rootLower)
-      || homeExpandedVariants(command, os.homedir()).some((e) => e.toLowerCase().includes(rootLower));
-    if (!mentionsRoot) return false;
-    return WRITE_SHAPED_SIGNALS.some((re) => re.test(command));
-  }
-
+  // policy.json` and similar mutate the exact files this check exists to
+  // protect. That review's own proposed fix -- deny when the command BOTH
+  // mentions pluginRoot AND matches a fixed list of "write-shaped" signals
+  // (redirection, sed -i, tee, cp, mv, Set-Content, ...) -- was tried and
+  // then found, by a FURTHER independent review, to be strictly worse than
+  // having no Bash/PowerShell arm at all: it is simultaneously (a) a
+  // Critical false-positive generator, since `>` alone also matches `->`,
+  // `=>`, and `2>&1`/`1>file` inside completely unrelated, legitimate
+  // command text (including KRYLO's own mandatory runtime CLI calls, whose
+  // JSON evidence payloads routinely contain arrows or comparison text),
+  // and `cp`/`mv` match as bare free-text substrings; and (b) still misses
+  // nearly every real mutation path, since there is no finite verb list --
+  // `node -e "require('fs').writeFileSync(...)"`, `perl -pi -e`,
+  // `python -c "open(...,'w')"`, `dd`, `truncate`, `install`, `rsync`,
+  // `ln -sf`, `curl -o`, `git checkout ... --`, PowerShell
+  // `[System.IO.File]::WriteAllText(...)`, `Remove-Item`, `Rename-Item`,
+  // and a flagless `rm <file>` (not even caught by the destructive-
+  // operation class, which requires a recognized delete flag) all
+  // classified as `pass` against the fixed list, while genuinely
+  // overwriting or deleting the protected file. A regex over untokenized
+  // shell text cannot answer "is this a write to file X" for an
+  // interpreter-agnostic, unbounded set of write primitives -- this is a
+  // structural limit of the text-matching approach used throughout this
+  // module, not a gap in any one pattern. Per that review's explicit
+  // recommendation, the Bash/PowerShell arm is removed rather than kept in
+  // a state that is negative-value (blocks legitimate use, catches little
+  // real risk) or patched into a sixth round of the same failure mode.
+  // Real protection for this file-mutation threat is the Write/Edit/
+  // NotebookEdit arm below (the tool surface KRYLO can reliably observe
+  // and canonicalize a path from) plus the narrowly-scoped
+  // touchesHookEntrypoint() above; a model using an interpreter one-liner
+  // or another shell write primitive to mutate the plugin's own installed
+  // files via Bash/PowerShell is a disclosed, accepted residual gap for
+  // this specific tool surface (see the residual-limitations list in
+  // docs/adr/0028-foundation-final-closure.md), not a closed guarantee.
   if (name !== 'Write' && name !== 'Edit' && name !== 'NotebookEdit') return false;
   const target = typeof input.file_path === 'string'
     ? input.file_path
@@ -488,8 +491,15 @@ function matchesSensitivePath(policy, text) {
   // tokens, Write/Edit/NotebookEdit target, Read/Glob/Grep candidates)
   // benefits without each needing its own copy of this logic.
   const withoutAds = text.replace(/::[^\\/]*$/, '');
-  if (ENV_TEMPLATE_EXCEPTION.test(withoutAds)) return false;
-  return policy.sensitivePaths.patterns.some((p) => new RegExp(p, 'i').test(withoutAds));
+  // A further independent review found and confirmed, against a real
+  // PowerShell process, that Windows silently ignores trailing spaces and
+  // dots on a path component (`Get-Content '.env '` reads the real `.env`
+  // on disk), so appending either to an otherwise-matched secret path
+  // bypassed the pattern's own end-of-string anchors. Stripped the same
+  // way as the ADS suffix above, before the exception and pattern checks.
+  const normalized = withoutAds.replace(/[ .]+$/, '');
+  if (ENV_TEMPLATE_EXCEPTION.test(normalized)) return false;
+  return policy.sensitivePaths.patterns.some((p) => new RegExp(p, 'i').test(normalized));
 }
 
 /**
@@ -504,18 +514,20 @@ function matchesSensitivePath(policy, text) {
  * the sensitivePaths patterns' own path-boundary anchors (which expect a
  * literal `.env`, not a quote character, at the start) -- a quoted
  * filename, valid and completely ordinary shell syntax, bypassed secret-
- * path protection entirely. Strips one matching pair of quotes (never
- * partial/mismatched pairs) before matching.
+ * path protection entirely.
+ *
+ * A further independent review found that stripping only one matching
+ * OUTER pair still left `.env""` and `"".env` (a quote-concatenation --
+ * ordinary, valid shell syntax that still resolves to the literal file
+ * `.env`) unmatched, since the leftover interior quote characters broke
+ * the path-boundary anchors just the same. Every quote character is now
+ * removed from the token, not merely a single surrounding pair. This
+ * cannot re-lose the internal space the SHELL_WORD tokenizer preserves
+ * inside a quoted segment (round 4's fix for `cat "my dir/.env"`): only
+ * quote characters themselves are removed, and a space is not one.
  */
 function stripSurroundingQuotes(token) {
-  if (token.length >= 2) {
-    const first = token[0];
-    const last = token[token.length - 1];
-    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
-      return token.slice(1, -1);
-    }
-  }
-  return token;
+  return token.replace(/["']/g, '');
 }
 
 // Splitting on whitespace before stripping quotes (the original approach)
