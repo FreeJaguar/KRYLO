@@ -24,8 +24,10 @@ import {
   isCrossHarnessDepthExceeded,
   buildCrossHarnessRequest,
   buildWorkerSystemPrompt,
+  buildWorkerStdinPayload,
   buildContextPacket,
   validateCrossHarnessResult,
+  CROSS_HARNESS_RESULT_JSON_SCHEMA,
 } from '../lib/cross-harness.mjs';
 import { crossHarnessInvocationDir, ensureDir } from '../lib/paths.mjs';
 import { readActiveRunPointer, computeProjectRootHash } from '../lib/state.mjs';
@@ -33,45 +35,6 @@ import { bootstrapStorageEnvironment, resolveSessionId, detectHost } from '../li
 import { recordEvent } from '../lib/telemetry.mjs';
 import { detectClaudeWorkerCapability, spawnClaudeWorker, parseClaudeWorkerOutput } from '../host/cross-harness/claude-worker.mjs';
 import { detectCodexWorkerCapability, spawnCodexWorker, parseCodexWorkerOutput } from '../host/cross-harness/codex-worker.mjs';
-
-const RESULT_JSON_SCHEMA = {
-  type: 'object',
-  additionalProperties: false,
-  required: ['schemaVersion', 'status', 'provider', 'role', 'summary', 'filesModified', 'findings', 'limitations'],
-  properties: {
-    schemaVersion: { const: '1.0.0' },
-    status: { enum: ['completed', 'incomplete'] },
-    provider: { enum: ['claude', 'codex'] },
-    role: { enum: ['verifier', 'reviewer', 'security-reviewer', 'architect'] },
-    summary: { type: 'string', maxLength: 2000 },
-    filesModified: { type: 'array', items: { type: 'string' } },
-    findings: {
-      type: 'array',
-      maxItems: 32,
-      items: {
-        type: 'object',
-        properties: {
-          severity: { enum: ['critical', 'high', 'medium', 'low', 'info'] },
-          title: { type: 'string', maxLength: 200 },
-          confidence: { enum: ['high', 'medium', 'low'] },
-          recommendation: { type: 'string', maxLength: 1000 },
-          evidence: {
-            type: 'array',
-            items: {
-              type: 'object',
-              properties: {
-                path: { type: 'string' },
-                line: { type: 'integer', minimum: 1 },
-                description: { type: 'string', maxLength: 500 },
-              },
-            },
-          },
-        },
-      },
-    },
-    limitations: { type: 'array', items: { type: 'string', maxLength: 500 } },
-  },
-};
 
 function parseArgs(argv) {
   const args = { role: null, task: '', contextFile: null, session: null, projectDir: null, timeoutMs: null };
@@ -209,10 +172,10 @@ async function main() {
   const invocationDir = crossHarnessInvocationDir(runId, invocationId);
   ensureDir(invocationDir);
   const outputSchemaPath = path.join(invocationDir, 'result-schema.json');
-  fs.writeFileSync(outputSchemaPath, JSON.stringify(RESULT_JSON_SCHEMA), 'utf8');
+  fs.writeFileSync(outputSchemaPath, JSON.stringify(CROSS_HARNESS_RESULT_JSON_SCHEMA), 'utf8');
 
   const systemPrompt = buildWorkerSystemPrompt(request.role);
-  const stdinPayload = JSON.stringify({ role: request.role, packet: packetResult.packet });
+  const stdinPayload = buildWorkerStdinPayload({ role: request.role, packet: packetResult.packet });
 
   // NOTE: process.exit() terminates synchronously and does NOT run a
   // pending try/finally -- every exit point below explicitly calls
@@ -226,7 +189,7 @@ async function main() {
 
   const spawnResult = request.workerProvider === 'codex'
     ? spawnCodexWorker({ cliPath: codexCliPath, cwd: invocationDir, outputSchemaPath, stdinPayload: `${systemPrompt}\n\n${stdinPayload}`, runId, timeoutMs: args.timeoutMs || undefined })
-    : spawnClaudeWorker({ cliPath: claudeCliPath, cwd: invocationDir, systemPrompt, stdinPayload, runId, timeoutMs: args.timeoutMs || undefined });
+    : spawnClaudeWorker({ cliPath: claudeCliPath, cwd: invocationDir, systemPrompt, jsonSchema: CROSS_HARNESS_RESULT_JSON_SCHEMA, stdinPayload, runId, timeoutMs: args.timeoutMs || undefined });
 
   if (!spawnResult.ok) {
     recordEvent(runId, { event: 'cross-harness', provider: request.workerProvider, role: request.role, status: 'failed', category: spawnResult.failureCode });

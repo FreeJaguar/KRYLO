@@ -9,11 +9,23 @@
 // NotebookEdit/WebFetch/WebSearch tool is even AVAILABLE to the worker,
 // regardless of what it is told), `--permission-mode plan` (defense in
 // depth on top of the tool restriction), `--strict-mcp-config` with no
-// `--mcp-config` (zero MCP servers), `--bare` (skips hooks/plugin-sync/
-// CLAUDE.md-discovery so KRYLO's own Claude-host hooks never fire
-// recursively inside the worker's own process), `--no-session-persistence`
-// (the worker's own conversation is never saved/resumable). Never
-// `--dangerously-skip-permissions` / `--allow-dangerously-skip-permissions`.
+// `--mcp-config` (zero MCP servers), `--setting-sources ""` (no user/
+// project/local settings file is loaded, so no personal hook or MCP
+// configuration can apply inside the worker's own process), `--no-session-
+// persistence` (the worker's own conversation is never saved/resumable).
+// Never `--dangerously-skip-permissions` / `--allow-dangerously-skip-permissions`.
+//
+// Deliberately NOT `--bare`: a real live probe against this environment's
+// actual authenticated session (OAuth via claude.ai, not an API key) found
+// `--bare` makes the worker unable to authenticate at all -- its own
+// documented contract states plainly that in --bare mode "OAuth and
+// keychain are never read" and only `ANTHROPIC_API_KEY`/`apiKeyHelper` are
+// accepted. Since OAuth is the common, documented default authentication
+// path (not merely this environment's own setup), `--bare` would have
+// silently made Cross-Harness's Claude worker direction nonfunctional for
+// the majority of real users. `--setting-sources ""` reproduces --bare's
+// settings-file isolation (no hook/hooks.json, no personal MCP config, no
+// personal CLAUDE.md picked up) without touching the auth path.
 //
 // The task/context payload is sent via STDIN, never argv (task Section 12).
 // The worker's system-prompt / prompt-injection-boundary text
@@ -48,19 +60,24 @@ export function detectClaudeWorkerCapability({ cliPath = 'claude', env = process
 
 /**
  * Build the argv array for `claude -p`. Never includes task/context text --
- * that is written to stdin by the caller; systemPrompt is fixed, non-secret
- * KRYLO-authored boundary text, safe to pass as an argument value.
+ * that is written to stdin by the caller; systemPrompt/jsonSchema are
+ * fixed, non-secret KRYLO-authored content, safe to pass as argument
+ * values. `--json-schema` is a first line of defense constraining the
+ * model's final response shape (mirroring Codex's `--output-schema`) --
+ * scripts/lib/cross-harness.mjs's validateCrossHarnessResult() remains
+ * authoritative regardless of whether the platform enforces it.
  */
-export function buildClaudeWorkerArgv({ systemPrompt }) {
+export function buildClaudeWorkerArgv({ systemPrompt, jsonSchema }) {
   return [
     '-p',
-    '--bare',
+    '--setting-sources', '',
     '--tools', READ_ONLY_TOOLS,
     '--permission-mode', 'plan',
     '--strict-mcp-config',
     '--output-format', 'json',
     '--no-session-persistence',
     '--append-system-prompt', systemPrompt,
+    ...(jsonSchema ? ['--json-schema', JSON.stringify(jsonSchema)] : []),
   ];
 }
 
@@ -99,8 +116,8 @@ export function buildClaudeWorkerEnv({ runId, parentEnv = process.env }) {
  * disposable Cross-Harness directory (claude has no -C/--cd flag on this
  * build; cwd is set via the child_process option instead).
  */
-export function spawnClaudeWorker({ cliPath = 'claude', cwd, systemPrompt, stdinPayload, runId, timeoutMs = CROSS_HARNESS_TIMEOUT_MS, env = process.env }) {
-  const argv = buildClaudeWorkerArgv({ systemPrompt });
+export function spawnClaudeWorker({ cliPath = 'claude', cwd, systemPrompt, jsonSchema, stdinPayload, runId, timeoutMs = CROSS_HARNESS_TIMEOUT_MS, env = process.env }) {
+  const argv = buildClaudeWorkerArgv({ systemPrompt, jsonSchema });
   const childEnv = buildClaudeWorkerEnv({ runId, parentEnv: env });
   const { command, args } = platformSpawnTarget(cliPath, argv);
   try {
@@ -137,14 +154,43 @@ export function spawnClaudeWorker({ cliPath = 'claude', cwd, systemPrompt, stdin
 
 /**
  * Extract the model's final JSON result from `claude -p --output-format
- * json`'s single JSON result object (its own `result` field holds the
- * assistant's final text). Never throws on malformed input.
+ * json --json-schema <schema>`'s output. Two real, live-confirmed shapes
+ * exist, and which one appears depends on other flags combined with
+ * `--json-schema` (confirmed: adding `--append-system-prompt` changes
+ * which shape is produced, even with `--output-format json` present in
+ * both cases) -- so this checks for all of them rather than assuming one:
+ *   1. The `--output-format json` envelope with a dedicated
+ *      `structured_output` field holding the already-parsed,
+ *      schema-conformant object directly (seen with no custom system
+ *      prompt).
+ *   2. The RAW schema-conformant object printed directly to stdout, with
+ *      no envelope at all -- `--output-format json`'s own wrapping did not
+ *      apply (seen with `--append-system-prompt` present). Detected by the
+ *      parsed top-level object itself already carrying `schemaVersion`.
+ *   3. Fallback: the envelope's `result` field (a plain string) holding
+ *      the model's raw text, which may itself be JSON (optionally wrapped
+ *      in a markdown code fence the model added despite instructions not
+ *      to) -- covers any other shape not yet seen live.
+ * validateCrossHarnessResult() (scripts/lib/cross-harness.mjs) remains the
+ * actual authority regardless of which path extracted the object. Never
+ * throws on malformed input.
  */
 export function parseClaudeWorkerOutput(stdout) {
   try {
     const outer = JSON.parse(stdout);
-    const text = typeof outer?.result === 'string' ? outer.result : null;
+    if (outer && typeof outer === 'object') {
+      if (outer.structured_output && typeof outer.structured_output === 'object') {
+        return outer.structured_output;
+      }
+      if ('schemaVersion' in outer) {
+        return outer;
+      }
+    }
+    let text = typeof outer?.result === 'string' ? outer.result : null;
     if (text === null) return null;
+    text = text.trim();
+    const fenced = /^```(?:json)?\s*([\s\S]*?)\s*```$/.exec(text);
+    if (fenced) text = fenced[1];
     return JSON.parse(text);
   } catch {
     return null;
