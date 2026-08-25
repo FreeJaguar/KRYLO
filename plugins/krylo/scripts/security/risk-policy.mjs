@@ -517,6 +517,261 @@ function matchesSensitivePath(policy, text) {
   return policy.sensitivePaths.patterns.some((p) => new RegExp(p, 'i').test(normalized));
 }
 
+// -----------------------------------------------------------------------
+// Foundation glob-closure checkpoint: matchesSensitivePath() above (kept
+// exactly as-is, per this checkpoint's own instruction to preserve the
+// existing exact matcher) only recognizes a LITERAL secret filename. A
+// filesystem glob expression -- Bash/PowerShell `*`, `?`, `[...]` bracket
+// classes, or a Glob/Grep path-shaped field -- that EXPANDS, at shell/tool
+// level, to that exact same name was not recognized at all: `cat .e*` in a
+// directory containing a real `.env` reads it identically to `cat .env`,
+// but the sensitivePaths regexes require the literal text `.env`, not a
+// wildcard that merely resolves to it.
+//
+// Rather than adding one more regex per reported example (which the task
+// this fix answers explicitly asks not to do, and which drifts further
+// from correct with every new example), this implements a small, bounded,
+// deterministic glob-matching primitive and reuses it against the SAME
+// canonical protected names/extensions the policy already declares
+// (policies/production-policy.json's new `globProtectedPaths`/
+// `globProtectedExtensions` fields) -- one shared algorithm, not one
+// regex alternative per bypass.
+//
+// Design, bounded and ReDoS-free by construction:
+//   1. Parse a glob string into ATOMS (`lit`, `any` from `?`, `class` from
+//      a `[...]` bracket expression, `star` from one-or-more consecutive
+//      `*`) in a single linear pass -- O(pattern length), no backtracking.
+//   2. Match an atom sequence against a literal target using the classic
+//      ITERATIVE two-pointer wildcard-matching algorithm (the same shape
+//      as the well-known bounded `fnmatch`/wildcard-match algorithms):
+//      O(atoms.length * literal.length), no recursion, no exponential
+//      blowup regardless of how many `*`/`?`/class atoms the pattern has.
+//      Crucially, `literal` here is always one of KRYLO's OWN short,
+//      fixed canonical protected names (".env", "id_rsa", ".pem", ...),
+//      never attacker-controlled length -- so this stays fast no matter
+//      how long the ATTACKER's glob pattern is.
+//   3. For the sensitive-EXTENSION family (any name ending in `.pem` etc,
+//      not one fixed literal), search for a split point where a SUFFIX of
+//      the pattern's atoms fully matches the extension literal -- bounded
+//      to the last `MAX_SUFFIX_SEARCH_ATOMS` atoms (a real extension glob
+//      never needs more trailing "wiggle room" than that; consecutive `*`
+//      already collapse to one atom during parsing, so this bound does
+//      not depend on the attacker's overall pattern length).
+// -----------------------------------------------------------------------
+
+const MAX_SUFFIX_SEARCH_ATOMS = 64;
+const MAX_BRACE_BRANCHES = 32;
+const MAX_BRACE_BRANCH_LENGTH = 128;
+
+function parseGlobAtoms(pattern) {
+  const atoms = [];
+  let i = 0;
+  while (i < pattern.length) {
+    const ch = pattern[i];
+    if (ch === '*') {
+      atoms.push({ type: 'star' });
+      i += 1;
+      while (i < pattern.length && pattern[i] === '*') i += 1; // collapse consecutive '*'
+    } else if (ch === '?') {
+      atoms.push({ type: 'any' });
+      i += 1;
+    } else if (ch === '[') {
+      const close = pattern.indexOf(']', i + 1);
+      if (close === -1) {
+        // No closing ']' -- an unterminated bracket expression is not a
+        // valid glob class; treat the '[' as a literal character, the
+        // same way a real shell does when a bracket expression is
+        // malformed, rather than throwing or looping.
+        atoms.push({ type: 'lit', ch: '[' });
+        i += 1;
+        continue;
+      }
+      let body = pattern.slice(i + 1, close);
+      let negate = false;
+      if (body.startsWith('!') || body.startsWith('^')) {
+        negate = true;
+        body = body.slice(1);
+      }
+      const set = new Set();
+      let j = 0;
+      while (j < body.length) {
+        // A bounded range (a-z): expand up to 1024 code points per range
+        // so a pathological range spec cannot itself become a cost sink.
+        if (body[j + 1] === '-' && j + 2 < body.length) {
+          const lo = Math.min(body.charCodeAt(j), body.charCodeAt(j + 2));
+          const hi = Math.max(body.charCodeAt(j), body.charCodeAt(j + 2));
+          for (let c = lo; c <= hi && c - lo < 1024; c += 1) set.add(String.fromCharCode(c).toLowerCase());
+          j += 3;
+        } else {
+          set.add(body[j].toLowerCase());
+          j += 1;
+        }
+      }
+      atoms.push({ type: 'class', set, negate });
+      i = close + 1;
+    } else {
+      atoms.push({ type: 'lit', ch: ch.toLowerCase() });
+      i += 1;
+    }
+  }
+  return atoms;
+}
+
+function atomMatchesChar(atom, ch) {
+  const c = ch.toLowerCase();
+  if (atom.type === 'lit') return atom.ch === c;
+  if (atom.type === 'any') return true;
+  if (atom.type === 'class') {
+    const inSet = atom.set.has(c);
+    return atom.negate ? !inSet : inSet;
+  }
+  return false;
+}
+
+// Classic bounded wildcard matching: iterative, two-pointer, tracking the
+// most recent `star` atom to retry from on a mismatch. O(atoms.length *
+// literal.length) worst case; no recursion, no exponential backtracking.
+function globAtomsMatchLiteral(atoms, literal) {
+  let ai = 0;
+  let li = 0;
+  let starAtomIdx = -1;
+  let starLiteralIdx = 0;
+  const atomCount = atoms.length;
+  const literalLength = literal.length;
+  while (li < literalLength) {
+    if (ai < atomCount && atoms[ai].type !== 'star' && atomMatchesChar(atoms[ai], literal[li])) {
+      ai += 1;
+      li += 1;
+    } else if (ai < atomCount && atoms[ai].type === 'star') {
+      starAtomIdx = ai;
+      starLiteralIdx = li;
+      ai += 1; // try matching zero characters with the star first
+    } else if (starAtomIdx !== -1) {
+      ai = starAtomIdx + 1;
+      starLiteralIdx += 1;
+      li = starLiteralIdx; // star absorbs one more character, retry
+    } else {
+      return false;
+    }
+  }
+  while (ai < atomCount && atoms[ai].type === 'star') ai += 1; // trailing stars match empty
+  return ai === atomCount;
+}
+
+// A candidate glob made ENTIRELY of star atoms (`*`, `**`, `***`, all
+// collapse to one star atom) carries no specific-name signal at all -- a
+// lone star fully matches ANY literal, so without this guard `cat *`
+// would "match" every single protected name and extension in the policy,
+// denying the single most ordinary wildcard command there is. This is
+// exactly the over-blocking the task this checkpoint answers explicitly
+// warns against ("do NOT solve this by denying every command containing
+// `*`"): a bare wildcard is not attempting to spell out a specific
+// protected name the way `.e*`/`id_rsa*`/`*.pem` are (each of those has
+// real literal/class content alongside its wildcard).
+function hasDiscriminatingContent(atoms) {
+  return atoms.some((atom) => atom.type !== 'star');
+}
+
+function segmentGlobMatchesLiteral(candidateSegment, literalSegment) {
+  const atoms = parseGlobAtoms(candidateSegment);
+  if (!hasDiscriminatingContent(atoms)) return false;
+  return globAtomsMatchLiteral(atoms, literalSegment.toLowerCase());
+}
+
+// Does some SUFFIX of candidateSegment (as a glob) fully match
+// suffixLiteral (e.g. ".pem")? Bounded to the last MAX_SUFFIX_SEARCH_ATOMS
+// atoms -- independent of the candidate's overall length, since a real
+// extension glob never needs more trailing wiggle room than that, and
+// consecutive `*` already collapsed to one atom during parsing.
+function segmentGlobMatchesExtensionSuffix(candidateSegment, suffixLiteral) {
+  const atoms = parseGlobAtoms(candidateSegment);
+  if (!hasDiscriminatingContent(atoms)) return false;
+  const literal = suffixLiteral.toLowerCase();
+  const searchFrom = Math.max(0, atoms.length - MAX_SUFFIX_SEARCH_ATOMS);
+  for (let k = atoms.length; k >= searchFrom; k -= 1) {
+    if (globAtomsMatchLiteral(atoms.slice(k), literal)) return true;
+  }
+  return false;
+}
+
+// A candidate glob's "*" segment-wildcard sentinel (only used for
+// directory-scoped protections like ".ssh/*", meaning "any single
+// filename directly under this protected directory") vs an ordinary
+// protected segment matched via the atom matcher above.
+function segmentMatchesProtectedSegment(candidateSegment, protectedSegment) {
+  if (protectedSegment === '*') return true;
+  return segmentGlobMatchesLiteral(candidateSegment, protectedSegment);
+}
+
+// Bounded, simple Bash brace-expansion support: a single, non-nested
+// `{a,b,c}` group is expanded into its literal alternatives (each
+// re-checked through the same glob-aware path). Deliberately narrow, per
+// this checkpoint's own instruction not to build a shell interpreter:
+// nested braces, more than MAX_BRACE_BRANCHES alternatives, or an
+// over-long branch fall through untouched (treated as ordinary text,
+// which the existing exact matcher and the rest of this function still
+// see normally).
+function expandSimpleBraceGroup(text) {
+  const open = text.indexOf('{');
+  if (open === -1) return [text];
+  const close = text.indexOf('}', open + 1);
+  if (close === -1) return [text];
+  const body = text.slice(open + 1, close);
+  if (body.includes('{') || body.includes('}')) return [text]; // no nesting
+  const branches = body.split(',');
+  if (branches.length < 2 || branches.length > MAX_BRACE_BRANCHES) return [text];
+  if (branches.some((b) => b.length > MAX_BRACE_BRANCH_LENGTH)) return [text];
+  const prefix = text.slice(0, open);
+  const suffix = text.slice(close + 1);
+  return branches.map((b) => `${prefix}${b}${suffix}`);
+}
+
+/**
+ * Determine whether `text`, interpreted as a filesystem glob expression,
+ * can match one of KRYLO's canonical protected secret names/extensions
+ * (policies/production-policy.json's `sensitivePaths.globProtectedPaths`/
+ * `globProtectedExtensions`). Complements matchesSensitivePath() (exact
+ * literal matching, unchanged) rather than replacing it.
+ *
+ * A glob that can ALSO match an exempted public template name (e.g.
+ * `.env*` also matches `.env.example`) is still denied here: the template
+ * exception in matchesSensitivePath() only ever applies to an EXACT,
+ * literal template filename with no glob metacharacters at all, since
+ * this function only runs when a glob metacharacter is present.
+ */
+function globCouldTargetSensitivePath(policy, text) {
+  if (typeof text !== 'string' || text === '') return false;
+  if (!/[*?[]/.test(text)) return false; // no glob metacharacter: nothing for this check to do
+  const candidates = expandSimpleBraceGroup(text);
+  const globProtectedPaths = Array.isArray(policy.sensitivePaths.globProtectedPaths)
+    ? policy.sensitivePaths.globProtectedPaths
+    : [];
+  const globProtectedExtensions = Array.isArray(policy.sensitivePaths.globProtectedExtensions)
+    ? policy.sensitivePaths.globProtectedExtensions
+    : [];
+  for (const candidate of candidates) {
+    const segments = candidate.replace(/\\/g, '/').split('/').filter((s) => s !== '');
+    if (segments.length === 0) continue;
+    for (const protectedPath of globProtectedPaths) {
+      const protectedSegments = protectedPath.split('/');
+      if (segments.length < protectedSegments.length) continue;
+      const tail = segments.slice(segments.length - protectedSegments.length);
+      if (protectedSegments.every((protectedSegment, idx) => segmentMatchesProtectedSegment(tail[idx], protectedSegment))) {
+        return true;
+      }
+    }
+    const lastSegment = segments[segments.length - 1];
+    for (const ext of globProtectedExtensions) {
+      if (segmentGlobMatchesExtensionSuffix(lastSegment, `.${ext}`)) return true;
+    }
+  }
+  return false;
+}
+
+function isSensitivePath(policy, text) {
+  return matchesSensitivePath(policy, text) || globCouldTargetSensitivePath(policy, text);
+}
+
 /**
  * Sensitive-path patterns are anchored to path boundaries, so a command like
  * `cat .env` must be checked token-by-token as well as whole-string (for
@@ -568,11 +823,21 @@ function stripSurroundingQuotes(token) {
 const SHELL_WORD = /(?:[^\s"';|&<>()]|"[^"]*"|'[^']*')+/g;
 
 function commandTouchesSensitivePath(policy, command) {
+  // The WHOLE-STRING check stays exact-match only (matchesSensitivePath,
+  // unchanged): it exists to catch an exact protected path embedded
+  // directly in the command text (`cat ./config/.env`), and a raw
+  // multi-word command line is not itself a meaningful glob expression --
+  // running the glob-aware check against it let an unrelated preceding
+  // word (`cat *`) supply just enough "discriminating content" for the
+  // trailing bare `*` to still slip through the extension-suffix search,
+  // exactly reproducing the over-blocking this checkpoint's own task
+  // explicitly warns against. The glob-aware check instead only ever runs
+  // per TOKEN (each a genuine shell word on its own), below.
   if (matchesSensitivePath(policy, command)) return true;
   const tokens = String(command).match(SHELL_WORD) || [];
   return tokens
     .map(stripSurroundingQuotes)
-    .some((token) => matchesSensitivePath(policy, token));
+    .some((token) => isSensitivePath(policy, token));
 }
 
 /**
@@ -651,7 +916,7 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
       : typeof input.notebook_path === 'string'
         ? input.notebook_path
         : '';
-    if (matchesSensitivePath(policy, stripSurroundingQuotes(target))) {
+    if (isSensitivePath(policy, stripSurroundingQuotes(target))) {
       return {
         action: 'deny',
         category: 'sensitive-path',
@@ -687,7 +952,7 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
         ? [input.path, input.pattern]
         : [input.path, input.glob]; // Grep: never input.pattern (a content regex, not a path)
     for (const candidate of candidates) {
-      if (typeof candidate === 'string' && candidate !== '' && matchesSensitivePath(policy, stripSurroundingQuotes(candidate))) {
+      if (typeof candidate === 'string' && candidate !== '' && isSensitivePath(policy, stripSurroundingQuotes(candidate))) {
         return {
           action: 'deny',
           category: 'sensitive-path',
