@@ -281,6 +281,67 @@ test('shared risk policy: a brace-only expansion (no other glob metacharacter) s
   assert.equal(benign.action, 'pass');
 });
 
+test('shared risk policy: MULTIPLE brace groups in one candidate are all expanded, not just the first (regression found by a fresh independent Security Reviewer)', () => {
+  // The original single-pass expandSimpleBraceGroup() only ever expanded
+  // the FIRST `{...}` group, leaving a SECOND group in the output with
+  // its literal `{`/`}` characters still present -- which then matched
+  // nothing, even though a real shell expands every group in a word.
+  // Fixed with an iterative, fixed-point expander bounded by
+  // MAX_BRACE_GROUPS rounds and a hard MAX_TOTAL_BRACE_CANDIDATES ceiling
+  // (so multiple groups cannot combine into a combinatorial explosion).
+  const dataRoot = tempDataRoot();
+  const mustDeny = [
+    'cat .e{n,m}{v,w}',
+    'cat {.,x}{env,y}',
+    'cat .{e,f}{n,m}v',
+  ];
+  for (const command of mustDeny) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for: ${command}`);
+    assert.equal(result.category, 'sensitive-path');
+  }
+
+  // A group beyond MAX_BRACE_BRANCHES (33 here) is a disclosed, explicit
+  // bound -- left as literal text. Confirms this is a stable, intentional
+  // limit rather than an accidental crash/hang.
+  const overBoundBranches = '.{env,' + Array.from({ length: 32 }, (_, i) => `z${i}`).join(',') + '}';
+  const overBound = classifyRiskAction({ toolName: 'Bash', toolInput: { command: `cat ${overBoundBranches}` }, cwd: process.cwd(), dataRoot });
+  assert.equal(overBound.action, 'pass');
+
+  // Two benign groups must still pass.
+  const benign = classifyRiskAction({ toolName: 'Bash', toolInput: { command: 'cat notes.{txt,md}.{v1,v2}' }, cwd: process.cwd(), dataRoot });
+  assert.equal(benign.action, 'pass');
+});
+
+test('shared risk policy: brace expansion combined with a dense bracket-class candidate does not compound into a multi-second stall (regression found by a fresh independent Security Reviewer: measured 40-60 seconds before this fix)', () => {
+  // Each candidate segment was being re-parsed from scratch once per
+  // globProtectedPaths entry PLUS once per protected extension (~22
+  // times), which, stacked with brace expansion producing up to
+  // MAX_BRACE_BRANCHES candidates each carrying a dense bracket-class
+  // body, multiplied into hundreds of millions of redundant operations --
+  // far worse than the single-candidate stall this same fix round's
+  // MAX_CLASS_SET_SIZE bound was meant to close, since that bound only
+  // limits the cost of ONE parse, not how many times the same segment
+  // gets re-parsed. Fixed by parsing each segment's atoms exactly once
+  // per candidate and reusing them across every check.
+  const dataRoot = tempDataRoot();
+  const denseClass = '[Ā-￿]'.repeat(796);
+  const braceGroup = `{${Array.from({ length: 32 }, (_, i) => `a${i}`).join(',')}}`;
+  const payload = braceGroup + denseClass;
+
+  const start1 = Date.now();
+  const result1 = classifyRiskAction({ toolName: 'Read', toolInput: { file_path: payload }, cwd: process.cwd(), dataRoot });
+  const elapsed1 = Date.now() - start1;
+  assert.ok(elapsed1 < 1000, `Read classification took ${elapsed1}ms, expected under 1000ms (was 40-60s before this fix)`);
+  assert.equal(result1.action, 'pass');
+
+  const start2 = Date.now();
+  const result2 = classifyRiskAction({ toolName: 'Bash', toolInput: { command: `cat ${payload}` }, cwd: process.cwd(), dataRoot });
+  const elapsed2 = Date.now() - start2;
+  assert.ok(elapsed2 < 1000, `Bash classification took ${elapsed2}ms, expected under 1000ms (was 40-60s before this fix)`);
+  assert.equal(result2.action, 'pass');
+});
+
 test('shared risk policy: a bare wildcard with no discriminating literal content ("*", "**") does not match every protected name -- the fix must not turn every wildcard command into a blanket deny', () => {
   // A lone star (or any run of consecutive stars, which collapse to one
   // star atom) fully matches ANY literal by construction -- without an
@@ -371,7 +432,7 @@ test('shared risk policy glob-aware check is bounded: a very long adversarial wi
   assert.equal(result5.category, 'sensitive-path');
 });
 
-test('shared risk policy: an oversized bracket-class body on a Read/Write/Glob/Grep path field (no MAX_BASH_COMMAND_LENGTH-style guard on those tools) does not cause a multi-second stall (regression found by a fresh independent Security Reviewer: measured ~19 seconds before this fix)', () => {
+test('shared risk policy: an oversized bracket-class body on a Read/Write/Glob/Grep path field (no MAX_BASH_COMMAND_LENGTH-style guard on those tools) does not cause a multi-second stall, and correctly DENIES rather than being silently skipped (regression found by a fresh independent Security Reviewer: measured ~19 seconds before this fix)', () => {
   // Bash/PowerShell commands are bounded by MAX_BASH_COMMAND_LENGTH, but
   // Read/Write/Edit/NotebookEdit/Glob/Grep path-shaped fields had no
   // equivalent cap. A bracket class body packed with hundreds of
@@ -380,11 +441,12 @@ test('shared risk policy: an oversized bracket-class body on a Read/Write/Glob/G
   // contain, driving total work into the hundreds of millions of Set
   // insertions -- independently measured at ~19 seconds for a real,
   // reachable ~990,000-character candidate (well within the 1MB Hook-
-  // stdin size limit). Fixed with two independent bounds: a total
-  // distinct-character budget per bracket class (MAX_CLASS_SET_SIZE), and
-  // an overall candidate-length cap for the glob-aware check specifically
-  // (MAX_GLOB_CANDIDATE_LENGTH) -- the pre-existing exact-match check is
-  // unaffected by either and still runs regardless of length.
+  // stdin size limit). Fixed with a total distinct-character budget per
+  // bracket class (MAX_CLASS_SET_SIZE) plus a cap on how many bracket-
+  // class occurrences one pattern is parsed for at all
+  // (MAX_CLASS_ATOMS_PER_PATTERN) -- NOT an overall candidate-length cap,
+  // which a further review found was itself a fail-open bypass (see the
+  // dedicated padding-bypass test below).
   const dataRoot = tempDataRoot();
 
   const hugeCandidate = `.[${'\u0000-\uffff'.repeat(330000)}]nv`;
@@ -392,10 +454,11 @@ test('shared risk policy: an oversized bracket-class body on a Read/Write/Glob/G
   const result1 = classifyRiskAction({ toolName: 'Read', toolInput: { file_path: hugeCandidate }, cwd: process.cwd(), dataRoot });
   const elapsed1 = Date.now() - start1;
   assert.ok(elapsed1 < 1000, `oversized bracket-class candidate took ${elapsed1}ms, expected under 1000ms (was ~19000ms before this fix)`);
+  assert.equal(result1.action, 'deny', 'the oversized candidate must be correctly DENIED, not merely fast -- a test that only measures elapsed time would silently accept a fail-open bypass');
+  assert.equal(result1.category, 'sensitive-path');
 
-  // A dense-but-not-oversized bracket body (under the overall length cap,
-  // so it must be the per-class set-size budget doing the bounding) must
-  // also resolve quickly and still correctly deny.
+  // A dense-but-shorter bracket body must also resolve quickly and still
+  // correctly deny.
   const denseButUnderCap = `.[${'\u0000-\uffff'.repeat(500)}]nv`;
   const start2 = Date.now();
   const result2 = classifyRiskAction({ toolName: 'Glob', toolInput: { pattern: denseButUnderCap }, cwd: process.cwd(), dataRoot });
@@ -408,6 +471,70 @@ test('shared risk policy: an oversized bracket-class body on a Read/Write/Glob/G
   const legitimate = classifyRiskAction({ toolName: 'Read', toolInput: { file_path: '.[e]nv' }, cwd: process.cwd(), dataRoot });
   assert.equal(legitimate.action, 'deny');
   assert.equal(legitimate.category, 'sensitive-path');
+});
+
+test('shared risk policy: padding a candidate with harmless leading segments does not bypass the glob check (regression found by a fresh independent Reviewer: an earlier overall-length cap was itself a fail-open bypass)', () => {
+  // An earlier fix for the oversized-bracket-body stall (above) added a
+  // whole-candidate length cap that skipped the glob-aware check entirely
+  // for anything past it. A fresh Reviewer found this was itself a real,
+  // trivially reachable bypass: padding a candidate with harmless leading
+  // segments just past the cap evaded detection completely, even though
+  // the real danger (".e*") was still right there at the end. Fixed by
+  // removing the length cap entirely and instead only ever examining the
+  // TRAILING segments a protected path can possibly match against (the
+  // longest protected path needs 3), so neither the number nor the length
+  // of any leading segments has any bearing on whether the real danger at
+  // the end is caught.
+  const dataRoot = tempDataRoot();
+  const padding = './'.repeat(2100);
+
+  const start = Date.now();
+  const result = classifyRiskAction({ toolName: 'Read', toolInput: { file_path: `${padding}.e*` }, cwd: process.cwd(), dataRoot });
+  const elapsed = Date.now() - start;
+  assert.ok(elapsed < 1000, `padded candidate took ${elapsed}ms, expected under 1000ms`);
+  assert.equal(result.action, 'deny', 'padding with harmless leading segments must not evade detection of the real ".e*" danger at the end');
+  assert.equal(result.category, 'sensitive-path');
+
+  // Padding with no real danger at the end must still correctly pass.
+  const benign = classifyRiskAction({ toolName: 'Read', toolInput: { file_path: `${padding}notes.txt` }, cwd: process.cwd(), dataRoot });
+  assert.equal(benign.action, 'pass');
+});
+
+test('shared risk policy: a bare wildcard segment in the MIDDLE (or first) position of a multi-segment protected directory path is denied, without over-widening to fully generic paths (regression found by a fresh independent Reviewer)', () => {
+  // The previous fix for ".aws/*"/".kube/*" only relaxed the FINAL
+  // segment of a multi-segment protected path. A fresh Reviewer found an
+  // equally real form still evaded: `cat .config/*/hosts.yml` (the
+  // MIDDLE segment wildcarded, not the last) still reaches the real
+  // `.config/gh/hosts.yml` in a real shell. Fixed by allowing the
+  // relaxation at ANY ONE segment position (never two or more, and never
+  // when the protected path already has its own policy-level "*"
+  // sentinel -- combining that free pass with a second relaxed position
+  // would let a fully generic candidate match with zero real signal).
+  const dataRoot = tempDataRoot();
+  const mustDeny = [
+    'cat .config/*/hosts.yml',
+    'cat */gh/hosts.yml',
+  ];
+  for (const command of mustDeny) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for: ${command}`);
+    assert.equal(result.category, 'sensitive-path');
+  }
+
+  // Must NOT over-widen: a fully generic multi-segment path (no segment
+  // carries any real discriminating content at all) must still pass,
+  // including against a protectedPath that itself has a "*" sentinel
+  // (".ssh/*") -- combining the sentinel's own free pass with a second
+  // relaxed position must not let "*/*" match it.
+  const mustPass = [
+    'cat */*/*',
+    'cat */*',
+    'cat *',
+  ];
+  for (const command of mustPass) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'pass', `expected pass (fully generic, no real signal): ${command}`);
+  }
 });
 
 test('shared risk policy: path traversal combined with glob syntax still resolves to the correct decision (denied when it reaches a real secret, allowed for an exact template)', () => {

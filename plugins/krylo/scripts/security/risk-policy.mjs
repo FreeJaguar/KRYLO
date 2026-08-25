@@ -568,17 +568,44 @@ const MAX_SUFFIX_SEARCH_ATOMS = 64;
 // with no limit on how many a body can contain, drove total work into the
 // hundreds of millions of Set insertions. MAX_CLASS_SET_SIZE bounds a
 // single bracket class's total distinct-character budget regardless of
-// body length or repeated ranges; MAX_GLOB_CANDIDATE_LENGTH bounds the
-// glob-aware check as a whole for any one candidate string (the exact-
-// match check, unaffected by this cost, still runs regardless of length).
+// body length or repeated ranges.
+//
+// An earlier version of this fix ALSO added a whole-candidate length cap
+// (skip the glob-aware check entirely above some length). A further
+// independent review found that was itself a fail-OPEN bypass, not a
+// bound: padding a candidate with harmless leading segments just past the
+// cap (`./` repeated 2100 times, then the real `.e*`) evaded the glob
+// check entirely, reopening every case this fix exists to close. Removed
+// in favor of the real fix: only the TRAILING segments a protected path
+// can possibly match against are ever examined at all (see
+// globCouldTargetSensitivePath's own `maxProtectedPathSegments` slicing),
+// combined with parsing each segment exactly once (see atomsMatchLiteral's
+// own comment) -- neither the number nor the length of any LEADING
+// segments has any bearing on cost once only the tail is considered.
 const MAX_CLASS_SET_SIZE = 512;
-const MAX_GLOB_CANDIDATE_LENGTH = 4096;
+// A realistic glob for one of KRYLO's own protected names never needs
+// anywhere near this many bracket-class occurrences; caps the cost of
+// MANY of them back to back within one segment (each individually
+// bounded by MAX_CLASS_SET_SIZE, but with no prior limit on how many a
+// single segment could contain) directly at the source, benefiting every
+// caller uniformly. Scoped to CLASS atoms specifically, not the pattern's
+// overall atom count: a long run of plain literal/any/star atoms (with no
+// bracket classes at all) is already O(1) per atom and does not need the
+// same cap -- capping total atoms indiscriminately would truncate parsing
+// before reaching a legitimate trailing extension in a pattern with a
+// long literal prefix.
+const MAX_CLASS_ATOMS_PER_PATTERN = 32;
 const MAX_BRACE_BRANCHES = 32;
 const MAX_BRACE_BRANCH_LENGTH = 128;
+// Bound MULTI-group brace expansion (e.g. `.e{n,m}{v,w}`) so two or more
+// groups cannot multiply into a combinatorial explosion of candidates.
+const MAX_BRACE_GROUPS = 4;
+const MAX_TOTAL_BRACE_CANDIDATES = 64;
 
 function parseGlobAtoms(pattern) {
   const atoms = [];
   let i = 0;
+  let classAtomCount = 0;
   while (i < pattern.length) {
     const ch = pattern[i];
     if (ch === '*') {
@@ -587,6 +614,13 @@ function parseGlobAtoms(pattern) {
       while (i < pattern.length && pattern[i] === '*') i += 1; // collapse consecutive '*'
     } else if (ch === '?') {
       atoms.push({ type: 'any' });
+      i += 1;
+    } else if (ch === '[' && classAtomCount >= MAX_CLASS_ATOMS_PER_PATTERN) {
+      // Already at the per-pattern bracket-class budget: treat any
+      // further '[' as a literal character rather than parsing (and
+      // costing) another class. A legitimate glob for a protected name
+      // never needs more than a handful of bracket classes.
+      atoms.push({ type: 'lit', ch: '[' });
       i += 1;
     } else if (ch === '[') {
       const close = pattern.indexOf(']', i + 1);
@@ -599,6 +633,7 @@ function parseGlobAtoms(pattern) {
         i += 1;
         continue;
       }
+      classAtomCount += 1;
       let body = pattern.slice(i + 1, close);
       let negate = false;
       if (body.startsWith('!') || body.startsWith('^')) {
@@ -700,24 +735,27 @@ function hasDiscriminatingContent(atoms) {
   return atoms.some((atom) => atom.type !== 'star');
 }
 
-// `allowBareWildcard`: independent review found that a bare `*`/`**` as
-// the FINAL segment of a multi-segment protected path (e.g. `.aws/*`
-// reaching the real `.aws/credentials`) was wrongly rejected by the same
-// guard that (correctly) rejects a bare wildcard with no directory
-// context at all. The two cases are NOT the same risk: here, every
-// LEADING segment has already matched the exact protected directory name
-// with real discriminating content (enforced by the caller, which never
-// sets this flag for a non-final or single-segment check) -- the
-// candidate is confirmed to be reaching a SPECIFIC known-sensitive
-// directory, so "any file in there" legitimately includes the protected
-// filename, the same way a real shell's glob expansion would. This never
-// widens the single-segment case (`.env`, `id_rsa`, ...) or a non-final
-// directory segment, where a bare wildcard still correctly does not
-// count -- only the trailing filename position of an already-confirmed
-// protected directory.
-function segmentGlobMatchesLiteral(candidateSegment, literalSegment, allowBareWildcard = false) {
-  const atoms = parseGlobAtoms(candidateSegment);
-  if (!hasDiscriminatingContent(atoms)) return allowBareWildcard && atoms.length > 0;
+// Takes ALREADY-PARSED atoms rather than a raw string and re-parsing here:
+// independent review found each candidate segment was being re-parsed
+// from scratch once per globProtectedPaths entry PLUS once per protected
+// extension (roughly 22 times per segment in the shipped policy), which,
+// stacked with a bracket-class-heavy segment repeated across up to
+// MAX_BRACE_BRANCHES brace-expanded candidates, multiplied into hundreds
+// of millions of redundant Set operations and a 40-60 second stall --
+// FAR worse than the stall this same fix round's MAX_CLASS_SET_SIZE bound
+// was meant to close, since that bound only limits the cost of a SINGLE
+// parse, not how many times the same segment gets re-parsed. Parsing each
+// segment exactly once (in globCouldTargetSensitivePath, below) and
+// reusing the atoms across every check removes that multiplier entirely.
+//
+// This is a plain, unconditional discriminating-content-required match --
+// the "one segment of a multi-segment protected path may instead be a
+// bare wildcard" relaxation lives directly in globCouldTargetSensitivePath's
+// own loop (which has the context -- how many OTHER segments already
+// matched strictly -- that this single-segment function does not), not
+// here.
+function atomsMatchLiteral(atoms, literalSegment) {
+  if (!hasDiscriminatingContent(atoms)) return false;
   return globAtomsMatchLiteral(atoms, literalSegment.toLowerCase());
 }
 
@@ -739,8 +777,7 @@ function segmentGlobMatchesLiteral(candidateSegment, literalSegment, allowBareWi
 // guard must apply to the SLICE being tested, not merely the pattern as a
 // whole, since a slice with real content overall can still contain a
 // suffix that is purely wildcard.
-function segmentGlobMatchesExtensionSuffix(candidateSegment, suffixLiteral) {
-  const atoms = parseGlobAtoms(candidateSegment);
+function atomsMatchExtensionSuffix(atoms, suffixLiteral) {
   const literal = suffixLiteral.toLowerCase();
   const searchFrom = Math.max(0, atoms.length - MAX_SUFFIX_SEARCH_ATOMS);
   for (let k = atoms.length; k >= searchFrom; k -= 1) {
@@ -751,18 +788,13 @@ function segmentGlobMatchesExtensionSuffix(candidateSegment, suffixLiteral) {
   return false;
 }
 
-// A candidate glob's "*" segment-wildcard sentinel (only used for
-// directory-scoped protections like ".ssh/*", meaning "any single
-// filename directly under this protected directory") vs an ordinary
-// protected segment matched via the atom matcher above. `allowBareWildcard`
-// is threaded through only for the FINAL segment of an already multi-
-// segment-matched protected path (see segmentGlobMatchesLiteral's own
-// comment) -- never for a non-final directory segment or a single-segment
-// protected name, where a bare wildcard still correctly does not count.
-function segmentMatchesProtectedSegment(candidateSegment, protectedSegment, allowBareWildcard = false) {
-  if (protectedSegment === '*') return true;
-  return segmentGlobMatchesLiteral(candidateSegment, protectedSegment, allowBareWildcard);
-}
+// The policy-level "*" segment sentinel (only used for directory-scoped
+// protections like ".ssh/*", meaning "any single filename directly under
+// this protected directory") and the at-most-one-relaxed-position
+// bare-wildcard logic both live directly in globCouldTargetSensitivePath's
+// own loop, which has the cross-segment context (how many OTHER segments
+// already matched strictly) neither `atomsMatchLiteral()` nor a
+// standalone per-segment helper can see on its own.
 
 // Bounded, simple Bash brace-expansion support: a single, non-nested
 // `{a,b,c}` group is expanded into its literal alternatives (each
@@ -772,19 +804,63 @@ function segmentMatchesProtectedSegment(candidateSegment, protectedSegment, allo
 // over-long branch fall through untouched (treated as ordinary text,
 // which the existing exact matcher and the rest of this function still
 // see normally).
-function expandSimpleBraceGroup(text) {
+// Expand the first, non-nested `{a,b,c}` group found in `text`. Returns
+// `null` (not a one-element array) when there is nothing valid to expand,
+// so the iterative driver below can tell "no group here" apart from "one
+// literal candidate" and stop cleanly.
+function expandFirstBraceGroup(text) {
   const open = text.indexOf('{');
-  if (open === -1) return [text];
+  if (open === -1) return null;
   const close = text.indexOf('}', open + 1);
-  if (close === -1) return [text];
+  if (close === -1) return null;
   const body = text.slice(open + 1, close);
-  if (body.includes('{') || body.includes('}')) return [text]; // no nesting
+  if (body.includes('{') || body.includes('}')) return null; // no nesting
   const branches = body.split(',');
-  if (branches.length < 2 || branches.length > MAX_BRACE_BRANCHES) return [text];
-  if (branches.some((b) => b.length > MAX_BRACE_BRANCH_LENGTH)) return [text];
+  if (branches.length < 2 || branches.length > MAX_BRACE_BRANCHES) return null;
+  if (branches.some((b) => b.length > MAX_BRACE_BRANCH_LENGTH)) return null;
   const prefix = text.slice(0, open);
   const suffix = text.slice(close + 1);
   return branches.map((b) => `${prefix}${b}${suffix}`);
+}
+
+// Independent review found the original single-pass version only ever
+// expanded the FIRST `{...}` group in the text, leaving a SECOND group
+// (`.e{n,m}{v,w}`) or a group beyond MAX_BRACE_BRANCHES/
+// MAX_BRACE_BRANCH_LENGTH (`.{env,z0,...,z31}`, 33 branches) in the
+// output UNEXPANDED -- with literal `{`/`}` characters still in the
+// candidate, which then matched nothing, even though a real shell
+// expands every group and Bash has no such branch-count limit. Iterates
+// to a fixed point (every reachable, in-bounds group gets expanded, in
+// any candidate produced by a previous round), bounded by
+// MAX_BRACE_GROUPS rounds and a hard MAX_TOTAL_BRACE_CANDIDATES ceiling
+// on the total candidate count so two or more groups cannot combine into
+// a combinatorial explosion. A group that is out of bounds (too many
+// branches, an over-long branch, or nesting) is left as literal text in
+// whichever candidate contains it, exactly like the original single-pass
+// version -- it is not silently dropped, just not expanded.
+function expandSimpleBraceGroup(text) {
+  let candidates = [text];
+  for (let round = 0; round < MAX_BRACE_GROUPS; round += 1) {
+    let expandedAnything = false;
+    const next = [];
+    for (const candidate of candidates) {
+      const expanded = expandFirstBraceGroup(candidate);
+      if (expanded === null) {
+        next.push(candidate);
+        continue;
+      }
+      expandedAnything = true;
+      for (const branch of expanded) {
+        next.push(branch);
+        if (next.length >= MAX_TOTAL_BRACE_CANDIDATES) {
+          return next;
+        }
+      }
+    }
+    candidates = next;
+    if (!expandedAnything) break;
+  }
+  return candidates;
 }
 
 /**
@@ -807,15 +883,6 @@ function globCouldTargetSensitivePath(policy, text) {
   // though a real shell expands it unconditionally -- `{` is now part of
   // this initial gate too.
   if (!/[*?[{]/.test(text)) return false; // no glob/brace metacharacter: nothing for this check to do
-  // Bash/PowerShell already bound the WHOLE command via
-  // MAX_BASH_COMMAND_LENGTH, but Read/Write/Edit/NotebookEdit/Glob/Grep
-  // path-shaped fields have no equivalent cap -- independent review
-  // measured a ~19-second stall from a single, otherwise-ordinary-looking
-  // candidate this large. A legitimate glob for a protected name never
-  // needs anywhere near this many characters; skip the glob-aware check
-  // (the exact-match check above is unaffected and still runs) rather
-  // than doing unbounded work on an implausibly long candidate.
-  if (text.length > MAX_GLOB_CANDIDATE_LENGTH) return false;
   const candidates = expandSimpleBraceGroup(text);
   const globProtectedPaths = Array.isArray(policy.sensitivePaths.globProtectedPaths)
     ? policy.sensitivePaths.globProtectedPaths
@@ -823,32 +890,98 @@ function globCouldTargetSensitivePath(policy, text) {
   const globProtectedExtensions = Array.isArray(policy.sensitivePaths.globProtectedExtensions)
     ? policy.sensitivePaths.globProtectedExtensions
     : [];
+  // A further independent review found the length cap that used to sit
+  // here (and the per-candidate one below) was a fail-OPEN bypass, not a
+  // safety bound: `Read{file_path: './'.repeat(2100) + '.e*'}` padded the
+  // candidate just past the cap and evaded the glob check entirely,
+  // reopening every case this fix exists to close. The actual cost driver
+  // was never the candidate's overall length -- only the TRAILING
+  // segments a protected path can possibly match against ever matter (the
+  // longest, `.config/gh/hosts.yml`, needs 3), and re-parsing was already
+  // eliminated below -- so only the last `maxProtectedPathSegments`
+  // segments are ever parsed or examined at all, regardless of how many
+  // (or how long) the leading segments are. Measured: the original
+  // 990,000-character single-segment stall now resolves in ~0.1s with NO
+  // length bail-out of any kind, and the padding-bypass repro above
+  // correctly denies again.
+  const maxProtectedPathSegments = globProtectedPaths.reduce(
+    (max, protectedPath) => Math.max(max, protectedPath.split('/').length),
+    1,
+  );
   for (const candidate of candidates) {
-    const segments = candidate.replace(/\\/g, '/').split('/').filter((s) => s !== '');
-    if (segments.length === 0) continue;
+    const allSegments = candidate.replace(/\\/g, '/').split('/').filter((s) => s !== '');
+    if (allSegments.length === 0) continue;
+    const segments = allSegments.slice(-maxProtectedPathSegments);
+    // Parse each (trailing) segment's atoms exactly ONCE per candidate and
+    // reuse them across every protectedPath/extension check below -- an
+    // earlier review found each segment was previously re-parsed from
+    // scratch once per globProtectedPaths entry plus once per protected
+    // extension (roughly 22 times), which, stacked with brace expansion's
+    // up to MAX_BRACE_BRANCHES candidates, multiplied into a 40-60 second
+    // stall for a bracket-class-heavy candidate.
+    const segmentAtoms = segments.map((segment) => parseGlobAtoms(segment));
     for (const protectedPath of globProtectedPaths) {
       const protectedSegments = protectedPath.split('/');
       if (segments.length < protectedSegments.length) continue;
-      const tail = segments.slice(segments.length - protectedSegments.length);
+      const tailAtoms = segmentAtoms.slice(segments.length - protectedSegments.length);
       // Independent review found a real bypass: `.aws/*`, `.kube/*`, and
       // `.config/gh/*` all passed, since a bare wildcard filename segment
       // was rejected by the SAME guard that (correctly) rejects a bare
-      // wildcard with no directory context at all. Once every LEADING
+      // wildcard with no directory context at all. Once every OTHER
       // segment has matched the exact protected directory name with real
-      // content, a bare-wildcard FINAL segment legitimately does reach
-      // the specific protected filename too (the directory context
-      // already confirms it, unlike a context-free `cat *`).
-      const matchesAll = protectedSegments.every((protectedSegment, idx) => {
-        const isFinalOfMultiSegmentPath = protectedSegments.length > 1 && idx === protectedSegments.length - 1;
-        return segmentMatchesProtectedSegment(tail[idx], protectedSegment, isFinalOfMultiSegmentPath);
-      });
+      // content, a bare-wildcard segment legitimately does reach the
+      // specific protected path too (the surrounding context already
+      // confirms it, unlike a context-free `cat *`).
+      //
+      // A further review found restricting this to only the FINAL
+      // segment missed an equally real form: `cat .config/*/hosts.yml`
+      // (the MIDDLE segment wildcarded, not the last) still reaches the
+      // real `.config/gh/hosts.yml` in a real shell. At most ONE segment
+      // may use this relaxation, at ANY position -- never two or more,
+      // which is what would turn a fully generic `*/*/*` into a false
+      // match with no real directory-context signal at all (the same
+      // over-blocking concern a context-free bare `*` already guards
+      // against for single-segment protected names).
+      //
+      // Own follow-up check (caught before this round's review closed,
+      // via this checkpoint's own test-first practice): a protectedPath
+      // that ALREADY has a policy-level `*` sentinel (`.ssh/*`) grants a
+      // free pass on that position regardless of anything else -- so also
+      // letting the relaxation apply to one of the OTHER (specific-name)
+      // segments would let a fully generic candidate (`cat */*`) match
+      // with ZERO real information confirming ANY of them, since between
+      // the sentinel's unconditional pass and the one relaxed position
+      // there would be nothing left requiring a strict match. The
+      // relaxation is therefore only available when the protectedPath has
+      // NO sentinel segment of its own; a sentinel-bearing entry already
+      // requires every one of its OTHER (non-sentinel) segments to match
+      // strictly.
+      const pathHasSentinel = protectedSegments.includes('*');
+      let relaxedPositionUsed = false;
+      let matchesAll = true;
+      for (let idx = 0; idx < protectedSegments.length; idx += 1) {
+        const protectedSegment = protectedSegments[idx];
+        if (protectedSegment === '*') continue; // policy-level sentinel: always matches
+        if (atomsMatchLiteral(tailAtoms[idx], protectedSegment)) continue; // strict match
+        const isEligibleForRelaxation = !pathHasSentinel // never combine the sentinel's own free pass with a second relaxed position
+          && protectedSegments.length > 1 // never for a single-segment protected name (`.env`, `id_rsa`, ...): that is exactly the context-free bare-`*` over-blocking case
+          && !relaxedPositionUsed
+          && tailAtoms[idx].length > 0
+          && !hasDiscriminatingContent(tailAtoms[idx]);
+        if (isEligibleForRelaxation) {
+          relaxedPositionUsed = true;
+          continue;
+        }
+        matchesAll = false;
+        break;
+      }
       if (matchesAll) {
         return true;
       }
     }
-    const lastSegment = segments[segments.length - 1];
+    const lastSegmentAtoms = segmentAtoms[segmentAtoms.length - 1];
     for (const ext of globProtectedExtensions) {
-      if (segmentGlobMatchesExtensionSuffix(lastSegment, `.${ext}`)) return true;
+      if (atomsMatchExtensionSuffix(lastSegmentAtoms, `.${ext}`)) return true;
     }
   }
   return false;
