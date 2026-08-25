@@ -182,6 +182,65 @@ function touchesDataRoot({ toolName, toolInput, cwd, dataRoot }) {
   }
 }
 
+export const PLUGIN_INSTALLATION_REASON =
+  'The KRYLO plugin\'s own installed files (hooks, security policy, run skill) are integrity-protected while a ' +
+  'KRYLO run is active. A model must not be able to disable a hook or weaken policy by editing the plugin\'s ' +
+  'own installed source. Ask a human to change the plugin installation directly.';
+
+export const SECURITY_CONFIG_WEAKENING_REASON =
+  'Claude Code\'s own permission/hook configuration is integrity-protected while a KRYLO run is active. ' +
+  'A model must not be able to silently weaken enforcement (add an allow rule, remove a hook, enable ' +
+  'bypassPermissions) by writing to its own settings files. Ask a human to change this configuration directly.';
+
+/**
+ * Claude Code's own settings files control the exact enforcement surface
+ * this checkpoint (docs/adr/0025-native-permission-approval.md,
+ * docs/adr/0027-restore-native-approval-for-all-require-approval-classes.md)
+ * relies on: `permissions.allow`/`deny`/`ask` rules, `hooks.PreToolUse`
+ * registration, and `defaultMode` (which could be set to `bypassPermissions`).
+ * Live testing (ADR-0028) confirmed a *pre-existing* allow rule cannot
+ * bypass a hook's own `ask` decision -- but nothing previously stopped the
+ * model from directly WRITING a new rule, or deleting the hook registration
+ * outright, via its own ordinary Write/Edit/Bash/PowerShell tools. Only
+ * writes are gated (reading these files is not itself a threat, and the
+ * model may legitimately need to read them to understand current config).
+ */
+const HOST_SETTINGS_FILENAMES = ['settings.json', 'settings.local.json'];
+
+function touchesClaudeSettings({ toolName, toolInput, cwd }) {
+  const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
+  const name = String(toolName ?? '');
+
+  const pathFragments = HOST_SETTINGS_FILENAMES.flatMap((f) => [
+    `.claude/${f}`,
+    `.claude\\${f}`,
+  ]).map((v) => v.toLowerCase());
+
+  if (name === 'Bash' || name === 'PowerShell') {
+    const command = String(input.command ?? '').toLowerCase();
+    if (pathFragments.some((v) => command.includes(v))) return true;
+    const expanded = homeExpandedVariants(command, os.homedir());
+    return expanded.some((e) => pathFragments.some((v) => e.toLowerCase().includes(v)));
+  }
+
+  if (name === 'Write' || name === 'Edit' || name === 'NotebookEdit') {
+    const target = typeof input.file_path === 'string'
+      ? input.file_path
+      : typeof input.notebook_path === 'string'
+        ? input.notebook_path
+        : '';
+    if (target === '') return false;
+    const lower = target.toLowerCase().replace(/\\/g, '/');
+    // Match the exact settings filename as a path suffix (any directory
+    // depth: project, or a user-level `~/.claude/settings.json`), not a
+    // bare substring, so an unrelated file merely named "settings.json.bak"
+    // or "my-settings.json" is not swept in.
+    return HOST_SETTINGS_FILENAMES.some((f) => lower === `.claude/${f}` || lower.endsWith(`/.claude/${f}`));
+  }
+
+  return false;
+}
+
 /**
  * Deny a Bash or PowerShell command that directly executes a KRYLO Hook
  * entrypoint (see HOOK_ENTRYPOINT_FILENAMES above). Only these two shell
@@ -195,6 +254,48 @@ function touchesHookEntrypoint({ toolName, toolInput }) {
   const command = typeof toolInput?.command === 'string' ? toolInput.command.toLowerCase() : '';
   if (command === '') return false;
   return HOOK_ENTRYPOINT_FILENAMES.some((filename) => command.includes(filename.toLowerCase()));
+}
+
+/**
+ * The KRYLO plugin's own INSTALLED files (hook entrypoints, production/MCP
+ * policy JSON, the run skill's own hook-registration frontmatter) must not
+ * be writable by the model, for the same reason the data root is protected:
+ * a model that could edit its own gate's source or policy could disable or
+ * weaken enforcement for the rest of the run. Scoped to `pluginRoot` (the
+ * actual INSTALLED plugin location a real host adapter resolves from its
+ * own host-specific plugin-root signal) rather than matching filenames like risk-gate.mjs
+ * anywhere -- KRYLO's own SOURCE repository (where this exact file is
+ * developed) is a completely different path from where a host installs the
+ * plugin for actual use, so this does not block legitimate KRYLO-on-itself
+ * development, only a running instance's actual enforcement surface.
+ */
+function touchesPluginInstallation({ toolName, toolInput, cwd, pluginRoot }) {
+  if (typeof pluginRoot !== 'string' || pluginRoot.trim() === '') return false;
+  const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
+  const name = String(toolName ?? '');
+  const rootLower = path.resolve(pluginRoot).toLowerCase();
+
+  if (name === 'Bash' || name === 'PowerShell') {
+    const command = String(input.command ?? '').toLowerCase();
+    if (command === '') return false;
+    if (command.includes(rootLower)) return true;
+    const expanded = homeExpandedVariants(command, os.homedir());
+    return expanded.some((e) => e.toLowerCase().includes(rootLower));
+  }
+
+  if (name !== 'Write' && name !== 'Edit' && name !== 'NotebookEdit') return false;
+  const target = typeof input.file_path === 'string'
+    ? input.file_path
+    : typeof input.notebook_path === 'string'
+      ? input.notebook_path
+      : '';
+  if (target === '') return false;
+  try {
+    const resolved = path.resolve(cwd || process.cwd(), target).toLowerCase();
+    return resolved === rootLower || resolved.startsWith(rootLower + path.sep.toLowerCase());
+  } catch {
+    return false;
+  }
 }
 
 function loadPolicy() {
@@ -218,8 +319,21 @@ function firstMatchingClass(policy, command) {
   return null;
 }
 
+// Foundation final-closure checkpoint: `.env.example`, `.env.sample`, and
+// equivalent intentionally-shareable environment templates are conventional,
+// public, non-secret files -- committed to version control on purpose, to
+// document which variables a real .env needs -- yet the sensitivePaths
+// `.env` pattern's own boundary alternation (`$|\.|[\\/]`) matches ANY
+// `.env.<anything>`, including these, treating a routine template read the
+// same as a real secret. This exception is intentionally narrow: only the
+// specific, well-known template suffixes below are exempted, matched at a
+// full path-segment boundary (so `.env.example` is exempt but
+// `.env.example.secret` or `config/.env.example/real-secret` is not).
+const ENV_TEMPLATE_EXCEPTION = /(^|[\\/])\.env\.(example|sample|template|dist|defaults)($|[\\/])/i;
+
 function matchesSensitivePath(policy, text) {
   if (typeof text !== 'string' || text === '') return false;
+  if (ENV_TEMPLATE_EXCEPTION.test(text)) return false;
   return policy.sensitivePaths.patterns.some((p) => new RegExp(p, 'i').test(text));
 }
 
@@ -250,7 +364,7 @@ function commandTouchesSensitivePath(policy, command) {
  * deterministic deny, not an unconfirmed-safe "ask") for a malformed input
  * (missing/invalid dataRoot, unreadable policy file, etc).
  */
-export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot } = {}) {
+export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginRoot } = {}) {
   const name = String(toolName ?? '');
   const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
   const resolvedDataRoot = typeof dataRoot === 'string' && dataRoot.trim() !== '' ? dataRoot : getDataRoot();
@@ -277,6 +391,14 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot } = {}) 
 
   if (touchesHookEntrypoint({ toolName: name, toolInput: input })) {
     return { action: 'deny', category: 'hook-entrypoint-protection', reason: HOOK_ENTRYPOINT_REASON };
+  }
+
+  if (touchesClaudeSettings({ toolName: name, toolInput: input, cwd })) {
+    return { action: 'deny', category: 'security-config-protection', reason: SECURITY_CONFIG_WEAKENING_REASON };
+  }
+
+  if (touchesPluginInstallation({ toolName: name, toolInput: input, cwd, pluginRoot })) {
+    return { action: 'deny', category: 'plugin-installation-protection', reason: PLUGIN_INSTALLATION_REASON };
   }
 
   if (name === 'Bash' || name === 'PowerShell') {

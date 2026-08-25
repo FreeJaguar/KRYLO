@@ -69,6 +69,40 @@ test('shared risk policy classifies every one of the 12 production-policy.json a
   }
 });
 
+test('shared risk policy no longer over-matches git-push on unrelated commands merely containing the word "push" later in the text (Foundation final-closure D4)', () => {
+  // Three independent review rounds flagged the same over-breadth: the
+  // git-push pattern matched the literal word "push" appearing anywhere
+  // after "git", with no requirement that it actually be the git
+  // subcommand -- so `git commit -m "push button feature"` classified as
+  // git-push. Tightened to require "push" immediately follow "git" plus
+  // only recognized global option tokens (-C, -c, --git-dir=, etc.), not
+  // any arbitrary later text.
+  const dataRoot = tempDataRoot();
+  const mustStillMatch = [
+    ['git push origin main', 'git-push'],
+    ['git -C /some/repo push origin main', 'git-push'],
+    ['git -c user.name=x push origin main', 'git-push'],
+    ['git --git-dir=/r/.git push', 'git-push'],
+    ['git push origin +main', 'git-force'],
+    ['git push --force origin main', 'git-force'],
+  ];
+  for (const [command, expectedClass] of mustStillMatch) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'require-approval', `expected require-approval for: ${command}`);
+    assert.equal(result.actionClass, expectedClass, `expected ${expectedClass} for: ${command}`);
+  }
+
+  const mustNoLongerMatch = [
+    'git commit -m "push button feature"',
+    'git status\necho push',
+  ];
+  for (const command of mustNoLongerMatch) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.notEqual(result.actionClass, 'git-push', `must not classify as git-push: ${command}`);
+    assert.notEqual(result.actionClass, 'git-force', `must not classify as git-force: ${command}`);
+  }
+});
+
 test('shared risk policy classifies a git force-push as git-force, not the more general git-push', () => {
   const result = classifyRiskAction({
     toolName: 'Bash',
@@ -101,6 +135,64 @@ test('shared risk policy denies a protected secret path for Write', () => {
   assert.equal(result.action, 'deny');
   assert.equal(result.category, 'sensitive-path');
   assert.equal(typeof result.reason, 'string');
+});
+
+test('shared risk policy denies wildcard/glob forms of sensitive-path access (Foundation final-closure D2)', () => {
+  // A third independent review found the sensitivePaths patterns were
+  // literal-path-anchored: `cat .env` was denied, but `cat .env*` or
+  // `Grep(glob: '.env*')` -- shell/tool wildcards that expand to the exact
+  // same secret file at execution time -- evaded the pattern entirely,
+  // because the boundary alternation right after ".env" (end-of-string, a
+  // literal ".", or a path separator) never included a literal "*".
+  const dataRoot = tempDataRoot();
+  const denied = [
+    ['Bash', { command: 'cat .env*' }],
+    ['Bash', { command: 'cat .env.*' }],
+    ['Bash', { command: 'cat id_rsa*' }],
+    ['Grep', { pattern: '.', glob: '**/.env', output_mode: 'content' }],
+    ['Grep', { pattern: '.', glob: '.env*', output_mode: 'content' }],
+    ['Glob', { pattern: '**/.env*' }],
+  ];
+  for (const [toolName, toolInput] of denied) {
+    const result = classifyRiskAction({ toolName, toolInput, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for ${toolName}(${JSON.stringify(toolInput)})`);
+    assert.equal(result.category, 'sensitive-path');
+  }
+});
+
+test('shared risk policy passes shareable dotenv templates (.env.example/.sample/.template/.dist/.defaults) but still denies the real thing (Foundation final-closure D3)', () => {
+  // `.env.example`-style files are conventional, public, non-secret
+  // templates committed to version control on purpose -- the sensitivePaths
+  // `.env` pattern's own boundary (matching ANY `.env.<anything>`) treated
+  // reading one identically to reading a real secret .env, an availability
+  // regression this checkpoint fixes narrowly (only these exact, well-known
+  // template suffixes are exempted).
+  const dataRoot = tempDataRoot();
+  const safeTemplates = [
+    ['Read', { file_path: '.env.example' }],
+    ['Read', { file_path: '.env.sample' }],
+    ['Read', { file_path: 'config/.env.template' }],
+    ['Read', { file_path: '.env.dist' }],
+    ['Read', { file_path: '.env.defaults' }],
+    ['Bash', { command: 'cat .env.example' }],
+    ['Write', { file_path: '.env.example', content: 'PORT=3000' }],
+  ];
+  for (const [toolName, toolInput] of safeTemplates) {
+    const result = classifyRiskAction({ toolName, toolInput, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'pass', `expected pass for ${toolName}(${JSON.stringify(toolInput)})`);
+  }
+
+  const stillDenied = [
+    ['Read', { file_path: '.env' }],
+    ['Read', { file_path: '.env.local' }],
+    ['Bash', { command: 'cat .env' }],
+    // Not a real template suffix -- must not accidentally widen the exception.
+    ['Read', { file_path: '.env.example.secret' }],
+  ];
+  for (const [toolName, toolInput] of stillDenied) {
+    const result = classifyRiskAction({ toolName, toolInput, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for ${toolName}(${JSON.stringify(toolInput)})`);
+  }
 });
 
 test('shared risk policy denies a protected secret path for Read, Glob, and Grep (not just Bash/Write)', () => {
@@ -303,6 +395,101 @@ test('shared risk policy denies a Bash or PowerShell command directly invoking a
       assert.equal(result.category, 'hook-entrypoint-protection');
     }
   }
+});
+
+test('shared risk policy denies the model writing/editing Claude Code\'s own settings.json or settings.local.json (security-config-weakening protection, Foundation final closure)', () => {
+  // A model must not be able to silently weaken KRYLO/Claude enforcement --
+  // add a permissions.allow rule, remove the PreToolUse hook registration,
+  // or set defaultMode to bypassPermissions -- by writing to Claude Code's
+  // own settings files with its ordinary Write/Edit/Bash/PowerShell tools.
+  const dataRoot = tempDataRoot();
+  const targets = ['.claude/settings.json', '.claude/settings.local.json'];
+  for (const target of targets) {
+    const writeResult = classifyRiskAction({ toolName: 'Write', toolInput: { file_path: target, content: '{}' }, cwd: process.cwd(), dataRoot });
+    assert.equal(writeResult.action, 'deny', `expected deny for Write(${target})`);
+    assert.equal(writeResult.category, 'security-config-protection');
+
+    const editResult = classifyRiskAction({ toolName: 'Edit', toolInput: { file_path: target, old_string: 'a', new_string: 'b' }, cwd: process.cwd(), dataRoot });
+    assert.equal(editResult.action, 'deny', `expected deny for Edit(${target})`);
+
+    for (const toolName of ['Bash', 'PowerShell']) {
+      const bashResult = classifyRiskAction({
+        toolName,
+        toolInput: { command: `echo hello >> ${target}` },
+        cwd: process.cwd(),
+        dataRoot,
+      });
+      assert.equal(bashResult.action, 'deny', `expected deny for ${toolName} referencing ${target}`);
+      assert.equal(bashResult.category, 'security-config-protection');
+    }
+  }
+
+  // A user-level settings file (absolute/home-relative path) must be caught too.
+  const userLevel = classifyRiskAction({
+    toolName: 'Write',
+    toolInput: { file_path: '~/.claude/settings.json', content: '{}' },
+    cwd: process.cwd(),
+    dataRoot,
+  });
+  assert.equal(userLevel.action, 'deny', 'expected deny for a user-level settings.json target');
+});
+
+test('shared risk policy does not deny reading Claude settings, or writing an unrelated file that merely contains "settings.json" as a substring', () => {
+  const dataRoot = tempDataRoot();
+  const readResult = classifyRiskAction({ toolName: 'Read', toolInput: { file_path: '.claude/settings.json' }, cwd: process.cwd(), dataRoot });
+  assert.notEqual(readResult.action, 'deny', 'reading settings.json is not itself the threat; only writing it is');
+
+  const lookalike = classifyRiskAction({ toolName: 'Write', toolInput: { file_path: 'docs/my-settings.json.bak', content: 'x' }, cwd: process.cwd(), dataRoot });
+  assert.equal(lookalike.action, 'pass', 'a file merely named similarly must not be swept in by a bare substring match');
+});
+
+test('shared risk policy denies the model writing/editing the KRYLO plugin\'s own INSTALLED files (hooks, policy) when pluginRoot is known, without blocking KRYLO-on-itself source development', () => {
+  // A model must not be able to disable a KRYLO hook or weaken its policy
+  // by editing the plugin's own installed source. Scoped to `pluginRoot`
+  // (the actual installed location, e.g. CLAUDE_PLUGIN_ROOT) so this never
+  // collides with KRYLO's own SOURCE repository -- a completely different
+  // path in ordinary development -- confirmed by the negative case below.
+  const dataRoot = tempDataRoot();
+  // A separate root, sibling to (not nested under) dataRoot -- in real usage
+  // pluginRoot and dataRoot are always distinct installed locations; nesting
+  // them here would also trip data-root-protection first and not exercise
+  // this check at all.
+  const fakePluginRoot = path.join(os.tmpdir(), 'krylo-risk-policy-test-fake-plugin-root');
+  const targets = [
+    path.join(fakePluginRoot, 'scripts', 'security', 'risk-gate.mjs'),
+    path.join(fakePluginRoot, 'policies', 'production-policy.json'),
+    path.join(fakePluginRoot, 'skills', 'run', 'SKILL.md'),
+  ];
+  for (const target of targets) {
+    const result = classifyRiskAction({
+      toolName: 'Edit', toolInput: { file_path: target, old_string: 'a', new_string: 'b' }, cwd: process.cwd(), dataRoot, pluginRoot: fakePluginRoot,
+    });
+    assert.equal(result.action, 'deny', `expected deny for editing installed plugin file: ${target}`);
+    assert.equal(result.category, 'plugin-installation-protection');
+  }
+
+  const bashResult = classifyRiskAction({
+    toolName: 'Bash',
+    toolInput: { command: `echo x >> ${path.join(fakePluginRoot, 'policies', 'production-policy.json')}` },
+    cwd: process.cwd(),
+    dataRoot,
+    pluginRoot: fakePluginRoot,
+  });
+  assert.equal(bashResult.action, 'deny', 'expected deny for a Bash command referencing the installed plugin path');
+
+  // Negative case: editing the SAME filename outside pluginRoot (e.g. KRYLO's
+  // own source repository during development) must be unaffected.
+  const sourceRepoPath = path.join(os.tmpdir(), 'krylo-risk-policy-test-source-repo', 'plugins', 'krylo', 'scripts', 'security', 'risk-gate.mjs');
+  const sourceEdit = classifyRiskAction({
+    toolName: 'Edit', toolInput: { file_path: sourceRepoPath, old_string: 'a', new_string: 'b' }, cwd: process.cwd(), dataRoot, pluginRoot: fakePluginRoot,
+  });
+  assert.notEqual(sourceEdit.action, 'deny', 'editing the source repo (a different path from the installed pluginRoot) must not be blocked');
+
+  // No pluginRoot known: the check must not throw or false-positive.
+  const noPluginRoot = classifyRiskAction({
+    toolName: 'Edit', toolInput: { file_path: targets[0], old_string: 'a', new_string: 'b' }, cwd: process.cwd(), dataRoot,
+  });
+  assert.notEqual(noPluginRoot.action, 'deny', 'without a known pluginRoot, this check must not fire');
 });
 
 test('shared risk policy still allows the legitimate runtime CLIs the model is meant to call directly', () => {
@@ -546,25 +733,64 @@ test('shared risk policy catches PowerShell parameter abbreviations and built-in
   }
 });
 
-test('shared risk policy still passes ordinary Bash rm/git-rm/docker-rm hygiene commands (negative case for the PowerShell alias fix)', () => {
-  // Regression found by independent review: an earlier attempt at the fix
-  // above included bare "rm" in the PowerShell alias alternation, which
-  // (since the alternation has no path/target anchor) turned routine Bash
-  // commands with no PowerShell involvement at all into unconditional
-  // destructive-operation denies -- with no native-ask unlock, a real
-  // availability regression on ordinary build/dev hygiene.
+test('shared risk policy classifies a bare relative-path rm as destructive-operation (require-approval, not an accidental permanent deny) -- git-rm/docker-rm/xargs-rm hygiene stays unaffected', () => {
+  // Foundation final-closure checkpoint (docs/adr/0028): the pre-existing
+  // Bash `rm` pattern only matched an absolute/home-anchored target, so
+  // `rm -rf node_modules`, `rm -rf ../`, `rm -rf .`, and `rm -rf *` all
+  // passed through completely ungated -- a real relative-path evasion of
+  // the destructive-operation class. Now that native ask (ADR-0027) covers
+  // every require-approval class, including destructive-operation, fixing
+  // this correctly means require-approval (a real human-approval path via
+  // native ask), not an accidental unconditional deny with no unlock --
+  // exactly the earlier PowerShell-alias regression this same test file
+  // once guarded against, now resolved differently because the
+  // consequence of gating destructive-operation changed underneath it.
+  // "docker rm", "git rm", and "npm rm" are excluded (a negative lookbehind)
+  // because "rm" there is a different tool's subcommand, not the actual
+  // filesystem-delete shell command, and gating them would be pure noise
+  // with no security value.
   const dataRoot = tempDataRoot();
-  const commands = [
+  const nowGated = [
     'rm -rf node_modules',
     'rm -rf dist',
     'rm -f package-lock.json',
+    'rm -rf ../',
+    'rm -rf ../../',
+    'rm -rf .',
+    'rm -rf *',
+  ];
+  for (const command of nowGated) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'require-approval', `expected require-approval for: ${command}`);
+    assert.equal(result.actionClass, 'destructive-operation', `expected destructive-operation for: ${command}`);
+  }
+
+  const stillBenign = [
     'docker rm -f my-container',
     'git rm -r --cached .',
     'xargs rm -f',
+    'npm rm somepackage',
   ];
-  for (const command of commands) {
+  for (const command of stillBenign) {
     const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
     assert.equal(result.action, 'pass', `expected pass (not blocked) for: ${command}`);
+  }
+});
+
+test('shared risk policy classifies environment-variable, Windows drive-root, and PowerShell rm-alias-with-relative-target destructive deletes correctly', () => {
+  const dataRoot = tempDataRoot();
+  const cases = [
+    ['Bash', 'rm -rf $HOME'],
+    ['Bash', 'rm -rf %USERPROFILE%\\temp'],
+    ['Bash', 'rm -rf C:\\'],
+    ['PowerShell', 'rm -Recurse -Force ./build'],
+    ['PowerShell', 'Remove-Item .. -Recurse -Force'],
+    ['PowerShell', 'Remove-Item -Recurse -Force $env:TEMP\\x'],
+  ];
+  for (const [toolName, command] of cases) {
+    const result = classifyRiskAction({ toolName, toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'require-approval', `expected require-approval for ${toolName}: ${command}`);
+    assert.equal(result.actionClass, 'destructive-operation');
   }
 });
 

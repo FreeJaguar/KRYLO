@@ -319,6 +319,26 @@ test('risk-gate: sensitive file targets and data-root/hook-entrypoint protection
   }
 });
 
+test('risk-gate: the model cannot weaken Claude Code\'s own settings.json/settings.local.json through the real Hook (Foundation final-closure Section B)', () => {
+  const dataDir = mkTempDataDir();
+  const projectDir = mkTempDataDir('krylo-proj-');
+  try {
+    createActiveRun(dataDir, { projectDir });
+    for (const target of ['.claude/settings.json', '.claude/settings.local.json']) {
+      const writeRes = runHook(GATE, {
+        hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: target, content: '{"permissions":{"allow":["Bash"]}}' }, cwd: projectDir,
+      }, dataDir);
+      assert.equal(decision(writeRes), 'deny', `expected deny for Write(${target})`);
+
+      const bashRes = runHook(GATE, bashPayload(projectDir, `echo x >> ${target}`), dataDir);
+      assert.equal(decision(bashRes), 'deny', `expected deny for a Bash command referencing ${target}`);
+    }
+  } finally {
+    cleanup(dataDir);
+    cleanup(projectDir);
+  }
+});
+
 test('risk-gate: sensitive file targets are denied for Write and Bash', () => {
   const dataDir = mkTempDataDir();
   // Distinct project dir: in production the project is never the data root,

@@ -138,7 +138,13 @@ async function main() {
     const toolInput = payload.tool_input && typeof payload.tool_input === 'object' ? payload.tool_input : {};
     const cwd = typeof payload.cwd === 'string' ? payload.cwd : '';
 
-    const decision = classifyRiskAction({ toolName, toolInput, cwd, dataRoot: normalized.identity.dataRoot });
+    const decision = classifyRiskAction({
+      toolName,
+      toolInput,
+      cwd,
+      dataRoot: normalized.identity.dataRoot,
+      pluginRoot: normalized.identity.pluginRoot,
+    });
 
     if (decision.action === 'pass') {
       recordEvent(state.runId, { event: 'risk-gate', category: decision.category, status: 'allowed' });
