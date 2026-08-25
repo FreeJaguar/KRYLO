@@ -70,13 +70,13 @@
     "git-push": {
       "reason": "Git push requires explicit user approval unless the active task explicitly requested the exact action.",
       "patterns": [
-        "\\bgit(?:\\.exe|\\.cmd)?\\b(?:\\s+(?:-{1,2}[\\w-]+(?:[=\\s](?:[^\\s\"']+|\"[^\"]*\"|'[^']*')+)?))*\\s+['\"]?push['\"]?\\b"
+        "\\bgit(?:\\.exe|\\.cmd)?\\b['\"]?(?:\\s+(?:-{1,2}[\\w-]+(?:[=\\s](?:[^\\s\"']|\"[^\"]*\"|'[^']*')+)?))*\\s+['\"]?push['\"]?\\b"
       ]
     },
     "git-force": {
       "reason": "Force push is never automatic.",
       "patterns": [
-        "\\bgit(?:\\.exe|\\.cmd)?\\b(?:\\s+(?:-{1,2}[\\w-]+(?:[=\\s](?:[^\\s\"']+|\"[^\"]*\"|'[^']*')+)?))*\\s+['\"]?push['\"]?\\b[^|;&\\n]*(--force(-with-lease)?\\b|\\s-f\\b|\\s\\+\\S+)"
+        "\\bgit(?:\\.exe|\\.cmd)?\\b['\"]?(?:\\s+(?:-{1,2}[\\w-]+(?:[=\\s](?:[^\\s\"']|\"[^\"]*\"|'[^']*')+)?))*\\s+['\"]?push['\"]?\\b[^|;&\\n]*(--force(-with-lease)?\\b|\\s-f\\b|\\s\\+\\S+)"
       ]
     },
     "merge": {

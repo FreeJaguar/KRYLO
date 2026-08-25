@@ -148,6 +148,42 @@ test('shared risk policy still catches "git.exe push" and a quoted config value 
   }
 });
 
+test('shared risk policy still catches a quoted absolute path to git.exe containing a space, and remains free of the nested-quantifier ReDoS that fix itself introduced (regression found by fresh Security Reviewer/Reviewer)', () => {
+  // Two further real bugs, both in the SAME option-value pattern above:
+  // (1) a quoted absolute path like `"C:/Program Files/Git/bin/git.exe" push`
+  // still evaded the pattern, because the closing quote character sat
+  // between the git/.exe boundary and the required following whitespace.
+  // Fixed by allowing an optional matching quote right after that boundary.
+  // (2) the option-value alternation `(?:[^\s"']+|"[^"]*"|'[^']*')+` nested
+  // a quantified alternative inside an already-repeating group -- the
+  // textbook exponential-backtracking shape -- reproduced taking ~1.9s for
+  // a 46-byte adversarial payload with no closing quote and no "push"
+  // token (forcing the engine to try every partition before failing).
+  // Fixed by removing the redundant inner `+` (a single, non-quantified
+  // character inside the repeating group matches the same shell words
+  // without the ambiguity).
+  const dataRoot = tempDataRoot();
+  const mustMatch = [
+    ['"C:/Program Files/Git/bin/git.exe" push origin main', 'git-push'],
+    ["'C:/Program Files/Git/bin/git.exe' push origin main", 'git-push'],
+  ];
+  for (const [command, expectedClass] of mustMatch) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'require-approval', `expected require-approval for: ${command}`);
+    assert.equal(result.actionClass, expectedClass, `expected ${expectedClass} for: ${command}`);
+  }
+
+  // The adversarial ReDoS payload itself must classify quickly (well under
+  // a second), not merely "eventually" -- this is a direct regression test
+  // for the exponential-backtracking bug, not just a correctness check.
+  const adversarial = `git -a="${'a'.repeat(40)} ; echo done`;
+  const start = Date.now();
+  const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command: adversarial }, cwd: process.cwd(), dataRoot });
+  const elapsedMs = Date.now() - start;
+  assert.ok(elapsedMs < 1000, `classification of the adversarial payload took ${elapsedMs}ms, expected under 1000ms (ReDoS regression)`);
+  assert.equal(result.action, 'pass', 'the adversarial payload does not itself contain a real push and must classify as pass, quickly');
+});
+
 test('shared risk policy classifies a git force-push as git-force, not the more general git-push', () => {
   const result = classifyRiskAction({
     toolName: 'Bash',
@@ -361,6 +397,38 @@ test('shared risk policy denies a QUOTED sensitive-path reference (regression fo
   }
 });
 
+test('shared risk policy denies a quoted sensitive path containing an internal space, and an NTFS alternate-data-stream reference (two further regressions found by a fresh Security Reviewer/Reviewer in the quote-stripping fix itself)', () => {
+  // (1) Splitting on whitespace BEFORE stripping quotes (the original
+  // approach) tears a quoted path with an internal space in two
+  // (`cat "my dir/.env"` -> tokens `"my` and `dir/.env"`), so neither half
+  // still looks like a quoted token and nothing gets stripped. Fixed by
+  // extracting whole shell words (ordinary characters and/or fully-quoted
+  // segments glued together) before stripping quotes.
+  // (2) matchesSensitivePath() never stripped a trailing NTFS
+  // alternate-data-stream suffix (`::$DATA`, a distinct stream of the SAME
+  // file on Windows) the way touchesClaudeSettings() already does, so
+  // `.env::$DATA` read straight through to real secret content while
+  // classifying as `pass`.
+  const dataRoot = tempDataRoot();
+  const mustDeny = [
+    ['Bash', { command: 'cat "my dir/.env"' }],
+    ['Bash', { command: "cat 'my dir/.env'" }],
+    ['Bash', { command: 'cat .env::$DATA' }],
+    ['Bash', { command: 'cat ".env::$DATA"' }],
+    ['Read', { file_path: '.env::$DATA' }],
+    ['Write', { file_path: '.env::$DATA', content: 'x' }],
+  ];
+  for (const [toolName, toolInput] of mustDeny) {
+    const result = classifyRiskAction({ toolName, toolInput, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for ${toolName}(${JSON.stringify(toolInput)})`);
+    assert.equal(result.category, 'sensitive-path');
+  }
+
+  // A benign quoted path with an internal space must still pass.
+  const benign = classifyRiskAction({ toolName: 'Bash', toolInput: { command: 'cat "my dir/notes.txt"' }, cwd: process.cwd(), dataRoot });
+  assert.equal(benign.action, 'pass');
+});
+
 test('shared risk policy denies direct writes into the KRYLO data root', () => {
   const dataRoot = tempDataRoot();
   const result = classifyRiskAction({
@@ -544,6 +612,60 @@ test('shared risk policy: settings.json protection resolves the path before comp
   }
 });
 
+test('shared risk policy catches a directory symlink/junction whose name is not literally ".claude", for both settings-protection and plugin-installation-protection (regression found by a fresh Security Reviewer: neither function resolved symlinks, unlike touchesDataRoot())', () => {
+  // A prior review round's comment inaccurately claimed the same
+  // resolve-then-compare "shape" as touchesDataRoot() -- but touchesDataRoot()
+  // additionally resolves through any symlink/junction via
+  // realpathBestEffort(), which neither touchesClaudeSettings() nor
+  // touchesPluginInstallation() actually did. A directory symlink/junction
+  // named something other than ".claude" (or outside the literal
+  // pluginRoot string) passed the raw-path check while still landing on
+  // the real protected file once the OS resolved it.
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-settings-symlink-test-'));
+  try {
+    const dataRoot = tempDataRoot();
+    const realClaudeDir = path.join(base, '.claude');
+    fs.mkdirSync(realClaudeDir, { recursive: true });
+    const outsideDir = path.join(base, 'workdir');
+    fs.mkdirSync(outsideDir, { recursive: true });
+    const linkPath = path.join(outsideDir, 'cfg');
+    try {
+      fs.symlinkSync(realClaudeDir, linkPath, 'junction');
+    } catch {
+      return; // symlink/junction creation can require elevated privileges
+    }
+
+    const settingsResult = classifyRiskAction({
+      toolName: 'Write',
+      toolInput: { file_path: path.join(linkPath, 'settings.json'), content: '{}' },
+      cwd: outsideDir,
+      dataRoot,
+    });
+    assert.equal(settingsResult.action, 'deny', 'a write through a symlinked ".claude" directory must still be denied');
+    assert.equal(settingsResult.category, 'security-config-protection');
+
+    const realPluginRoot = path.join(base, 'installed-plugin-root');
+    fs.mkdirSync(path.join(realPluginRoot, 'policies'), { recursive: true });
+    const pluginLinkPath = path.join(outsideDir, 'plugin-cfg');
+    try {
+      fs.symlinkSync(realPluginRoot, pluginLinkPath, 'junction');
+    } catch {
+      return;
+    }
+    const pluginResult = classifyRiskAction({
+      toolName: 'Write',
+      toolInput: { file_path: path.join(pluginLinkPath, 'policies', 'production-policy.json'), content: '{}' },
+      cwd: outsideDir,
+      dataRoot,
+      pluginRoot: realPluginRoot,
+    });
+    assert.equal(pluginResult.action, 'deny', 'a write through a symlinked plugin-root directory must still be denied');
+    assert.equal(pluginResult.category, 'plugin-installation-protection');
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test('shared risk policy denies the model writing/editing the KRYLO plugin\'s own INSTALLED files (hooks, policy) when pluginRoot is known, without blocking KRYLO-on-itself source development', () => {
   // A model must not be able to disable a KRYLO hook or weaken its policy
   // by editing the plugin's own installed source. Scoped to `pluginRoot`
@@ -569,31 +691,64 @@ test('shared risk policy denies the model writing/editing the KRYLO plugin\'s ow
     assert.equal(result.category, 'plugin-installation-protection');
   }
 
-  // Bash/PowerShell command TEXT is deliberately NOT scanned for a
-  // pluginRoot reference (unlike Write/Edit/NotebookEdit above): a second
-  // independent review round found the first version of this check did
-  // scan Bash/PowerShell text, which also matched `skills/run/SKILL.md`'s
-  // own MANDATORY runtime CLI calls -- literally
-  // `node "${CLAUDE_PLUGIN_ROOT}/scripts/runtime/<script>.mjs"` -- once
-  // that variable is expanded to a literal path, breaking KRYLO's own
-  // operation with no approval path (a real, reproduced Critical
-  // regression). This is confirmed as a deliberate, permanent design
-  // choice, not an oversight: Write/Edit/NotebookEdit above cover the
-  // actual file-mutation threat, and touchesHookEntrypoint() (narrowly
-  // scoped to specific hook-entrypoint filenames, which never collide with
-  // the runtime CLIs) already covers direct Bash/PowerShell execution.
-  const bashResult = classifyRiskAction({
+  // Bash/PowerShell command TEXT is scanned for a pluginRoot reference, but
+  // ONLY combined with a write-shaped signal (redirection, sed -i, tee, cp,
+  // mv, or the PowerShell write cmdlets) -- a second independent review
+  // round found a first version scanning for ANY pluginRoot reference also
+  // matched `skills/run/SKILL.md`'s own MANDATORY runtime CLI calls
+  // (`node "<pluginRoot>/scripts/runtime/<script>.mjs"`), breaking KRYLO's
+  // own operation with no approval path (a real, reproduced Critical
+  // regression). A THIRD review round then found dropping the Bash/
+  // PowerShell arm entirely (rather than narrowing it) left the actual
+  // file-mutation threat unguarded for Bash/PowerShell (`echo x >>
+  // <pluginRoot>/policies/production-policy.json` classified as `pass`).
+  // The write-shaped-signal design closes that gap without repeating the
+  // Critical regression: a mandatory runtime CLI call contains neither a
+  // redirection operator nor a write-verb.
+  const bashWrite = classifyRiskAction({
     toolName: 'Bash',
     toolInput: { command: `echo x >> ${path.join(fakePluginRoot, 'policies', 'production-policy.json')}` },
     cwd: process.cwd(),
     dataRoot,
     pluginRoot: fakePluginRoot,
   });
-  assert.notEqual(bashResult.action, 'deny', 'a Bash command merely referencing pluginRoot must NOT be denied by this check -- it would also deny KRYLO\'s own mandatory runtime CLI calls');
+  assert.equal(bashWrite.action, 'deny', 'a Bash command that both references pluginRoot AND is write-shaped (redirection) must be denied');
+  assert.equal(bashWrite.category, 'plugin-installation-protection');
+
+  const bashSedWrite = classifyRiskAction({
+    toolName: 'Bash',
+    toolInput: { command: `sed -i 's/deny/pass/' ${path.join(fakePluginRoot, 'scripts', 'security', 'risk-policy.mjs')}` },
+    cwd: process.cwd(),
+    dataRoot,
+    pluginRoot: fakePluginRoot,
+  });
+  assert.equal(bashSedWrite.action, 'deny', 'a Bash in-place sed edit of an installed plugin file must be denied');
+
+  const powerShellWrite = classifyRiskAction({
+    toolName: 'PowerShell',
+    toolInput: { command: `Set-Content -Path "${path.join(fakePluginRoot, 'policies', 'production-policy.json')}" -Value '{}'` },
+    cwd: process.cwd(),
+    dataRoot,
+    pluginRoot: fakePluginRoot,
+  });
+  assert.equal(powerShellWrite.action, 'deny', 'a PowerShell Set-Content targeting an installed plugin file must be denied');
+
+  // A read-only Bash/PowerShell command that merely references pluginRoot
+  // (no write-shaped signal) must NOT be denied -- this is what keeps the
+  // model able to inspect its own installed policy.
+  const bashRead = classifyRiskAction({
+    toolName: 'Bash',
+    toolInput: { command: `cat ${path.join(fakePluginRoot, 'policies', 'production-policy.json')}` },
+    cwd: process.cwd(),
+    dataRoot,
+    pluginRoot: fakePluginRoot,
+  });
+  assert.notEqual(bashRead.action, 'deny', 'a read-only Bash command merely referencing pluginRoot must NOT be denied');
 
   // The realistic mandatory call this fix protects: a real runtime CLI
   // invocation using the plugin's own root, exactly as SKILL.md issues it,
-  // must never be denied by this check.
+  // must never be denied by this check -- it references pluginRoot but is
+  // not write-shaped.
   const legitimateRuntimeCall = classifyRiskAction({
     toolName: 'Bash',
     toolInput: { command: `node "${path.join(fakePluginRoot, 'scripts', 'runtime', 'update-state.mjs')}" --session s --record-progress` },
@@ -933,6 +1088,13 @@ test('shared risk policy: the git/docker/npm-rm exclusion cannot be spoofed by a
     // separator before collapsing other whitespace.
     'git\nrm -rf /',
     'true; git\nrm -rf /',
+    // A further review round found a BARE \r (no \n at all -- a real
+    // PowerShell statement separator on its own, confirmed against a real
+    // PowerShell process) fell through the \r?\n-only normalization to the
+    // plain-whitespace collapse and re-opened the identical gap. Fixed by
+    // normalizing \r\n, a lone \r, and a lone \n uniformly (matching \r\n
+    // first so it becomes one separator, not two).
+    'git\rrm -Recurse -Force C:\\Projects',
   ];
   for (const command of mustBeGated) {
     const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
@@ -953,6 +1115,45 @@ test('shared risk policy: the git/docker/npm-rm exclusion cannot be spoofed by a
     const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
     assert.equal(result.action, 'pass', `expected pass for: ${command}`);
   }
+});
+
+test('shared risk policy treats a Bash "\\"-continuation or PowerShell "`"-continuation as ONE command, not a separator (Critical regression found by a fresh Reviewer in the bare-newline rm fix itself)', () => {
+  // Converting EVERY bare newline into a command separator (the fix for the
+  // bare-newline `rm` spoof above) went too far: a Bash `\`-newline or
+  // PowerShell backtick-newline is a LINE CONTINUATION, one logical command
+  // written across lines, not a boundary. Treating it as a separator
+  // defeated every pattern in production-policy.json that excludes
+  // crossing a real separator (`[^|;&\n]*?`) for any continued command --
+  // reproduced for production-deploy, destructive-operation, iam-or-
+  // secrets, release, merge, and payment, among others. Fixed by collapsing
+  // a continuation to a plain space FIRST, before any remaining bare
+  // newline becomes a separator.
+  const dataRoot = tempDataRoot();
+  const mustStillGate = [
+    ['kubectl \\\napply -f prod.yaml', 'production-deploy'],
+    ['terraform \\\ndestroy -auto-approve', 'production-deploy'],
+    ['rm -rf \\\n./build', 'destructive-operation'],
+  ];
+  for (const [command, expectedClass] of mustStillGate) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'require-approval', `expected require-approval for: ${JSON.stringify(command)}`);
+    assert.equal(result.actionClass, expectedClass, `expected ${expectedClass} for: ${JSON.stringify(command)}`);
+  }
+
+  const powerShellContinuation = classifyRiskAction({
+    toolName: 'PowerShell',
+    toolInput: { command: 'kubectl `\napply -f prod.yaml' },
+    cwd: process.cwd(),
+    dataRoot,
+  });
+  assert.equal(powerShellContinuation.action, 'require-approval', 'a PowerShell backtick-continuation must not neuter production-deploy classification');
+  assert.equal(powerShellContinuation.actionClass, 'production-deploy');
+
+  // The bare-newline rm-spoof case (no continuation character at all) must
+  // remain gated -- this fix must not un-fix that regression test.
+  const bareNewlineStillGated = classifyRiskAction({ toolName: 'Bash', toolInput: { command: 'git\nrm -rf /' }, cwd: process.cwd(), dataRoot });
+  assert.equal(bareNewlineStillGated.action, 'require-approval');
+  assert.equal(bareNewlineStillGated.actionClass, 'destructive-operation');
 });
 
 test('shared risk policy classifies environment-variable, Windows drive-root, and PowerShell rm-alias-with-relative-target destructive deletes correctly', () => {

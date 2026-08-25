@@ -262,10 +262,20 @@ function touchesClaudeSettings({ toolName, toolInput, cwd }) {
       ? path.join(os.homedir(), withoutAds.slice(2))
       : withoutAds;
     try {
-      const resolved = path.resolve(cwd || process.cwd(), tildeExpanded).toLowerCase();
-      const base = path.basename(resolved);
-      const parentBase = path.basename(path.dirname(resolved));
-      return parentBase === '.claude' && HOST_SETTINGS_FILENAMES.some((f) => base === f.toLowerCase());
+      const resolved = path.resolve(cwd || process.cwd(), tildeExpanded);
+      const check = (candidate) => {
+        const lower = candidate.toLowerCase();
+        const base = path.basename(lower);
+        const parentBase = path.basename(path.dirname(lower));
+        return parentBase === '.claude' && HOST_SETTINGS_FILENAMES.some((f) => base === f.toLowerCase());
+      };
+      if (check(resolved)) return true;
+      // A directory symlink/junction whose NAME is not literally ".claude"
+      // (e.g. `cfg -> .claude`) passes the raw check above but still lands
+      // on the real settings file once the OS resolves it. realpathBestEffort
+      // mirrors touchesDataRoot()'s own symlink handling, including its
+      // best-effort behavior for a target file that does not exist yet.
+      return check(realpathBestEffort(resolved));
     } catch {
       return false;
     }
@@ -318,7 +328,7 @@ function touchesPluginInstallation({ toolName, toolInput, cwd, pluginRoot }) {
 
   // Independent review found a Critical self-inflicted regression: an
   // earlier version of this function also scanned Bash/PowerShell command
-  // TEXT for any reference to pluginRoot -- but `skills/run/SKILL.md`'s own
+  // TEXT for ANY reference to pluginRoot -- but `skills/run/SKILL.md`'s own
   // mandatory runtime CLI calls are literally
   // `node "<the host's plugin-root env var>/scripts/runtime/<script>.mjs"`,
   // so once that variable is expanded to a literal path (guaranteed for
@@ -328,11 +338,43 @@ function touchesPluginInstallation({ toolName, toolInput, cwd, pluginRoot }) {
   // comment states legitimate mutations "never embed the data-root path in
   // the command line"), the opposite is true for pluginRoot by
   // construction: the model is SUPPOSED to invoke scripts by that exact
-  // path. Deliberately narrowed to Write/Edit/NotebookEdit only -- the
-  // actual file-mutation threat this check exists for -- plus the
-  // pre-existing, narrowly-scoped touchesHookEntrypoint() above (Bash/
-  // PowerShell direct execution of a specific hook-entrypoint filename,
-  // which never collides with the runtime CLIs the model must call).
+  // path, so "references pluginRoot" alone is not a usable signal for
+  // Bash/PowerShell the way it is for touchesDataRoot().
+  //
+  // A later review found that dropping the Bash/PowerShell arm entirely
+  // left a real gap open: `echo x >> <pluginRoot>/policies/production-
+  // policy.json`, `sed -i ... <pluginRoot>/scripts/security/risk-policy.mjs`,
+  // or the PowerShell equivalents (Set-Content/Add-Content/Out-File/
+  // Copy-Item/Move-Item/New-Item -Value) all mutate the exact files this
+  // check exists to protect, and touchesHookEntrypoint() only covers the
+  // six known hook-entrypoint filenames, not policy JSON or the run
+  // skill. The narrower, correct signal is not "mentions pluginRoot" but
+  // "mentions pluginRoot AND is shaped like a write" -- a mandatory runtime
+  // CLI invocation never contains a redirection operator or a write-verb
+  // like `sed -i`/`tee`/`cp`/`mv`/`Set-Content`, so this does not repeat
+  // the earlier self-inflicted regression.
+  const WRITE_SHAPED_SIGNALS = [
+    />>?(?!=)/,
+    /\bsed\b[^|;&\n]*-i\b/i,
+    /\btee\b/i,
+    /\bcp\b/i,
+    /\bmv\b/i,
+    /\bset-content\b/i,
+    /\badd-content\b/i,
+    /\bout-file\b/i,
+    /\bcopy-item\b/i,
+    /\bmove-item\b/i,
+    /\bnew-item\b[^|;&\n]*-value\b/i,
+  ];
+  if (name === 'Bash' || name === 'PowerShell') {
+    const command = String(input.command ?? '').toLowerCase();
+    if (command === '') return false;
+    const mentionsRoot = command.includes(rootLower)
+      || homeExpandedVariants(command, os.homedir()).some((e) => e.toLowerCase().includes(rootLower));
+    if (!mentionsRoot) return false;
+    return WRITE_SHAPED_SIGNALS.some((re) => re.test(command));
+  }
+
   if (name !== 'Write' && name !== 'Edit' && name !== 'NotebookEdit') return false;
   const target = typeof input.file_path === 'string'
     ? input.file_path
@@ -341,8 +383,16 @@ function touchesPluginInstallation({ toolName, toolInput, cwd, pluginRoot }) {
       : '';
   if (target === '') return false;
   try {
-    const resolved = path.resolve(cwd || process.cwd(), target).toLowerCase();
-    return resolved === rootLower || resolved.startsWith(rootLower + path.sep.toLowerCase());
+    const resolvedRaw = path.resolve(cwd || process.cwd(), target);
+    const resolved = resolvedRaw.toLowerCase();
+    if (resolved === rootLower || resolved.startsWith(rootLower + path.sep.toLowerCase())) return true;
+    // Same symlink/junction handling as touchesDataRoot() and (as of this
+    // review round) touchesClaudeSettings(): a directory symlink pointing
+    // into the installed plugin root would otherwise let a write escape
+    // this check while still landing inside it once the OS resolves it.
+    const realResolved = realpathBestEffort(resolvedRaw).toLowerCase();
+    const realRoot = realpathBestEffort(path.resolve(pluginRoot)).toLowerCase();
+    return realResolved === realRoot || realResolved.startsWith(realRoot + path.sep.toLowerCase());
   } catch {
     return false;
   }
@@ -367,7 +417,29 @@ function firstMatchingClass(policy, command) {
   // and incidentally re-activating each pattern's own `[^|;&\n]` exclusion
   // (previously silently neutered by the plain-space collapse, since a
   // literal `\n` could never survive to be tested against by that point).
-  const normalized = String(command).replace(/\r?\n/g, ' ; ').replace(/\s+/g, ' ');
+  //
+  // Independent review then found a bare `\r` (no `\n` at all) still fell
+  // through to the plain-whitespace collapse and re-opened the identical
+  // gap -- a real statement separator in PowerShell on its own, not just as
+  // part of a `\r\n` pair. `\r\n` is matched first so a Windows-style
+  // line ending produces one separator, not two.
+  //
+  // A second independent review then found that turning EVERY newline into
+  // a command separator went too far the other way: a Bash `\`-newline or
+  // PowerShell backtick-newline is a LINE CONTINUATION, not a boundary --
+  // it is one logical command written across multiple lines. Treating it
+  // as a separator silently broke every pattern in production-policy.json
+  // that excludes crossing a real separator (`[^|;&\n]*?`), turning most of
+  // this checkpoint's own require-approval classes into `pass` for any
+  // continued command -- a far more severe availability gap than the
+  // narrow spoof this normalization exists to close. Continuations are
+  // collapsed to a plain space FIRST, before any remaining bare newline is
+  // turned into a separator.
+  const normalized = String(command)
+    .replace(/\\\r?\n/g, ' ')
+    .replace(/`\r?\n/g, ' ')
+    .replace(/\r\n|\r|\n/g, ' ; ')
+    .replace(/\s+/g, ' ');
   // git-force is a specialization of git-push; test it before git-push so the
   // more specific class wins.
   const order = Object.keys(policy.approvalClasses).sort((a, b) => (a === 'git-force' ? -1 : b === 'git-force' ? 1 : 0));
@@ -407,8 +479,17 @@ const ENV_TEMPLATE_EXCEPTION = /(^|[\\/])\.env\.(example|sample|template|dist|de
 
 function matchesSensitivePath(policy, text) {
   if (typeof text !== 'string' || text === '') return false;
-  if (ENV_TEMPLATE_EXCEPTION.test(text)) return false;
-  return policy.sensitivePaths.patterns.some((p) => new RegExp(p, 'i').test(text));
+  // Independent review found that touchesClaudeSettings() strips a trailing
+  // NTFS alternate-data-stream suffix (`::$DATA`, a distinct stream of the
+  // SAME file on Windows) before matching, but this function -- the one
+  // that actually gates secret-path reads/writes -- never did, so
+  // `.env::$DATA` read straight through to the real `.env` content while
+  // classifying as `pass`. Stripped here so every caller (Bash/PowerShell
+  // tokens, Write/Edit/NotebookEdit target, Read/Glob/Grep candidates)
+  // benefits without each needing its own copy of this logic.
+  const withoutAds = text.replace(/::[^\\/]*$/, '');
+  if (ENV_TEMPLATE_EXCEPTION.test(withoutAds)) return false;
+  return policy.sensitivePaths.patterns.some((p) => new RegExp(p, 'i').test(withoutAds));
 }
 
 /**
@@ -437,11 +518,23 @@ function stripSurroundingQuotes(token) {
   return token;
 }
 
+// Splitting on whitespace before stripping quotes (the original approach)
+// tears a quoted path containing an internal space in two, so neither half
+// still looks like a quoted token and stripSurroundingQuotes() has nothing
+// to strip -- independent review reproduced `cat "my dir/.env"` bypassing
+// secret-path protection this way. This instead extracts whole shell words:
+// each token is a maximal run of ordinary characters and/or fully-quoted
+// segments glued together (mirroring the git-push pattern's own "shell
+// word" concept above), so a quoted path keeps its internal space as part
+// of ONE token. The unquoted alternative is a single character (not `+`)
+// so this cannot repeat the nested-quantifier ReDoS already fixed once in
+// the git-push pattern.
+const SHELL_WORD = /(?:[^\s"';|&<>()]|"[^"]*"|'[^']*')+/g;
+
 function commandTouchesSensitivePath(policy, command) {
   if (matchesSensitivePath(policy, command)) return true;
-  return String(command)
-    .split(/[\s;|&<>()]+/)
-    .filter((t) => t !== '')
+  const tokens = String(command).match(SHELL_WORD) || [];
+  return tokens
     .map(stripSurroundingQuotes)
     .some((token) => matchesSensitivePath(policy, token));
 }
