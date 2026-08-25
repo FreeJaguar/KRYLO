@@ -21,6 +21,14 @@ const ALLOWED_FIELDS = [
   'cycle',
   'terminalState',
   'label',
+  // docs/adr/0030-cross-harness-advisory-workers.md: worker provider/role,
+  // byte counts, and finding count are safe, scalar, non-secret metadata --
+  // never the worker's raw prompt, context, or output text.
+  'provider',
+  'role',
+  'inputBytes',
+  'outputBytes',
+  'findingCount',
 ];
 
 /**

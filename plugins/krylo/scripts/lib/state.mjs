@@ -54,6 +54,7 @@ export const ENUMS = {
     'external-message',
     'external-write',
     'repository-admin',
+    'cross-harness-invocation',
     'other',
   ],
   approvalStatus: ['pending', 'approved', 'denied', 'consumed', 'expired'],

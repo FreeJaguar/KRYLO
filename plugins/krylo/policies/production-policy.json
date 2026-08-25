@@ -120,6 +120,12 @@
         "\\b(uvx|pipx?|uv\\s+tool\\s+install)\\b[^|;&\\n]{0,200}\\bcode[-_]review[-_]graph\\b",
         "\\bcode[-_]review[-_]graph\\b[^|;&\\n]{0,80}\\b(apply|serve|daemon)\\b"
       ]
+    },
+    "cross-harness-invocation": {
+      "reason": "Invoking an opposite-provider Cross-Harness advisory worker sends bounded repository context to a second model provider (data egress) and requires explicit user approval (docs/adr/0030-cross-harness-advisory-workers.md).",
+      "patterns": [
+        "\\bcross-harness-run\\.mjs\\b"
+      ]
     }
   },
   "sensitivePaths": {

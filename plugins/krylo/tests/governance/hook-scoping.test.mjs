@@ -128,7 +128,12 @@ test('Codex host adapter is isolated from the Claude Skill-scoped hook design (A
   const hostSubdirs = fs.existsSync(hostDir)
     ? fs.readdirSync(hostDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
     : [];
-  assert.deepEqual(hostSubdirs.sort(), ['claude', 'codex'], 'both host adapters ship side by side, neither replacing the other');
+  // scripts/host/cross-harness/ (docs/adr/0030-cross-harness-advisory-workers.md)
+  // holds the two thin PROVIDER adapters used when the native host spawns
+  // the OPPOSITE provider's CLI as an advisory worker -- a third directory
+  // alongside claude/codex, not a replacement for either, and not itself a
+  // native KRYLO host.
+  assert.deepEqual(hostSubdirs.sort(), ['claude', 'codex', 'cross-harness'], 'both host adapters ship side by side, neither replacing the other, alongside the Cross-Harness provider adapters');
 
   const hooksConfigText = fs.readFileSync(path.join(PLUGIN_ROOT, 'hooks', 'hooks.json'), 'utf8');
   assert.doesNotMatch(hooksConfigText, /codex/i, 'Claude\'s plugin-wide hooks.json must remain empty and unaffected by Codex support (ADR-0021)');

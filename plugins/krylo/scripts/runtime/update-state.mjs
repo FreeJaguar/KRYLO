@@ -85,6 +85,9 @@ function parseArgv(argv) {
       case '--register-agent':
         ops.push({ op: 'register-agent', value: argv[++i] });
         break;
+      case '--mark-external-worker':
+        ops.push({ op: 'mark-external-worker' });
+        break;
       case '--agent-status':
         ops.push({ op: 'agent-status', value: argv[++i] });
         break;
@@ -233,6 +236,17 @@ function applyOp(state, op) {
         endedAt: null,
         ...(parsed.taskLabel ? { taskLabel: String(parsed.taskLabel).slice(0, 120) } : {}),
       }));
+      return {};
+    }
+
+    case 'mark-external-worker': {
+      // Audit bookkeeping only (docs/adr/0030-cross-harness-advisory-workers.md):
+      // this run used a Cross-Harness worker at some point. Never touches
+      // delegation.depth -- a KRYLO run is always directly user-invoked and
+      // stays depth 0 for its whole lifetime; a worker never gets its own
+      // persisted run state to be "reached via delegation" into in the
+      // first place.
+      state.delegation = { ...state.delegation, externalWorker: true };
       return {};
     }
 

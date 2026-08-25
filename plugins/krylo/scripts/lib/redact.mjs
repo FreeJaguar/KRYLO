@@ -28,10 +28,27 @@ function maskBearer(s) {
 }
 
 function maskUrlCredentials(s) {
+  // Cheap linear pre-check: without a literal "://" anywhere, the regex
+  // below can never match, so skip it entirely -- this is the overwhelming
+  // common case for ordinary source/diff content. Found necessary after
+  // Cross-Harness's context-packet builder (a genuinely new, larger-input
+  // caller of this function) reproduced a real ~50s hang on a 300,000-char
+  // string with no "://" in it at all: the unbounded `[a-zA-Z0-9+.-]*`
+  // scheme-prefix quantifier greedily consumes the whole remaining run at
+  // every one of the string's O(n) starting positions, then backtracks
+  // character-by-character (another O(n)) looking for the literal "://"
+  // that never appears -- true O(n^2) behavior on adversarial input, not
+  // hypothetical.
+  if (!s.includes('://')) return s;
+  // Bounding the scheme prefix (no real URL scheme is anywhere near this
+  // long) caps the backtracking work per starting position at a constant,
+  // closing the O(n^2) blowup even for a crafted input that DOES contain
+  // "://" somewhere far from a long non-matching run -- defense in depth
+  // alongside the early-exit above, not a substitute for it.
   // Greedy password segment backtracks to the LAST @, so passwords that
   // themselves contain @ are fully masked.
   return s.replace(
-    /([a-zA-Z][a-zA-Z0-9+.-]*):\/\/[^/\s:@]+:[^/\s]*@/g,
+    /([a-zA-Z][a-zA-Z0-9+.-]{0,31}):\/\/[^/\s:@]+:[^/\s]*@/g,
     (_m, scheme) => `${scheme}://${MASK}@`,
   );
 }

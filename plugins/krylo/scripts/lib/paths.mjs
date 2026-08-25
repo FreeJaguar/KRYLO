@@ -133,6 +133,22 @@ export function telemetryPath(runId) {
   return safeJoin(getDataRoot(), 'telemetry', `${runId}.jsonl`);
 }
 
+/**
+ * Disposable per-invocation directory for a Cross-Harness worker
+ * (docs/adr/0030-cross-harness-advisory-workers.md): the worker's cwd, and
+ * the only place its bounded context packet is ever written. Never the
+ * application repository, and outside the KRYLO run's own runs/<runId>/
+ * tree so a worker process (which never receives KRYLO_DATA_ROOT at all)
+ * has no path back to real run state even if it tried.
+ */
+export function crossHarnessRootDir() {
+  return safeJoin(getDataRoot(), 'cross-harness');
+}
+
+export function crossHarnessInvocationDir(runId, invocationId) {
+  return safeJoin(getDataRoot(), 'cross-harness', runId, invocationId);
+}
+
 /** Legacy (pre-0.1.1) single global pointer. Read only, for one-time migration. */
 export function currentRunPointerPath() {
   return safeJoin(getDataRoot(), 'current-run.json');
