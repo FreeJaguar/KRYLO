@@ -204,6 +204,14 @@ export const SECURITY_CONFIG_WEAKENING_REASON =
  * outright, via its own ordinary Write/Edit/Bash/PowerShell tools. Only
  * writes are gated (reading these files is not itself a threat, and the
  * model may legitimately need to read them to understand current config).
+ *
+ * The Bash/PowerShell arm is text-matching defense-in-depth, the same
+ * category of limitation already documented for touchesDataRoot() and
+ * touchesHookEntrypoint() above: a sufficiently indirect invocation
+ * (`cd .claude && echo x > settings.json`, a shell variable holding the
+ * filename, base64/encoded writes) is not caught by design. It raises the
+ * bar for an unsophisticated attempt; it is not a guarantee against every
+ * possible obfuscation.
  */
 const HOST_SETTINGS_FILENAMES = ['settings.json', 'settings.local.json'];
 
@@ -230,12 +238,29 @@ function touchesClaudeSettings({ toolName, toolInput, cwd }) {
         ? input.notebook_path
         : '';
     if (target === '') return false;
-    const lower = target.toLowerCase().replace(/\\/g, '/');
-    // Match the exact settings filename as a path suffix (any directory
-    // depth: project, or a user-level `~/.claude/settings.json`), not a
-    // bare substring, so an unrelated file merely named "settings.json.bak"
-    // or "my-settings.json" is not swept in.
-    return HOST_SETTINGS_FILENAMES.some((f) => lower === `.claude/${f}` || lower.endsWith(`/.claude/${f}`));
+    // Independent review found the prior version matched the RAW target
+    // string, never resolved -- so `.claude/./settings.json`,
+    // `.claude//settings.json`, `.claude/x/../settings.json`, and an NTFS
+    // alternate-data-stream suffix (`settings.json::$DATA`, a distinct
+    // stream of the SAME file on Windows) all evaded it while still
+    // landing on the real file. Strip a trailing `::<stream>` suffix, expand
+    // a leading `~` the same way Bash command text already is elsewhere in
+    // this file, then resolve through `.`/`..`/double-separators before
+    // comparing the basename and immediate parent directory name -- the
+    // same resolve-then-compare shape `touchesDataRoot()` and
+    // `touchesPluginInstallation()` already use.
+    const withoutAds = target.replace(/::[^\\/]*$/, '');
+    const tildeExpanded = /^~[/\\]/.test(withoutAds)
+      ? path.join(os.homedir(), withoutAds.slice(2))
+      : withoutAds;
+    try {
+      const resolved = path.resolve(cwd || process.cwd(), tildeExpanded).toLowerCase();
+      const base = path.basename(resolved);
+      const parentBase = path.basename(path.dirname(resolved));
+      return parentBase === '.claude' && HOST_SETTINGS_FILENAMES.some((f) => base === f.toLowerCase());
+    } catch {
+      return false;
+    }
   }
 
   return false;
@@ -329,7 +354,18 @@ function firstMatchingClass(policy, command) {
 // specific, well-known template suffixes below are exempted, matched at a
 // full path-segment boundary (so `.env.example` is exempt but
 // `.env.example.secret` or `config/.env.example/real-secret` is not).
-const ENV_TEMPLATE_EXCEPTION = /(^|[\\/])\.env\.(example|sample|template|dist|defaults)($|[\\/])/i;
+// Independent security review found the original trailing boundary
+// (`$|[\\/]`) let the exception match ANYWHERE in the string, not only at
+// the very end -- so `.env.example/../.env` matched the exception (exempting
+// the WHOLE string from the sensitive-path check) while the resolved target
+// was actually the real `.env`, a genuine secret-leak path-traversal bypass
+// reproduced end to end. Anchored to end-of-string only: the template
+// filename must be the FINAL path component, nothing after it (not even a
+// further path segment), so a bare `.env.example` or `config/.env.example`
+// is still exempt, but `.env.example/../.env` or `config/.env.example/
+// real-secret` is not -- it falls through to the normal sensitivePaths
+// check, which correctly still matches the literal `.env` occurring later.
+const ENV_TEMPLATE_EXCEPTION = /(^|[\\/])\.env\.(example|sample|template|dist|defaults)$/i;
 
 function matchesSensitivePath(policy, text) {
   if (typeof text !== 'string' || text === '') return false;

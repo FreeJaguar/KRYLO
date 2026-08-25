@@ -103,6 +103,26 @@ test('shared risk policy no longer over-matches git-push on unrelated commands m
   }
 });
 
+test('shared risk policy still catches a quoted git-push subcommand (regression found by fresh Verifier in the D4 tightening itself)', () => {
+  // The D4 tightening (above) required "push" to immediately follow "git"
+  // plus recognized option tokens -- but did not anticipate a model or
+  // injected instruction simply quoting the subcommand (`git "push"`,
+  // `git 'push'`), which a real shell still dispatches to git's push
+  // subcommand identically. Fixed by tolerating optional matching quotes
+  // around "push" in the pattern itself.
+  const dataRoot = tempDataRoot();
+  const mustMatch = [
+    ['git "push" origin main', 'git-push'],
+    ["git 'push' origin main", 'git-push'],
+    ['git -C . "push" origin', 'git-push'],
+  ];
+  for (const [command, expectedClass] of mustMatch) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'require-approval', `expected require-approval for: ${command}`);
+    assert.equal(result.actionClass, expectedClass, `expected ${expectedClass} for: ${command}`);
+  }
+});
+
 test('shared risk policy classifies a git force-push as git-force, not the more general git-push', () => {
   const result = classifyRiskAction({
     toolName: 'Bash',
@@ -188,6 +208,13 @@ test('shared risk policy passes shareable dotenv templates (.env.example/.sample
     ['Bash', { command: 'cat .env' }],
     // Not a real template suffix -- must not accidentally widen the exception.
     ['Read', { file_path: '.env.example.secret' }],
+    // Security review found the original exception's trailing boundary
+    // matched anywhere in the string (not only at the end), so path
+    // traversal riding on a legitimate-looking template prefix reached a
+    // REAL secret and returned its content -- reproduced end to end on
+    // Windows. The template name must be the final path component.
+    ['Read', { file_path: '.env.example/../.env' }],
+    ['Read', { file_path: 'config/.env.example/real-secret' }],
   ];
   for (const [toolName, toolInput] of stillDenied) {
     const result = classifyRiskAction({ toolName, toolInput, cwd: process.cwd(), dataRoot });
@@ -441,6 +468,32 @@ test('shared risk policy does not deny reading Claude settings, or writing an un
 
   const lookalike = classifyRiskAction({ toolName: 'Write', toolInput: { file_path: 'docs/my-settings.json.bak', content: 'x' }, cwd: process.cwd(), dataRoot });
   assert.equal(lookalike.action, 'pass', 'a file merely named similarly must not be swept in by a bare substring match');
+});
+
+test('shared risk policy: settings.json protection resolves the path before comparing, so a redundant "." segment, a double separator, ".." traversal, or an NTFS alternate-data-stream suffix cannot bypass it (regression found by fresh Security Reviewer, real file overwrite reproduced)', () => {
+  // The first version of touchesClaudeSettings() matched the RAW target
+  // string (lowercased, backslash-to-slash only) -- never resolved through
+  // path.resolve() the way touchesDataRoot()/touchesPluginInstallation()
+  // already do. Independent review reproduced, end to end, that
+  // `.claude/./settings.json`, `.claude//settings.json`,
+  // `.claude/x/../settings.json`, and `.claude/settings.json::$DATA` (an
+  // NTFS alternate-data-stream suffix -- a distinct stream of the SAME
+  // file on Windows) all classified as `pass` and genuinely overwrote the
+  // real settings.json on disk. Fixed by resolving the target (after
+  // stripping any `::<stream>` suffix and expanding a leading `~`) before
+  // comparing its basename and parent directory name.
+  const dataRoot = tempDataRoot();
+  const mustDeny = [
+    '.claude/./settings.json',
+    '.claude//settings.json',
+    '.claude/x/../settings.json',
+    '.claude/settings.json::$DATA',
+  ];
+  for (const target of mustDeny) {
+    const result = classifyRiskAction({ toolName: 'Write', toolInput: { file_path: target, content: '{}' }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for Write(${target})`);
+    assert.equal(result.category, 'security-config-protection');
+  }
 });
 
 test('shared risk policy denies the model writing/editing the KRYLO plugin\'s own INSTALLED files (hooks, policy) when pluginRoot is known, without blocking KRYLO-on-itself source development', () => {
@@ -774,6 +827,49 @@ test('shared risk policy classifies a bare relative-path rm as destructive-opera
   for (const command of stillBenign) {
     const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
     assert.equal(result.action, 'pass', `expected pass (not blocked) for: ${command}`);
+  }
+});
+
+test('shared risk policy: the git/docker/npm-rm exclusion cannot be spoofed by an unrelated preceding word or an env-var-assignment prefix (regression found by fresh Verifier + Security Reviewer in the rm fix itself)', () => {
+  // The first fix's negative lookbehind (`(?<!git )(?<!docker )(?<!npm )`)
+  // inspected only the four raw characters immediately before "rm" -- not
+  // whether "git"/"docker"/"npm" was actually a real, separate command.
+  // Two independent review rounds reproduced real bypasses: a two-line
+  // script normalized to "echo git rm -rf /" (the literal word "git"
+  // merely happens to precede "rm"), and a POSIX env-var-assignment prefix
+  // like "x=npm rm -rf /var/data" (a real, working shell command). Both
+  // evaded the exclusion and passed through completely ungated -- worse
+  // than the original relative-path gap, since these examples used
+  // absolute targets the PRE-fix pattern already caught. Fixed by requiring
+  // "git"/"docker"/"npm" itself be at a genuine command-start position
+  // (start-of-string or after a ;/&/| separator), not merely the word
+  // immediately preceding "rm".
+  const dataRoot = tempDataRoot();
+  const mustBeGated = [
+    'echo git rm -rf /',
+    'echo npm rm -rf ~/important',
+    'x=npm rm -rf /var/data',
+    'FOO=git rm -rf /var/data',
+    'TMP=/opt/npm rm -rf /var/data',
+  ];
+  for (const command of mustBeGated) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'require-approval', `expected require-approval for: ${command}`);
+    assert.equal(result.actionClass, 'destructive-operation');
+  }
+
+  // Genuine subcommands, including after a real command separator, must
+  // still pass.
+  const stillBenign = [
+    'git rm -r --cached .',
+    'docker rm -f my-container',
+    'npm rm somepackage',
+    'echo hi && git rm -r --cached .',
+    'echo hi; docker rm -f x',
+  ];
+  for (const command of stillBenign) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'pass', `expected pass for: ${command}`);
   }
 });
 

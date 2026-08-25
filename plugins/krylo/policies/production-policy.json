@@ -39,7 +39,7 @@
         "\\bgit\\b[^|;&\\n]*?\\bclean\\s+-[a-z]*f",
         "\\bgit\\b[^|;&\\n]*?\\bcheckout\\s+--\\s+\\.",
         "\\bgit\\b[^|;&\\n]*?\\brestore\\s+(--worktree\\s+)?\\.(?:\\s|$)",
-        "(?<!git )(?<!docker )(?<!npm )\\brm\\s+(-[a-z]*[rf][a-z]*\\s+)+\\S",
+        "(?<!(?:^|[;&|])\\s*(?:git|docker|npm)\\s)\\brm\\s+(-[a-z]*[rf][a-z]*\\s+)+\\S",
         "\\b(remove-item|ri|rd|rmdir|del|erase)\\b[^|;&\\n]*?(-r\\w*|-f\\w*|/s\\b|/q\\b|/f\\b)",
         "\\bgit\\b[^|;&\\n]*?\\bbranch\\s+-[dD]\\b",
         "\\bgit\\b[^|;&\\n]*?\\bstash\\s+(drop|clear)\\b"
@@ -70,13 +70,13 @@
     "git-push": {
       "reason": "Git push requires explicit user approval unless the active task explicitly requested the exact action.",
       "patterns": [
-        "\\bgit\\b(?:\\s+(?:-{1,2}[\\w-]+(?:[=\\s]\\S+)?))*\\s+push\\b"
+        "\\bgit\\b(?:\\s+(?:-{1,2}[\\w-]+(?:[=\\s]\\S+)?))*\\s+['\"]?push['\"]?\\b"
       ]
     },
     "git-force": {
       "reason": "Force push is never automatic.",
       "patterns": [
-        "\\bgit\\b(?:\\s+(?:-{1,2}[\\w-]+(?:[=\\s]\\S+)?))*\\s+push\\b[^|;&\\n]*(--force(-with-lease)?\\b|\\s-f\\b|\\s\\+\\S+)"
+        "\\bgit\\b(?:\\s+(?:-{1,2}[\\w-]+(?:[=\\s]\\S+)?))*\\s+['\"]?push['\"]?\\b[^|;&\\n]*(--force(-with-lease)?\\b|\\s-f\\b|\\s\\+\\S+)"
       ]
     },
     "merge": {
