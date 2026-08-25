@@ -211,6 +211,48 @@ test('cross-harness-run: a slow worker exceeding the timeout is reported as TIME
   }
 });
 
+// Regression (M1, Reviewer, plus a Verifier-flagged coverage gap in a later
+// round): spawnSync sets BOTH res.error.code='ENOBUFS' AND res.signal=
+// 'SIGTERM' on a real maxBuffer overflow -- the original branch order
+// checked SIGTERM/timeout first and misreported oversized worker output as
+// TIMEOUT. The fake worker's 'huge-output' mode writes 50MB, well past
+// CROSS_HARNESS_MAX_OUTPUT_BYTES (2MB), to exercise this live rather than
+// only via static code reading.
+test('cross-harness-run: oversized worker output is reported as OUTPUT_TOO_LARGE, never misreported as TIMEOUT', () => {
+  const dataDir = mkTempDataDir();
+  try {
+    createRun(dataDir);
+    const res = runCli(dataDir, ['--role', 'reviewer', '--task', 'x', '--session', 'ch-session'], { FAKE_WORKER_MODE: 'huge-output' });
+    assert.equal(res.json?.ok, false);
+    assert.equal(res.json.failureCode, 'OUTPUT_TOO_LARGE');
+  } finally {
+    try { rmSyncRetry(dataDir, 5); } catch { /* see slow-worker test's identical Windows cleanup-timing note */ }
+  }
+});
+
+// Regression (H2, Reviewer, plus a Verifier-flagged coverage gap in a later
+// round): a worker's own reported severity was recorded verbatim, letting
+// an untrusted worker unilaterally block VERIFIED_COMPLETE by reporting a
+// fabricated critical/high finding. cappedSeverity() must demote it to
+// medium on the actual persisted state.json, not merely in the function
+// that implements the cap -- exercised end to end here, not just read.
+test('cross-harness-run: a worker-reported "high" finding is persisted as severity "medium", with the original severity preserved in the summary text', () => {
+  const dataDir = mkTempDataDir();
+  try {
+    const runId = createRun(dataDir);
+    const res = runCli(dataDir, ['--role', 'reviewer', '--task', 'x', '--session', 'ch-session'], { FAKE_WORKER_MODE: 'high-severity-finding' });
+    assert.equal(res.json?.ok, true, JSON.stringify(res.json));
+
+    const state = readState(dataDir, runId);
+    const recorded = state.findings.find((f) => f.source === 'cross-harness:codex:reviewer');
+    assert.ok(recorded, 'the worker finding should have been recorded');
+    assert.equal(recorded.severity, 'medium', 'a worker-reported high/critical finding must never be persisted at its own reported severity');
+    assert.match(recorded.summary, /worker-reported severity: high/, 'the original, unconfirmed severity must remain visible for a human to independently re-file');
+  } finally {
+    rmSyncRetry(dataDir);
+  }
+});
+
 // H. Read-only enforcement (fixture-level; the real read-only-probe against actual CLIs is a separate, environment-gated test)
 test('cross-harness-run: the fake worker\'s own filesystem write attempt inside its cwd is observable (fixture sanity: proves the probe technique itself works before trusting a real CLI\'s sandbox)', () => {
   const dataDir = mkTempDataDir();

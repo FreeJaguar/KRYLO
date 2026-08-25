@@ -126,10 +126,13 @@ export function spawnCodexWorker({ cliPath = 'codex', cwd, outputSchemaPath, std
       return { ok: false, failureCode: 'OUTPUT_TOO_LARGE' };
     }
     if (res.error?.code === 'ETIMEDOUT' || res.signal === 'SIGTERM') {
-      // spawnSync's own timeout only reliably reaches the DIRECT child --
-      // platformSpawnTarget's cmd.exe wrapper on Windows -- never the
-      // grandchild worker process it launched. Kill the whole tree so a
-      // slow/hung worker never survives past the reported TIMEOUT.
+      // spawnSync's own timeout only reliably reaches the DIRECT child.
+      // platformSpawnTarget() resolves and invokes the worker CLI's real
+      // target directly (no cmd.exe indirection since the spawn-platform.mjs
+      // rewrite -- see that module's own header comment), but the worker
+      // CLI itself may spawn its OWN subprocesses internally; killProcessTree
+      // kills the whole tree so a slow/hung worker never survives past the
+      // reported TIMEOUT regardless of what it spawned underneath itself.
       killProcessTree(res.pid);
       return { ok: false, failureCode: 'TIMEOUT' };
     }

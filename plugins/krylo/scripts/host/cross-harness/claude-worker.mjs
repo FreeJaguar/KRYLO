@@ -163,8 +163,11 @@ export function spawnClaudeWorker({ cliPath = 'claude', cwd, systemPrompt, jsonS
     }
     if (res.error?.code === 'ETIMEDOUT' || res.signal === 'SIGTERM') {
       // See codex-worker.mjs's identical comment: spawnSync's own timeout
-      // only reaches the direct cmd.exe wrapper on Windows, never the
-      // grandchild worker process -- kill the whole tree explicitly.
+      // only reaches the direct child (the worker CLI's real target,
+      // resolved directly by platformSpawnTarget() -- no cmd.exe
+      // indirection since the spawn-platform.mjs rewrite), never a
+      // subprocess the worker CLI spawns internally -- kill the whole tree
+      // explicitly.
       killProcessTree(res.pid);
       return { ok: false, failureCode: 'TIMEOUT' };
     }

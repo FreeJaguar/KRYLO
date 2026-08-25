@@ -95,6 +95,16 @@ function runMode() {
       process.stderr.write('fake worker: exiting 2\n');
       process.exit(2);
       break;
+    case 'high-severity-finding':
+      // Otherwise-conformant (safe evidence path, no filesModified) so it
+      // passes validateCrossHarnessResult() and reaches --add-finding --
+      // unlike 'malicious-output' below, which is rejected outright before
+      // cappedSeverity() ever runs. Exercises H2 end to end.
+      writeResult(validResult({
+        findings: [{ severity: 'high', title: 'a worker-reported high finding', confidence: 'high', recommendation: 'x', evidence: [{ path: 'add.js', line: 1, description: 'x' }] }],
+      }));
+      process.exit(0);
+      break;
     case 'malicious-output':
       writeResult({
         schemaVersion: '1.0.0',
