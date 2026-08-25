@@ -21,7 +21,7 @@ import { fingerprintText } from '../lib/action-fingerprint.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { withFileLock } from '../lib/lock.mjs';
 import { runLockPath } from '../lib/paths.mjs';
-import { bootstrapClaudeStorageEnvironment, resolveClaudeSessionId } from '../host/claude/context.mjs';
+import { bootstrapStorageEnvironment, resolveSessionId, detectHost } from '../lib/host-dispatch.mjs';
 
 function nowIso() {
   return new Date().toISOString();
@@ -479,13 +479,13 @@ function main() {
   // entirely, but still needs the correct KRYLO_DATA_ROOT resolved from the
   // Claude-specific env vars (and KRYLO_SECURITY_PROFILE mapped from the
   // current userConfig option, read by the request-approval op above).
-  bootstrapClaudeStorageEnvironment();
+  bootstrapStorageEnvironment();
 
   let runId = explicitRunId;
   if (!runId) {
     const projectRootHash = computeProjectRootHash(path.resolve(projectDir || process.cwd()));
-    const hostSessionId = resolveClaudeSessionId({ explicitSessionId: session }) || undefined;
-    const pointer = readActiveRunPointer({ projectRootHash, host: 'claude', hostSessionId });
+    const hostSessionId = resolveSessionId({ explicitSessionId: session }) || undefined;
+    const pointer = readActiveRunPointer({ projectRootHash, host: detectHost(), hostSessionId });
     if (!pointer.ok || !pointer.value || !pointer.value.runId) {
       fail('no-current-run');
       return;

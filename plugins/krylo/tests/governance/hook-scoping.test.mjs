@@ -59,11 +59,16 @@ test('the run skill frontmatter declares all six required hook events against re
 });
 
 test('no other KRYLO skill declares an interception hook', () => {
+  // 'krylo-run' is the Codex explicit-invocation Skill (docs/adr/0029-codex-host-packaging-and-approval-boundary.md).
+  // It intentionally has no `hooks:` frontmatter of its own -- Codex has no
+  // Skill-scoped hook lifecycle, so its hooks are registered plugin-wide via
+  // hooks/codex-hooks.json instead (checked by a separate test below), never
+  // through SKILL.md frontmatter the way Claude's `run` skill uses.
   const skillsDir = path.join(PLUGIN_ROOT, 'skills');
   const others = fs.readdirSync(skillsDir, { withFileTypes: true })
     .filter((e) => e.isDirectory() && e.name !== 'run')
     .map((e) => e.name);
-  assert.deepEqual(others.sort(), ['audit-tool', 'doctor', 'setup', 'status']);
+  assert.deepEqual(others.sort(), ['audit-tool', 'doctor', 'krylo-run', 'setup', 'status']);
   for (const skill of others) {
     const block = frontmatterBlock(path.join(skillsDir, skill, 'SKILL.md'));
     assert.ok(!/^hooks:/m.test(block), `${skill} must not declare hooks — only the run skill gates tool use`);
@@ -108,21 +113,35 @@ test('every required hook script imports the real Claude host-transport adapter,
   );
 });
 
-test('no Codex hook files were added in Foundation', () => {
-  const codexHooksDir = path.join(PLUGIN_ROOT, 'hooks', 'codex');
-  assert.ok(!fs.existsSync(codexHooksDir), 'Foundation must not add a Codex-specific hooks directory');
-
+// Superseded by the approved Codex Host checkpoint
+// (docs/process/CODEX_HOST_IMPLEMENTATION_PLAN.md, docs/adr/0029-codex-host-packaging-and-approval-boundary.md):
+// this test previously asserted NO Codex host adapter existed at all. It now
+// asserts the narrower, still-load-bearing invariant ADR-0021 actually
+// depends on: adding Codex support must not touch how Claude launches its
+// OWN hooks. Claude's plugin-wide hooks/hooks.json must remain empty and
+// Claude's run Skill must remain uncoupled from Codex, regardless of what
+// the Codex host adapter/Skill/hooks file contain.
+test('Codex host adapter is isolated from the Claude Skill-scoped hook design (ADR-0021 invariant preserved)', () => {
   const hostDir = path.join(PLUGIN_ROOT, 'scripts', 'host');
   const hostSubdirs = fs.existsSync(hostDir)
     ? fs.readdirSync(hostDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name)
     : [];
-  assert.deepEqual(hostSubdirs, ['claude'], 'Foundation only ships the Claude host adapter; no codex host adapter yet');
+  assert.deepEqual(hostSubdirs.sort(), ['claude', 'codex'], 'both host adapters ship side by side, neither replacing the other');
 
   const hooksConfigText = fs.readFileSync(path.join(PLUGIN_ROOT, 'hooks', 'hooks.json'), 'utf8');
-  assert.doesNotMatch(hooksConfigText, /codex/i, 'hooks.json must not reference Codex');
+  assert.doesNotMatch(hooksConfigText, /codex/i, 'Claude\'s plugin-wide hooks.json must remain empty and unaffected by Codex support (ADR-0021)');
 
   const skillText = fs.readFileSync(path.join(PLUGIN_ROOT, 'skills', 'run', 'SKILL.md'), 'utf8');
-  assert.doesNotMatch(skillText, /codex/i, 'the run skill must not reference Codex');
+  assert.doesNotMatch(skillText, /codex/i, 'the Claude run skill must not reference Codex');
+
+  // Codex's own hook registration must live in a SEPARATE file its manifest
+  // explicitly points to, never falling back to (and therefore never risking
+  // collision with) the auto-discovered hooks/hooks.json Claude also reads
+  // by the same directory convention.
+  const codexHooksPath = path.join(PLUGIN_ROOT, 'hooks', 'codex-hooks.json');
+  assert.ok(fs.existsSync(codexHooksPath), 'Codex hook registrations must live in their own file, not the shared hooks/hooks.json');
+  const codexPluginManifest = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, '.codex-plugin', 'plugin.json'), 'utf8'));
+  assert.equal(codexPluginManifest.hooks, './hooks/codex-hooks.json', 'the Codex manifest must explicitly reference its own hooks file, not rely on auto-discovery of hooks/hooks.json');
 });
 
 test('/krylo:run remains user-invocable and not model-invocable', () => {

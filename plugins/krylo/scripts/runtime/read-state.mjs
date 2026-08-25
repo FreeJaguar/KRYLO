@@ -5,7 +5,7 @@ import path from 'node:path';
 
 import { loadState, readActiveRunPointer, computeProjectRootHash } from '../lib/state.mjs';
 import { deepRedact } from '../lib/redact.mjs';
-import { bootstrapClaudeStorageEnvironment, resolveClaudeSessionId } from '../host/claude/context.mjs';
+import { bootstrapStorageEnvironment, resolveSessionId, detectHost } from '../lib/host-dispatch.mjs';
 
 function parseArgs(argv) {
   const args = {};
@@ -33,13 +33,13 @@ function main() {
   // when a session id is not (yet) known: --run bypasses pointer lookup
   // entirely, but still needs the correct KRYLO_DATA_ROOT resolved from the
   // Claude-specific env vars.
-  bootstrapClaudeStorageEnvironment();
+  bootstrapStorageEnvironment();
 
   let runId = args.run;
   if (!runId) {
     const projectRootHash = computeProjectRootHash(path.resolve(args.projectDir || process.cwd()));
-    const hostSessionId = resolveClaudeSessionId({ explicitSessionId: args.session }) || undefined;
-    const pointer = readActiveRunPointer({ projectRootHash, host: 'claude', hostSessionId });
+    const hostSessionId = resolveSessionId({ explicitSessionId: args.session }) || undefined;
+    const pointer = readActiveRunPointer({ projectRootHash, host: detectHost(), hostSessionId });
     if (!pointer.ok || !pointer.value || !pointer.value.runId) {
       console.log(JSON.stringify({ ok: false, error: 'no-current-run' }));
       process.exit(1);

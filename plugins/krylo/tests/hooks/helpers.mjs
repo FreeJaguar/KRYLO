@@ -154,6 +154,72 @@ export function createActiveRunClaudeOnly(dataDir, { projectDir = dataDir, goal 
   };
 }
 
+/**
+ * Codex-only variants of runCli()/runHook()/createActiveRun(): set ONLY
+ * PLUGIN_DATA and PLUGIN_ROOT (never KRYLO_DATA_ROOT, never a
+ * CLAUDE_SESSION_ID-style env fallback, since Codex has none) plus
+ * KRYLO_HOST=codex so host-dispatch.mjs's detection is exercised the same
+ * way a real Codex plugin invocation would set it, and every write/read
+ * genuinely exercises the Codex host adapter's own PLUGIN_DATA ->
+ * KRYLO_DATA_ROOT bootstrap instead of a directly-set host-neutral override.
+ */
+function codexOnlyEnv(dataDir, extra = {}) {
+  const env = { ...process.env, PLUGIN_DATA: dataDir, PLUGIN_ROOT: dataDir, KRYLO_HOST: 'codex', ...extra };
+  delete env.KRYLO_DATA_ROOT;
+  delete env.CLAUDE_PLUGIN_DATA;
+  delete env.CLAUDE_PLUGIN_ROOT;
+  delete env.CLAUDE_SESSION_ID;
+  return env;
+}
+
+export function runCliCodexOnly(scriptRelPath, args, dataDir) {
+  const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath), ...args], {
+    encoding: 'utf8',
+    cwd: dataDir,
+    env: codexOnlyEnv(dataDir),
+  });
+  let json;
+  try {
+    json = JSON.parse(res.stdout.trim());
+  } catch {
+    json = null;
+  }
+  return { status: res.status, stdout: res.stdout, stderr: res.stderr, json };
+}
+
+export function runHookCodexOnly(scriptRelPath, payload, dataDir, { rawInput, env } = {}) {
+  const input = rawInput !== undefined ? rawInput : JSON.stringify(payload);
+  const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath)], {
+    encoding: 'utf8',
+    input,
+    env: codexOnlyEnv(dataDir, env),
+  });
+  let json = null;
+  try {
+    json = JSON.parse(res.stdout.trim());
+  } catch {
+    json = null;
+  }
+  return { status: res.status, stdout: res.stdout, stderr: res.stderr, json };
+}
+
+export function createActiveRunCodexOnly(dataDir, { projectDir = dataDir, goal = 'codex hook fixture run', lane = 'PATCH', risk = 'low' } = {}) {
+  const res = runCliCodexOnly('runtime/init-run.mjs', [
+    '--goal', goal,
+    '--session', 'codex-hook-session',
+    '--project-dir', projectDir,
+    '--lane', lane,
+    '--risk', risk,
+  ], dataDir);
+  if (res.status !== 0 || !res.json?.ok) {
+    throw new Error(`fixture init-run (Codex-only env) failed: ${res.stdout} ${res.stderr}`);
+  }
+  return {
+    runId: res.json.runId,
+    statePath: path.join(dataDir, 'runs', res.json.runId, 'state.json'),
+  };
+}
+
 /** Read, patch, and write a run's state.json directly (fixture surgery). */
 export function patchState(statePath, mutator) {
   const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));

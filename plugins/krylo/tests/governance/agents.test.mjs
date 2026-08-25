@@ -52,15 +52,30 @@ test('only the Builder holds Write/Edit; models are portable aliases; unsupporte
   }
 });
 
-test('all five skills are manual-invocation only', () => {
+test('all five Claude skills are manual-invocation only', () => {
+  // Excludes 'krylo-run' (the Codex Skill, docs/adr/0029-codex-host-packaging-and-approval-boundary.md):
+  // Codex SKILL.md frontmatter does not document disable-model-invocation/
+  // user-invocable fields at all -- Codex's own implicit-invocation control
+  // is a separate agents/openai.yaml file, checked by the test below.
   const skillsDir = path.join(PLUGIN_ROOT, 'skills');
-  const skills = fs.readdirSync(skillsDir, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name);
+  const skills = fs.readdirSync(skillsDir, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && e.name !== 'krylo-run')
+    .map((e) => e.name);
   assert.deepEqual(skills.sort(), ['audit-tool', 'doctor', 'run', 'setup', 'status']);
   for (const skill of skills) {
     const fields = frontmatter(path.join(skillsDir, skill, 'SKILL.md'));
     assert.equal(fields['disable-model-invocation'], 'true', `${skill} must not be model-invocable`);
     assert.equal(fields['user-invocable'], 'true', `${skill} must be user-invocable`);
   }
+});
+
+test('the Codex krylo-run skill disables implicit invocation via agents/openai.yaml', () => {
+  const yamlPath = path.join(PLUGIN_ROOT, 'skills', 'krylo-run', 'agents', 'openai.yaml');
+  const text = fs.readFileSync(yamlPath, 'utf8');
+  assert.match(text, /allow_implicit_invocation:\s*false/, 'krylo-run must disable implicit invocation, same explicit-only guarantee as the Claude run skill');
+  const skillFields = frontmatter(path.join(PLUGIN_ROOT, 'skills', 'krylo-run', 'SKILL.md'));
+  assert.equal(skillFields.name, 'krylo-run');
+  assert.ok(typeof skillFields.description === 'string' && skillFields.description.length > 0);
 });
 
 test('no plugin settings.json ships while the CLI floor is below 2.1.207 (ADR-0016)', () => {

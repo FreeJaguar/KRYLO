@@ -9,7 +9,7 @@ import path from 'node:path';
 
 import { runsRootDir, telemetryRootDir, activeRunsRootDir } from '../lib/paths.mjs';
 import { loadState, pruneStaleActiveRunPointers } from '../lib/state.mjs';
-import { bootstrapClaudeStorageEnvironment } from '../host/claude/context.mjs';
+import { bootstrapStorageEnvironment } from '../lib/host-dispatch.mjs';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -61,7 +61,7 @@ function main() {
   // data root (mapping CLAUDE_PLUGIN_DATA / CLAUDE_PLUGIN_OPTION_* into
   // KRYLO_DATA_ROOT / KRYLO_TELEMETRY_RETENTION_DAYS) without requiring a
   // session identity, then uses only host-neutral KRYLO_* storage paths below.
-  bootstrapClaudeStorageEnvironment();
+  bootstrapStorageEnvironment();
 
   const args = parseArgs(process.argv.slice(2));
   const retentionDays = Number.isFinite(args.retentionDays) ? args.retentionDays : defaultRetentionDays();

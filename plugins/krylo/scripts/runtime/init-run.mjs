@@ -10,7 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { getDataRoot } from '../lib/paths.mjs';
 import { createInitialState, saveState, writeActiveRunPointer } from '../lib/state.mjs';
 import { redactText } from '../lib/redact.mjs';
-import { bootstrapClaudeRuntimeEnvironment } from '../host/claude/context.mjs';
+import { bootstrapRuntimeEnvironment } from '../lib/host-dispatch.mjs';
 
 const RISK_BUDGETS = { low: 3, medium: 5, high: 7 };
 const HARD_MAX_BUDGET = 10;
@@ -74,10 +74,11 @@ function main() {
   const complexity = args.complexity;
   const projectDir = path.resolve(args.projectDir);
 
-  // Normalizes CLAUDE_SESSION_ID / CLAUDE_PLUGIN_DATA / CLAUDE_PLUGIN_OPTION_*
-  // into the host-neutral identity and KRYLO_* runtime env vars before any
-  // budget/state/pointer logic reads them.
-  const hostIdentity = bootstrapClaudeRuntimeEnvironment({
+  // Detects the active host (Claude or Codex) and normalizes its
+  // session/plugin-root/data-root/option fields into the host-neutral
+  // identity and KRYLO_* runtime env vars before any budget/state/pointer
+  // logic reads them.
+  const hostIdentity = bootstrapRuntimeEnvironment({
     explicitSessionId: args.session,
     projectRoot: projectDir,
   });
