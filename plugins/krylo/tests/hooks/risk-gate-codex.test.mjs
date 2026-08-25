@@ -111,25 +111,109 @@ for (const [command, label] of REQUIRE_APPROVAL_COMMANDS) {
   }
 }
 
-test('risk-gate-codex: apply_patch tool name is preserved (not silently relabeled as Claude Edit/Write)', () => {
+// apply_patch has its own tool identity (never silently relabeled as
+// Claude's Edit/Write, per the task's explicit instruction), but a
+// pre-review round confirmed it also had NO case anywhere in the shared
+// risk-policy classifier at all -- it silently fell through to the
+// unconditional final `pass` every genuinely unrecognized tool name
+// reaches. A real, reproduced .env read/write/exfiltration bypass, not a
+// hypothetical gap: `*** Update File: .env` and `*** Add File: .env`
+// (with real-looking secret content) both classified as `pass`. Fixed by
+// extracting every `*** Add|Update|Delete File:`/`*** Move to:` target from
+// the patch text and running each through the same hard-deny/sensitive-path
+// checks Write/Edit/NotebookEdit already get.
+function applyPatchPayload(cwd, patch) {
+  return {
+    hook_event_name: 'PreToolUse',
+    tool_name: 'apply_patch',
+    tool_input: { patch },
+    cwd,
+    session_id: 'codex-hook-session',
+    permission_mode: 'default',
+  };
+}
+
+test('risk-gate-codex: apply_patch targeting a sensitive path (.env) denies -- the confirmed Critical bypass, now closed', () => {
   const dataDir = mkTempDataDir('krylo-codex-hook-');
   try {
     createActiveRunCodexOnly(dataDir);
-    const payload = {
+    const updatePatch = '*** Begin Patch\n*** Update File: .env\n@@\n-OLD=1\n+API_KEY=stolen\n*** End Patch\n';
+    const updateRes = runHookCodexOnly(GATE, applyPatchPayload(dataDir, updatePatch), dataDir);
+    assert.equal(updateRes.status, 0);
+    assert.equal(decision(updateRes), 'deny', `apply_patch Update File: .env must deny, got: ${updateRes.stdout}`);
+    assert.equal(updateRes.json.hookSpecificOutput.hookEventName, 'PreToolUse');
+
+    const addPatch = '*** Begin Patch\n*** Add File: .env\n+API_KEY=exfiltrated123\n*** End Patch\n';
+    const addRes = runHookCodexOnly(GATE, applyPatchPayload(dataDir, addPatch), dataDir);
+    assert.equal(decision(addRes), 'deny', `apply_patch Add File: .env must deny, got: ${addRes.stdout}`);
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate-codex: apply_patch targeting an ordinary, non-sensitive file passes silently (not a blanket apply_patch deny)', () => {
+  const dataDir = mkTempDataDir('krylo-codex-hook-');
+  // A separate project directory, distinct from dataDir (which doubles as
+  // PLUGIN_DATA/the data root in this test env): a relative patch target
+  // resolved against dataDir itself would spuriously land inside the data
+  // root and trigger data-root-protection, unrelated to what this test
+  // means to exercise.
+  const projectDir = mkTempDataDir('krylo-codex-hook-project-');
+  try {
+    createActiveRunCodexOnly(dataDir, { projectDir });
+    const patch = '*** Begin Patch\n*** Update File: src/index.js\n@@\n-const a = 1;\n+const a = 2;\n*** End Patch\n';
+    const res = runHookCodexOnly(GATE, applyPatchPayload(projectDir, patch), dataDir);
+    assert.equal(res.status, 0);
+    assert.equal(res.stdout, '', 'a benign apply_patch to an ordinary file must pass silently, proving the tool name reached classification and this is not a blanket apply_patch deny');
+  } finally {
+    cleanup(dataDir);
+    cleanup(projectDir);
+  }
+});
+
+test('risk-gate-codex: apply_patch with an unparseable/empty patch (no extractable file target) fails safe -- deny, never a silent pass', () => {
+  const dataDir = mkTempDataDir('krylo-codex-hook-');
+  try {
+    createActiveRunCodexOnly(dataDir);
+    const noHeaders = runHookCodexOnly(GATE, applyPatchPayload(dataDir, '*** Begin Patch\n*** End Patch\n'), dataDir);
+    assert.equal(decision(noHeaders), 'deny', `unparseable patch must fail safe (deny), got: ${noHeaders.stdout}`);
+
+    const missingPatchField = runHookCodexOnly(GATE, {
       hook_event_name: 'PreToolUse',
       tool_name: 'apply_patch',
-      tool_input: { patch: '*** Begin Patch\n*** End Patch\n' },
+      tool_input: {},
       cwd: dataDir,
       session_id: 'codex-hook-session',
       permission_mode: 'default',
-    };
-    const res = runHookCodexOnly(GATE, payload, dataDir);
-    assert.equal(res.status, 0);
-    // A benign apply_patch payload with no sensitive path/require-approval
-    // signal must pass silently, same as a benign Bash command -- proving
-    // the tool name was normalized and reached classification rather than
-    // erroring out or being treated as an unknown/denied surface.
-    assert.equal(res.stdout, '');
+    }, dataDir);
+    assert.equal(decision(missingPatchField), 'deny', `a missing patch field must fail safe (deny), got: ${missingPatchField.stdout}`);
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate-codex: apply_patch touching KRYLO\'s own data root or the plugin installation denies, same protection Write/Edit already get', () => {
+  const dataDir = mkTempDataDir('krylo-codex-hook-');
+  try {
+    createActiveRunCodexOnly(dataDir);
+    // dataDir doubles as PLUGIN_DATA (see codexOnlyEnv in helpers.mjs), so a
+    // patch targeting a path inside it is a data-root-protection case.
+    const dataRootPatch = `*** Begin Patch\n*** Update File: ${dataDir}/current-run.json\n@@\n-x\n+y\n*** End Patch\n`;
+    const dataRootRes = runHookCodexOnly(GATE, applyPatchPayload(dataDir, dataRootPatch), dataDir);
+    assert.equal(decision(dataRootRes), 'deny', `apply_patch touching the data root must deny, got: ${dataRootRes.stdout}`);
+    assert.match(dataRootRes.json.hookSpecificOutput.permissionDecisionReason, /data directory|data root/i);
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate-codex: apply_patch renaming a file INTO a sensitive path via "*** Move to:" also denies', () => {
+  const dataDir = mkTempDataDir('krylo-codex-hook-');
+  try {
+    createActiveRunCodexOnly(dataDir);
+    const movePatch = '*** Begin Patch\n*** Update File: notes.txt\n*** Move to: .env\n@@\n-x\n+y\n*** End Patch\n';
+    const res = runHookCodexOnly(GATE, applyPatchPayload(dataDir, movePatch), dataDir);
+    assert.equal(decision(res), 'deny', `a rename destination landing on a sensitive path must deny, got: ${res.stdout}`);
   } finally {
     cleanup(dataDir);
   }

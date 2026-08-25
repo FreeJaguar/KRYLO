@@ -239,7 +239,7 @@ function touchesClaudeSettings({ toolName, toolInput, cwd }) {
     return expanded.some((e) => pathFragments.some((v) => e.toLowerCase().includes(v)));
   }
 
-  if (name === 'Write' || name === 'Edit' || name === 'NotebookEdit') {
+  if (name === 'Write' || name === 'Edit' || name === 'NotebookEdit' || name === 'apply_patch') {
     const target = typeof input.file_path === 'string'
       ? input.file_path
       : typeof input.notebook_path === 'string'
@@ -378,7 +378,7 @@ function touchesPluginInstallation({ toolName, toolInput, cwd, pluginRoot }) {
   // files via Bash/PowerShell is a disclosed, accepted residual gap for
   // this specific tool surface (see the residual-limitations list in
   // docs/adr/0028-foundation-final-closure.md), not a closed guarantee.
-  if (name !== 'Write' && name !== 'Edit' && name !== 'NotebookEdit') return false;
+  if (name !== 'Write' && name !== 'Edit' && name !== 'NotebookEdit' && name !== 'apply_patch') return false;
   const target = typeof input.file_path === 'string'
     ? input.file_path
     : typeof input.notebook_path === 'string'
@@ -399,6 +399,30 @@ function touchesPluginInstallation({ toolName, toolInput, cwd, pluginRoot }) {
   } catch {
     return false;
   }
+}
+
+// Codex's apply_patch tool carries potentially MULTIPLE file targets inside
+// its own unified-diff-like `patch` text, not a single file_path field the
+// way Write/Edit/NotebookEdit have one -- real apply_patch payloads use
+// `*** Add File: <path>` / `*** Update File: <path>` / `*** Delete File:
+// <path>` / `*** Move to: <path>` (a rename destination) header lines.
+// Extracting every one lets classifyRiskAction() run the SAME hard-deny/
+// sensitive-path protection those tools already get against apply_patch
+// too. A fresh independent review found this was previously entirely
+// missing: apply_patch had no case anywhere in this file, so it silently
+// fell through to the unconditional final `pass` any genuinely unrecognized
+// tool name reaches -- a real, reproduced .env read/write/exfiltration
+// bypass, not a hypothetical gap.
+function extractApplyPatchTargets(patchText) {
+  if (typeof patchText !== 'string') return [];
+  const targets = [];
+  const headerRe = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm;
+  let match;
+  while ((match = headerRe.exec(patchText)) !== null) {
+    const target = match[1].trim();
+    if (target !== '') targets.push(target);
+  }
+  return targets;
 }
 
 function loadPolicy() {
@@ -1324,6 +1348,45 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
           action: 'deny',
           category: 'sensitive-path',
           reason: `${policy.sensitivePaths.reason} This read target is a protected secret path.`,
+        };
+      }
+    }
+    return { action: 'pass', category: 'pass' };
+  }
+
+  if (name === 'apply_patch') {
+    const patchText = typeof input.patch === 'string' ? input.patch : '';
+    const targets = extractApplyPatchTargets(patchText);
+    // A real apply_patch call always specifies at least one target file via
+    // its own required header syntax -- zero extractable targets means the
+    // patch content was not recognized (malformed, unexpected shape, or a
+    // deliberate evasion attempt), which is exactly the "cannot determine
+    // whether this is safe" case this module treats as fail-safe deny
+    // elsewhere (the tri-state glob redesign, docs/adr/0028's Section H),
+    // never a silent pass just because parsing found nothing.
+    if (targets.length === 0) {
+      return {
+        action: 'deny',
+        category: 'apply-patch-unparseable',
+        reason: 'KRYLO could not determine which file(s) this apply_patch call targets, so it cannot verify the action is safe. Denied as a fail-safe.',
+      };
+    }
+    for (const target of targets) {
+      const syntheticInput = { file_path: target };
+      if (touchesDataRoot({ toolName: name, toolInput: syntheticInput, cwd, dataRoot: resolvedDataRoot })) {
+        return { action: 'deny', category: 'data-root-protection', reason: DATA_ROOT_REASON };
+      }
+      if (touchesClaudeSettings({ toolName: name, toolInput: syntheticInput, cwd })) {
+        return { action: 'deny', category: 'security-config-protection', reason: SECURITY_CONFIG_WEAKENING_REASON };
+      }
+      if (touchesPluginInstallation({ toolName: name, toolInput: syntheticInput, cwd, pluginRoot })) {
+        return { action: 'deny', category: 'plugin-installation-protection', reason: PLUGIN_INSTALLATION_REASON };
+      }
+      if (isSensitivePath(policy, stripSurroundingQuotes(target))) {
+        return {
+          action: 'deny',
+          category: 'sensitive-path',
+          reason: `${policy.sensitivePaths.reason} This apply_patch target is a protected secret path.`,
         };
       }
     }

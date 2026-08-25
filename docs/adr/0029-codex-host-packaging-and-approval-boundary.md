@@ -36,6 +36,14 @@ These facts materially constrain how KRYLO's `require-approval` classification c
 - Codex-specific code stays limited to packaging, HostContext extraction, tool/input normalization, lifecycle event translation, permission/rule transport, capability detection, and setup/install integration, per the design doc's own architectural rule (Section 5.2): if a future change requires Codex to reimplement risk classification, approval rules, completion rules, Orbit decisions, evidence semantics, or tool trust policy independently of Shared Core, that is a design failure requiring its own review, not a routine implementation choice.
 - Cross-Harness advisory workers, the weekly Upstream Watch, the monthly Ecosystem Radar, and the 0.2.0 version bump remain out of scope for this ADR and are not authorized by it.
 
+## Independent review finding, fixed before closure
+
+A fresh independent Verifier, dispatched against this ADR's own implementation commit, found the "hard-deny remains hard-deny... identical guarantee to the Claude host" claim above was **false for `apply_patch`** as first shipped: `classifyRiskAction()` (Shared Core, unchanged by this ADR's own diff) had no case for the `apply_patch` tool name at all, so it silently fell through to the function's unconditional final `pass` -- the same fallback used for a genuinely unrecognized tool. Reproduced live: an `apply_patch` call updating or creating `.env` with real-looking secret content both classified as `pass`, with zero protection, on a tool surface `production-policy.json`'s Write/Edit/NotebookEdit equivalent already hard-denies.
+
+Fixed in the same checkpoint, before closure: `classifyRiskAction()` now extracts every target path from `apply_patch`'s own `patch` text (`*** Add File:`/`*** Update File:`/`*** Delete File:`/`*** Move to:` headers -- a single call can touch multiple files) and runs each one through the same data-root, hook-entrypoint, plugin-installation, and sensitive-path checks Write/Edit/NotebookEdit already receive. A patch with zero extractable targets (malformed, unrecognized shape, or a deliberate evasion attempt) fails safe -- deny, consistent with this module's own fail-safe philosophy elsewhere (docs/adr/0028's tri-state glob redesign) -- never a silent pass just because parsing found nothing. Regression-tested (`risk-gate-codex.test.mjs`): sensitive-path, data-root, plugin-installation, rename-into-sensitive-path, unparseable-patch, and benign-file cases, 52/52 passing.
+
+This closes the gap the "identical guarantee to the Claude host" claim above already asserted; no wording change to that claim was needed once it was made true.
+
 ## Supersedes
 
 None. Extends ADR-0023 exactly as that ADR anticipated ("Codex receives its own explicit host invocation in a later ADR"). Does not modify ADR-0021 (Claude-only Skill-scoped Hooks), ADR-0025/ADR-0027 (Claude native-approval design, unchanged), or ADR-0028 (Foundation glob-closure, unrelated).
