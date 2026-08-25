@@ -123,6 +123,31 @@ test('shared risk policy still catches a quoted git-push subcommand (regression 
   }
 });
 
+test('shared risk policy still catches "git.exe push" and a quoted config value containing a space (regression found by fresh Reviewer in the quoted-subcommand fix itself)', () => {
+  // The quoted-subcommand fix above still missed two realistic, everyday
+  // forms: the Windows executable suffix (`git.exe push ...`, since `\bgit\b`
+  // requires a word boundary right after "git" and ".exe" does not provide
+  // one before "push" reaching it), and a quoted option VALUE containing a
+  // space (`git -c user.name="A B" push ...` -- the option-token loop's
+  // value alternation could not match a token that is partly unquoted and
+  // partly quoted, e.g. `user.name="A B"`). Fixed by allowing an optional
+  // `.exe`/`.cmd` suffix on `git`, and by matching an option value as a
+  // sequence of unquoted-or-quoted segments glued together (the same way a
+  // real shell treats `user.name="A B"` as one word after quote-removal),
+  // not a single quoted-or-plain alternative.
+  const dataRoot = tempDataRoot();
+  const mustMatch = [
+    ['git.exe push origin main', 'git-push'],
+    ['git -c user.name="A B" push origin main', 'git-push'],
+    ["git -c user.name='A B' push origin main", 'git-push'],
+  ];
+  for (const [command, expectedClass] of mustMatch) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'require-approval', `expected require-approval for: ${command}`);
+    assert.equal(result.actionClass, expectedClass, `expected ${expectedClass} for: ${command}`);
+  }
+});
+
 test('shared risk policy classifies a git force-push as git-force, not the more general git-push', () => {
   const result = classifyRiskAction({
     toolName: 'Bash',
@@ -311,6 +336,29 @@ test('shared risk policy denies a Bash command that reads a protected secret pat
   assert.equal(result.category, 'sensitive-path');
   // Prompt-injection / leak safety: the reason never echoes the command.
   assert.ok(!result.reason.includes('cat .env'));
+});
+
+test('shared risk policy denies a QUOTED sensitive-path reference (regression found by fresh Reviewer: quotes bypassed secret-path protection entirely)', () => {
+  // The Bash token splitter never stripped surrounding quotes, so
+  // `cat ".env"` or `cat '.env'` (ordinary, everyday shell quoting) produced
+  // the token `".env"` -- which never matched the sensitivePaths patterns'
+  // own path-boundary anchors (a literal `.env` is expected at the start,
+  // not a quote character) -- bypassing secret-path protection entirely.
+  // The same fix also applies to a literally-quoted `file_path`/`path`/
+  // `glob` value on Write/Edit/Read/Glob/Grep.
+  const dataRoot = tempDataRoot();
+  const mustDeny = [
+    ['Bash', { command: 'cat ".env"' }],
+    ['Bash', { command: "cat '.env'" }],
+    ['Bash', { command: 'cat ".ssh/id_rsa"' }],
+    ['Read', { file_path: '".env"' }],
+    ['Write', { file_path: '".env"', content: 'x' }],
+  ];
+  for (const [toolName, toolInput] of mustDeny) {
+    const result = classifyRiskAction({ toolName, toolInput, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for ${toolName}(${JSON.stringify(toolInput)})`);
+    assert.equal(result.category, 'sensitive-path');
+  }
 });
 
 test('shared risk policy denies direct writes into the KRYLO data root', () => {
@@ -521,6 +569,19 @@ test('shared risk policy denies the model writing/editing the KRYLO plugin\'s ow
     assert.equal(result.category, 'plugin-installation-protection');
   }
 
+  // Bash/PowerShell command TEXT is deliberately NOT scanned for a
+  // pluginRoot reference (unlike Write/Edit/NotebookEdit above): a second
+  // independent review round found the first version of this check did
+  // scan Bash/PowerShell text, which also matched `skills/run/SKILL.md`'s
+  // own MANDATORY runtime CLI calls -- literally
+  // `node "${CLAUDE_PLUGIN_ROOT}/scripts/runtime/<script>.mjs"` -- once
+  // that variable is expanded to a literal path, breaking KRYLO's own
+  // operation with no approval path (a real, reproduced Critical
+  // regression). This is confirmed as a deliberate, permanent design
+  // choice, not an oversight: Write/Edit/NotebookEdit above cover the
+  // actual file-mutation threat, and touchesHookEntrypoint() (narrowly
+  // scoped to specific hook-entrypoint filenames, which never collide with
+  // the runtime CLIs) already covers direct Bash/PowerShell execution.
   const bashResult = classifyRiskAction({
     toolName: 'Bash',
     toolInput: { command: `echo x >> ${path.join(fakePluginRoot, 'policies', 'production-policy.json')}` },
@@ -528,7 +589,19 @@ test('shared risk policy denies the model writing/editing the KRYLO plugin\'s ow
     dataRoot,
     pluginRoot: fakePluginRoot,
   });
-  assert.equal(bashResult.action, 'deny', 'expected deny for a Bash command referencing the installed plugin path');
+  assert.notEqual(bashResult.action, 'deny', 'a Bash command merely referencing pluginRoot must NOT be denied by this check -- it would also deny KRYLO\'s own mandatory runtime CLI calls');
+
+  // The realistic mandatory call this fix protects: a real runtime CLI
+  // invocation using the plugin's own root, exactly as SKILL.md issues it,
+  // must never be denied by this check.
+  const legitimateRuntimeCall = classifyRiskAction({
+    toolName: 'Bash',
+    toolInput: { command: `node "${path.join(fakePluginRoot, 'scripts', 'runtime', 'update-state.mjs')}" --session s --record-progress` },
+    cwd: process.cwd(),
+    dataRoot,
+    pluginRoot: fakePluginRoot,
+  });
+  assert.notEqual(legitimateRuntimeCall.action, 'deny', 'KRYLO\'s own mandatory runtime CLI call must never be denied by plugin-installation protection');
 
   // Negative case: editing the SAME filename outside pluginRoot (e.g. KRYLO's
   // own source repository during development) must be unaffected.
@@ -851,6 +924,15 @@ test('shared risk policy: the git/docker/npm-rm exclusion cannot be spoofed by a
     'x=npm rm -rf /var/data',
     'FOO=git rm -rf /var/data',
     'TMP=/opt/npm rm -rf /var/data',
+    // A fresh Reviewer round found the fix above still missed the BARER
+    // form with no preceding word at all: a literal two-line script with
+    // no other separator, "git\nrm -rf /", normalizes (before this
+    // checkpoint's newline-to-separator fix) to the SAME text as the
+    // genuine single command "git rm -rf /" -- the lookbehind could not
+    // tell them apart. Fixed by normalizing a newline to an explicit `;`
+    // separator before collapsing other whitespace.
+    'git\nrm -rf /',
+    'true; git\nrm -rf /',
   ];
   for (const command of mustBeGated) {
     const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });

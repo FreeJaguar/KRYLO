@@ -201,17 +201,25 @@ export const SECURITY_CONFIG_WEAKENING_REASON =
  * Live testing (ADR-0028) confirmed a *pre-existing* allow rule cannot
  * bypass a hook's own `ask` decision -- but nothing previously stopped the
  * model from directly WRITING a new rule, or deleting the hook registration
- * outright, via its own ordinary Write/Edit/Bash/PowerShell tools. Only
- * writes are gated (reading these files is not itself a threat, and the
- * model may legitimately need to read them to understand current config).
+ * outright, via its own ordinary Write/Edit/Bash/PowerShell tools.
  *
- * The Bash/PowerShell arm is text-matching defense-in-depth, the same
- * category of limitation already documented for touchesDataRoot() and
- * touchesHookEntrypoint() above: a sufficiently indirect invocation
- * (`cd .claude && echo x > settings.json`, a shell variable holding the
- * filename, base64/encoded writes) is not caught by design. It raises the
- * bar for an unsophisticated attempt; it is not a guarantee against every
- * possible obfuscation.
+ * The Write/Edit/NotebookEdit arm below gates only a genuine write to the
+ * resolved settings file -- reading it via Read/Glob/Grep is not itself a
+ * threat, and the model may legitimately need to read it to understand
+ * current config, so those tools are deliberately not checked here at all.
+ *
+ * The Bash/PowerShell arm cannot make that same read/write distinction: it
+ * is a plain text-matching check over the whole command string, so a
+ * read-only command that merely mentions the settings path (`cat
+ * .claude/settings.json`) is denied exactly like a write (`echo x >
+ * .claude/settings.json`) would be. This is the same category of limitation
+ * already documented for touchesDataRoot() and touchesHookEntrypoint()
+ * above, just biased toward over-blocking instead of under-blocking: a
+ * sufficiently indirect invocation (`cd .claude && echo x > settings.json`,
+ * a shell variable holding the filename, base64/encoded writes) still is
+ * not caught, while an innocuous read that merely names the file is. It
+ * raises the bar for an unsophisticated attempt; it is neither a guarantee
+ * against every possible obfuscation nor free of false positives.
  */
 const HOST_SETTINGS_FILENAMES = ['settings.json', 'settings.local.json'];
 
@@ -288,11 +296,19 @@ function touchesHookEntrypoint({ toolName, toolInput }) {
  * a model that could edit its own gate's source or policy could disable or
  * weaken enforcement for the rest of the run. Scoped to `pluginRoot` (the
  * actual INSTALLED plugin location a real host adapter resolves from its
- * own host-specific plugin-root signal) rather than matching filenames like risk-gate.mjs
- * anywhere -- KRYLO's own SOURCE repository (where this exact file is
- * developed) is a completely different path from where a host installs the
- * plugin for actual use, so this does not block legitimate KRYLO-on-itself
- * development, only a running instance's actual enforcement surface.
+ * own host-specific plugin-root signal) rather than matching filenames like
+ * risk-gate.mjs anywhere -- a real Claude Code session always sets its own
+ * plugin-root environment variable to the installed plugin's own path, which
+ * is a completely different path from KRYLO's own SOURCE repository
+ * checkout, so under a real host this does not block legitimate
+ * KRYLO-on-itself development. That separation is a property of how the
+ * host resolves `pluginRoot` (see the host adapter's own plugin-root
+ * resolver), not an unconditional guarantee of this function: if that
+ * environment variable is unset (an ad-hoc script invocation rather than a
+ * real Hook process), the host adapter's resolver falls back to a
+ * source-relative path that, when this module runs from within KRYLO's own
+ * repository, resolves to that same repository checkout -- and this check
+ * would then also deny editing `plugins/krylo/**` there.
  */
 function touchesPluginInstallation({ toolName, toolInput, cwd, pluginRoot }) {
   if (typeof pluginRoot !== 'string' || pluginRoot.trim() === '') return false;
@@ -300,14 +316,23 @@ function touchesPluginInstallation({ toolName, toolInput, cwd, pluginRoot }) {
   const name = String(toolName ?? '');
   const rootLower = path.resolve(pluginRoot).toLowerCase();
 
-  if (name === 'Bash' || name === 'PowerShell') {
-    const command = String(input.command ?? '').toLowerCase();
-    if (command === '') return false;
-    if (command.includes(rootLower)) return true;
-    const expanded = homeExpandedVariants(command, os.homedir());
-    return expanded.some((e) => e.toLowerCase().includes(rootLower));
-  }
-
+  // Independent review found a Critical self-inflicted regression: an
+  // earlier version of this function also scanned Bash/PowerShell command
+  // TEXT for any reference to pluginRoot -- but `skills/run/SKILL.md`'s own
+  // mandatory runtime CLI calls are literally
+  // `node "<the host's plugin-root env var>/scripts/runtime/<script>.mjs"`,
+  // so once that variable is expanded to a literal path (guaranteed for
+  // PowerShell, common for Bash), every legitimate init-run/read-state/
+  // update-state call was denied outright -- breaking KRYLO's own
+  // operation with no approval path. Unlike touchesDataRoot() (whose own
+  // comment states legitimate mutations "never embed the data-root path in
+  // the command line"), the opposite is true for pluginRoot by
+  // construction: the model is SUPPOSED to invoke scripts by that exact
+  // path. Deliberately narrowed to Write/Edit/NotebookEdit only -- the
+  // actual file-mutation threat this check exists for -- plus the
+  // pre-existing, narrowly-scoped touchesHookEntrypoint() above (Bash/
+  // PowerShell direct execution of a specific hook-entrypoint filename,
+  // which never collides with the runtime CLIs the model must call).
   if (name !== 'Write' && name !== 'Edit' && name !== 'NotebookEdit') return false;
   const target = typeof input.file_path === 'string'
     ? input.file_path
@@ -329,7 +354,20 @@ function loadPolicy() {
 }
 
 function firstMatchingClass(policy, command) {
-  const normalized = String(command).replace(/\s+/g, ' ');
+  // Independent review found that collapsing a newline to a plain space
+  // (like any other whitespace) erased the distinction between "one
+  // command with internal whitespace" and "two separate commands" --
+  // letting an unrelated preceding line (`git\nrm -rf /`, a bare two-line
+  // script with no other separator at all) spoof the git/docker/npm-rm
+  // exclusion below, since after collapsing it reads identically to the
+  // genuine single command `git rm -rf /`. A newline is a real command
+  // boundary in every shell this classifies (Bash, PowerShell), so it is
+  // now normalized to an explicit separator (`;`) before other whitespace
+  // is collapsed -- restoring the distinction the patterns below rely on,
+  // and incidentally re-activating each pattern's own `[^|;&\n]` exclusion
+  // (previously silently neutered by the plain-space collapse, since a
+  // literal `\n` could never survive to be tested against by that point).
+  const normalized = String(command).replace(/\r?\n/g, ' ; ').replace(/\s+/g, ' ');
   // git-force is a specialization of git-push; test it before git-push so the
   // more specific class wins.
   const order = Object.keys(policy.approvalClasses).sort((a, b) => (a === 'git-force' ? -1 : b === 'git-force' ? 1 : 0));
@@ -378,11 +416,33 @@ function matchesSensitivePath(policy, text) {
  * `cat .env` must be checked token-by-token as well as whole-string (for
  * embedded paths like `cat ./config/.env`).
  */
+/**
+ * Independent security review found the token splitter below never
+ * stripped surrounding quotes, so `cat ".env"` or `cat '.env'` produced the
+ * token `".env"` (quotes included) rather than `.env`, which never matched
+ * the sensitivePaths patterns' own path-boundary anchors (which expect a
+ * literal `.env`, not a quote character, at the start) -- a quoted
+ * filename, valid and completely ordinary shell syntax, bypassed secret-
+ * path protection entirely. Strips one matching pair of quotes (never
+ * partial/mismatched pairs) before matching.
+ */
+function stripSurroundingQuotes(token) {
+  if (token.length >= 2) {
+    const first = token[0];
+    const last = token[token.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return token.slice(1, -1);
+    }
+  }
+  return token;
+}
+
 function commandTouchesSensitivePath(policy, command) {
   if (matchesSensitivePath(policy, command)) return true;
   return String(command)
     .split(/[\s;|&<>()]+/)
     .filter((t) => t !== '')
+    .map(stripSurroundingQuotes)
     .some((token) => matchesSensitivePath(policy, token));
 }
 
@@ -462,7 +522,7 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
       : typeof input.notebook_path === 'string'
         ? input.notebook_path
         : '';
-    if (matchesSensitivePath(policy, target)) {
+    if (matchesSensitivePath(policy, stripSurroundingQuotes(target))) {
       return {
         action: 'deny',
         category: 'sensitive-path',
@@ -498,7 +558,7 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
         ? [input.path, input.pattern]
         : [input.path, input.glob]; // Grep: never input.pattern (a content regex, not a path)
     for (const candidate of candidates) {
-      if (typeof candidate === 'string' && candidate !== '' && matchesSensitivePath(policy, candidate)) {
+      if (typeof candidate === 'string' && candidate !== '' && matchesSensitivePath(policy, stripSurroundingQuotes(candidate))) {
         return {
           action: 'deny',
           category: 'sensitive-path',

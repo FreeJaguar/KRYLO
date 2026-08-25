@@ -11,6 +11,7 @@ import {
   bootstrapClaudeRuntimeEnvironment,
   bootstrapClaudeStorageEnvironment,
   resolveClaudeDataRoot,
+  resolveClaudePluginRoot,
   resolveClaudeSessionId,
 } from './context.mjs';
 
@@ -59,6 +60,14 @@ export function normalizeClaudeHookPayload(payload) {
           hostSessionId: undefined,
           projectRoot: path.resolve(projectRoot),
           dataRoot: resolveClaudeDataRoot(process.env),
+          // Independent review found this degraded path omitted pluginRoot
+          // entirely, so touchesPluginInstallation() (risk-policy.mjs) was
+          // silently inert -- no signal, not even a safe default -- for any
+          // session whose session id could not be resolved but whose
+          // active run was still found via the ADR-0020 fallback (the
+          // exact scenario this degraded path exists for). Same bug class
+          // already fixed once for `permission_mode` in risk-gate.mjs.
+          pluginRoot: resolveClaudePluginRoot(process.env),
         },
         payload,
       };
