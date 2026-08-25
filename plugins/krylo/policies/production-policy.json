@@ -163,8 +163,7 @@
       ".config/gh/hosts.yml",
       ".openwiki/.env"
     ],
-    "globProtectedExtensions": ["pem", "pfx", "p12", "key", "keystore", "jks"],
-    "globTemplateExceptionSuffixes": ["example", "sample", "template", "dist", "defaults"]
+    "globProtectedExtensions": ["pem", "pfx", "p12", "key", "keystore", "jks"]
   },
   "failMode": "fail-safe",
   "inactiveRunBehavior": "allow",

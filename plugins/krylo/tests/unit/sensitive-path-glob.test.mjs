@@ -200,11 +200,85 @@ test('shared risk policy: an ordinary benign wildcard command that cannot reach 
     'cat [a-z]og.txt',
     'ls -la *.js',
     'cat report.pem.backup.txt', // does not END in a protected extension
+    // A fresh independent Reviewer found a Critical over-block regression
+    // in the SAME extension-suffix search that closes the real bypass: it
+    // only guarded the FULL pattern for "no specific-name signal", not
+    // each individual suffix slice tried inside the search loop, so an
+    // ordinary "prefix*" command (real discriminating content overall,
+    // like "build") still matched via its degenerate trailing-star-only
+    // slice, denying routine wildcard commands with no approval path.
+    'ls build*',
+    'cat README*',
+    'ls -la ~/proj*',
+    'tar -czf out.tgz dist*',
   ];
   for (const command of benign) {
     const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
     assert.equal(result.action, 'pass', `expected pass for benign command: ${command}`);
   }
+
+  // Contrast: a prefix-then-star that DOES end up reaching a real
+  // protected extension must still deny -- the fix narrows the false
+  // positive without losing the true positive.
+  const stillDenied = classifyRiskAction({ toolName: 'Bash', toolInput: { command: 'cat build*.pem' }, cwd: process.cwd(), dataRoot });
+  assert.equal(stillDenied.action, 'deny');
+  assert.equal(stillDenied.category, 'sensitive-path');
+});
+
+test('shared risk policy: a bare wildcard filename under an already-confirmed protected directory is denied, without widening the context-free bare-wildcard exemption', () => {
+  // A fresh independent Reviewer found a real bypass: ".aws/*", ".kube/*",
+  // and ".config/gh/*" all passed, because a bare-wildcard FINAL segment
+  // was rejected by the same guard that (correctly) rejects a bare
+  // wildcard with no directory context at all. Once every LEADING segment
+  // has matched the exact protected directory name with real
+  // discriminating content, a bare-wildcard final segment legitimately
+  // does reach the specific protected filename too -- the directory
+  // context already confirms it, the way it would in a real shell.
+  const dataRoot = tempDataRoot();
+  const mustDeny = [
+    'cat .aws/*',
+    'cat .kube/*',
+    'cat .config/gh/*',
+  ];
+  for (const command of mustDeny) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for: ${command}`);
+    assert.equal(result.category, 'sensitive-path');
+  }
+
+  // Must NOT widen the context-free bare-wildcard exemption: no known
+  // protected directory in play, still passes.
+  const stillPasses = [
+    'cat *',
+    'ls -la **',
+  ];
+  for (const command of stillPasses) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'pass', `expected pass (no directory context): ${command}`);
+  }
+  const globStillPasses = classifyRiskAction({ toolName: 'Glob', toolInput: { pattern: '**/*.js' }, cwd: process.cwd(), dataRoot });
+  assert.equal(globStillPasses.action, 'pass');
+});
+
+test('shared risk policy: a brace-only expansion (no other glob metacharacter) still reaches a real dotenv file', () => {
+  // A fresh independent Reviewer found expandSimpleBraceGroup() was
+  // unreachable for a pattern containing ONLY a brace group and no other
+  // glob metacharacter (the top-level gate checked for */?/[ but not {),
+  // even though a real shell expands `.{env,x}` unconditionally.
+  const dataRoot = tempDataRoot();
+  const mustDeny = [
+    'cat .{env,x}',
+    'cat .en{v,w}',
+  ];
+  for (const command of mustDeny) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for: ${command}`);
+    assert.equal(result.category, 'sensitive-path');
+  }
+
+  // A brace group with no dangerous branch must still pass.
+  const benign = classifyRiskAction({ toolName: 'Bash', toolInput: { command: 'cat notes.{txt,md}' }, cwd: process.cwd(), dataRoot });
+  assert.equal(benign.action, 'pass');
 });
 
 test('shared risk policy: a bare wildcard with no discriminating literal content ("*", "**") does not match every protected name -- the fix must not turn every wildcard command into a blanket deny', () => {
@@ -295,6 +369,45 @@ test('shared risk policy glob-aware check is bounded: a very long adversarial wi
   assert.ok(elapsed5 < 1000, `worst-case matching classification took ${elapsed5}ms, expected under 1000ms`);
   assert.equal(result5.action, 'deny');
   assert.equal(result5.category, 'sensitive-path');
+});
+
+test('shared risk policy: an oversized bracket-class body on a Read/Write/Glob/Grep path field (no MAX_BASH_COMMAND_LENGTH-style guard on those tools) does not cause a multi-second stall (regression found by a fresh independent Security Reviewer: measured ~19 seconds before this fix)', () => {
+  // Bash/PowerShell commands are bounded by MAX_BASH_COMMAND_LENGTH, but
+  // Read/Write/Edit/NotebookEdit/Glob/Grep path-shaped fields had no
+  // equivalent cap. A bracket class body packed with hundreds of
+  // thousands of individually-bounded range specs (each already capped at
+  // 1024 codepoints) had no limit on how MANY such ranges one class could
+  // contain, driving total work into the hundreds of millions of Set
+  // insertions -- independently measured at ~19 seconds for a real,
+  // reachable ~990,000-character candidate (well within the 1MB Hook-
+  // stdin size limit). Fixed with two independent bounds: a total
+  // distinct-character budget per bracket class (MAX_CLASS_SET_SIZE), and
+  // an overall candidate-length cap for the glob-aware check specifically
+  // (MAX_GLOB_CANDIDATE_LENGTH) -- the pre-existing exact-match check is
+  // unaffected by either and still runs regardless of length.
+  const dataRoot = tempDataRoot();
+
+  const hugeCandidate = `.[${'\u0000-\uffff'.repeat(330000)}]nv`;
+  const start1 = Date.now();
+  const result1 = classifyRiskAction({ toolName: 'Read', toolInput: { file_path: hugeCandidate }, cwd: process.cwd(), dataRoot });
+  const elapsed1 = Date.now() - start1;
+  assert.ok(elapsed1 < 1000, `oversized bracket-class candidate took ${elapsed1}ms, expected under 1000ms (was ~19000ms before this fix)`);
+
+  // A dense-but-not-oversized bracket body (under the overall length cap,
+  // so it must be the per-class set-size budget doing the bounding) must
+  // also resolve quickly and still correctly deny.
+  const denseButUnderCap = `.[${'\u0000-\uffff'.repeat(500)}]nv`;
+  const start2 = Date.now();
+  const result2 = classifyRiskAction({ toolName: 'Glob', toolInput: { pattern: denseButUnderCap }, cwd: process.cwd(), dataRoot });
+  const elapsed2 = Date.now() - start2;
+  assert.ok(elapsed2 < 1000, `dense bracket-class candidate took ${elapsed2}ms, expected under 1000ms`);
+  assert.equal(result2.action, 'deny');
+  assert.equal(result2.category, 'sensitive-path');
+
+  // A legitimate, ordinary bracket class must still work correctly.
+  const legitimate = classifyRiskAction({ toolName: 'Read', toolInput: { file_path: '.[e]nv' }, cwd: process.cwd(), dataRoot });
+  assert.equal(legitimate.action, 'deny');
+  assert.equal(legitimate.category, 'sensitive-path');
 });
 
 test('shared risk policy: path traversal combined with glob syntax still resolves to the correct decision (denied when it reaches a real secret, allowed for an exact template)', () => {

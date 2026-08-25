@@ -560,6 +560,19 @@ function matchesSensitivePath(policy, text) {
 // -----------------------------------------------------------------------
 
 const MAX_SUFFIX_SEARCH_ATOMS = 64;
+// Independent review found a genuine ~19-second stall: Read/Write/Edit/
+// NotebookEdit/Glob/Grep path-shaped fields have no equivalent of
+// MAX_BASH_COMMAND_LENGTH, so an attacker-controlled ~990,000-character
+// candidate (well within the 1MB Hook-stdin cap) containing hundreds of
+// thousands of bracket-class range specs, each individually bounded but
+// with no limit on how many a body can contain, drove total work into the
+// hundreds of millions of Set insertions. MAX_CLASS_SET_SIZE bounds a
+// single bracket class's total distinct-character budget regardless of
+// body length or repeated ranges; MAX_GLOB_CANDIDATE_LENGTH bounds the
+// glob-aware check as a whole for any one candidate string (the exact-
+// match check, unaffected by this cost, still runs regardless of length).
+const MAX_CLASS_SET_SIZE = 512;
+const MAX_GLOB_CANDIDATE_LENGTH = 4096;
 const MAX_BRACE_BRANCHES = 32;
 const MAX_BRACE_BRANCH_LENGTH = 128;
 
@@ -594,13 +607,28 @@ function parseGlobAtoms(pattern) {
       }
       const set = new Set();
       let j = 0;
-      while (j < body.length) {
+      // Independent review found the per-range 1024-codepoint cap below
+      // does not bound the TOTAL cost of a bracket body containing MANY
+      // range specs back to back (e.g. a minimal-to-maximal codepoint
+      // range repeated 330,000 times inside one class) -- each range is
+      // individually capped, but
+      // there is no limit on how many capped ranges the body can contain,
+      // measured taking ~19 SECONDS for a ~990,000-character candidate on
+      // a Read/Write/Glob/Grep path field (none of which has the Bash/
+      // PowerShell MAX_BASH_COMMAND_LENGTH guard). A bracket class needing
+      // more than MAX_CLASS_SET_SIZE distinct characters has no realistic
+      // legitimate use in this policy's protected-name matching, so once
+      // the set reaches that size, the rest of the body is simply not
+      // examined -- bounding total cost regardless of body length.
+      while (j < body.length && set.size < MAX_CLASS_SET_SIZE) {
         // A bounded range (a-z): expand up to 1024 code points per range
         // so a pathological range spec cannot itself become a cost sink.
         if (body[j + 1] === '-' && j + 2 < body.length) {
           const lo = Math.min(body.charCodeAt(j), body.charCodeAt(j + 2));
           const hi = Math.max(body.charCodeAt(j), body.charCodeAt(j + 2));
-          for (let c = lo; c <= hi && c - lo < 1024; c += 1) set.add(String.fromCharCode(c).toLowerCase());
+          for (let c = lo; c <= hi && c - lo < 1024 && set.size < MAX_CLASS_SET_SIZE; c += 1) {
+            set.add(String.fromCharCode(c).toLowerCase());
+          }
           j += 3;
         } else {
           set.add(body[j].toLowerCase());
@@ -672,9 +700,24 @@ function hasDiscriminatingContent(atoms) {
   return atoms.some((atom) => atom.type !== 'star');
 }
 
-function segmentGlobMatchesLiteral(candidateSegment, literalSegment) {
+// `allowBareWildcard`: independent review found that a bare `*`/`**` as
+// the FINAL segment of a multi-segment protected path (e.g. `.aws/*`
+// reaching the real `.aws/credentials`) was wrongly rejected by the same
+// guard that (correctly) rejects a bare wildcard with no directory
+// context at all. The two cases are NOT the same risk: here, every
+// LEADING segment has already matched the exact protected directory name
+// with real discriminating content (enforced by the caller, which never
+// sets this flag for a non-final or single-segment check) -- the
+// candidate is confirmed to be reaching a SPECIFIC known-sensitive
+// directory, so "any file in there" legitimately includes the protected
+// filename, the same way a real shell's glob expansion would. This never
+// widens the single-segment case (`.env`, `id_rsa`, ...) or a non-final
+// directory segment, where a bare wildcard still correctly does not
+// count -- only the trailing filename position of an already-confirmed
+// protected directory.
+function segmentGlobMatchesLiteral(candidateSegment, literalSegment, allowBareWildcard = false) {
   const atoms = parseGlobAtoms(candidateSegment);
-  if (!hasDiscriminatingContent(atoms)) return false;
+  if (!hasDiscriminatingContent(atoms)) return allowBareWildcard && atoms.length > 0;
   return globAtomsMatchLiteral(atoms, literalSegment.toLowerCase());
 }
 
@@ -683,13 +726,27 @@ function segmentGlobMatchesLiteral(candidateSegment, literalSegment) {
 // atoms -- independent of the candidate's overall length, since a real
 // extension glob never needs more trailing wiggle room than that, and
 // consecutive `*` already collapsed to one atom during parsing.
+//
+// Independent review found the discriminating-content guard was only
+// checked against the FULL atom list, not each SUFFIX slice actually
+// tested in the loop below -- so `build*`, `ls -la ~/proj*`, or any other
+// ordinary prefix-then-star command (which plainly HAS discriminating
+// content overall) still matched via the degenerate trailing-star-only
+// slice (`atoms.slice(k)` for k = the position of the final `*`, which by
+// itself carries none), hard-denying routine wildcard commands with no
+// approval path -- the exact blanket-wildcard outcome this checkpoint's
+// task explicitly prohibits, just displaced from a bare `*` to `x*`. The
+// guard must apply to the SLICE being tested, not merely the pattern as a
+// whole, since a slice with real content overall can still contain a
+// suffix that is purely wildcard.
 function segmentGlobMatchesExtensionSuffix(candidateSegment, suffixLiteral) {
   const atoms = parseGlobAtoms(candidateSegment);
-  if (!hasDiscriminatingContent(atoms)) return false;
   const literal = suffixLiteral.toLowerCase();
   const searchFrom = Math.max(0, atoms.length - MAX_SUFFIX_SEARCH_ATOMS);
   for (let k = atoms.length; k >= searchFrom; k -= 1) {
-    if (globAtomsMatchLiteral(atoms.slice(k), literal)) return true;
+    const slice = atoms.slice(k);
+    if (!hasDiscriminatingContent(slice)) continue;
+    if (globAtomsMatchLiteral(slice, literal)) return true;
   }
   return false;
 }
@@ -697,10 +754,14 @@ function segmentGlobMatchesExtensionSuffix(candidateSegment, suffixLiteral) {
 // A candidate glob's "*" segment-wildcard sentinel (only used for
 // directory-scoped protections like ".ssh/*", meaning "any single
 // filename directly under this protected directory") vs an ordinary
-// protected segment matched via the atom matcher above.
-function segmentMatchesProtectedSegment(candidateSegment, protectedSegment) {
+// protected segment matched via the atom matcher above. `allowBareWildcard`
+// is threaded through only for the FINAL segment of an already multi-
+// segment-matched protected path (see segmentGlobMatchesLiteral's own
+// comment) -- never for a non-final directory segment or a single-segment
+// protected name, where a bare wildcard still correctly does not count.
+function segmentMatchesProtectedSegment(candidateSegment, protectedSegment, allowBareWildcard = false) {
   if (protectedSegment === '*') return true;
-  return segmentGlobMatchesLiteral(candidateSegment, protectedSegment);
+  return segmentGlobMatchesLiteral(candidateSegment, protectedSegment, allowBareWildcard);
 }
 
 // Bounded, simple Bash brace-expansion support: a single, non-nested
@@ -741,7 +802,20 @@ function expandSimpleBraceGroup(text) {
  */
 function globCouldTargetSensitivePath(policy, text) {
   if (typeof text !== 'string' || text === '') return false;
-  if (!/[*?[]/.test(text)) return false; // no glob metacharacter: nothing for this check to do
+  // Independent review found brace expansion below was unreachable for a
+  // BRACE-ONLY pattern (`.{env,x}` contains no `*`/`?`/`[` at all), even
+  // though a real shell expands it unconditionally -- `{` is now part of
+  // this initial gate too.
+  if (!/[*?[{]/.test(text)) return false; // no glob/brace metacharacter: nothing for this check to do
+  // Bash/PowerShell already bound the WHOLE command via
+  // MAX_BASH_COMMAND_LENGTH, but Read/Write/Edit/NotebookEdit/Glob/Grep
+  // path-shaped fields have no equivalent cap -- independent review
+  // measured a ~19-second stall from a single, otherwise-ordinary-looking
+  // candidate this large. A legitimate glob for a protected name never
+  // needs anywhere near this many characters; skip the glob-aware check
+  // (the exact-match check above is unaffected and still runs) rather
+  // than doing unbounded work on an implausibly long candidate.
+  if (text.length > MAX_GLOB_CANDIDATE_LENGTH) return false;
   const candidates = expandSimpleBraceGroup(text);
   const globProtectedPaths = Array.isArray(policy.sensitivePaths.globProtectedPaths)
     ? policy.sensitivePaths.globProtectedPaths
@@ -756,7 +830,19 @@ function globCouldTargetSensitivePath(policy, text) {
       const protectedSegments = protectedPath.split('/');
       if (segments.length < protectedSegments.length) continue;
       const tail = segments.slice(segments.length - protectedSegments.length);
-      if (protectedSegments.every((protectedSegment, idx) => segmentMatchesProtectedSegment(tail[idx], protectedSegment))) {
+      // Independent review found a real bypass: `.aws/*`, `.kube/*`, and
+      // `.config/gh/*` all passed, since a bare wildcard filename segment
+      // was rejected by the SAME guard that (correctly) rejects a bare
+      // wildcard with no directory context at all. Once every LEADING
+      // segment has matched the exact protected directory name with real
+      // content, a bare-wildcard FINAL segment legitimately does reach
+      // the specific protected filename too (the directory context
+      // already confirms it, unlike a context-free `cat *`).
+      const matchesAll = protectedSegments.every((protectedSegment, idx) => {
+        const isFinalOfMultiSegmentPath = protectedSegments.length > 1 && idx === protectedSegments.length - 1;
+        return segmentMatchesProtectedSegment(tail[idx], protectedSegment, isFinalOfMultiSegmentPath);
+      });
+      if (matchesAll) {
         return true;
       }
     }
