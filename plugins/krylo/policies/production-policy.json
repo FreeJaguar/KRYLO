@@ -140,6 +140,7 @@
       "(^|[\\\\/])\\.openwiki[\\\\/]\\.env"
     ],
     "$globCommentary": "Structured (non-regex) targets consumed by globCouldTargetSensitivePath() in risk-policy.mjs, added by the Foundation glob-closure checkpoint. `patterns` above stays the exact/literal matcher (unchanged, preserved); these lists let the SAME canonical protected names be checked against a filesystem glob expression (Bash/PowerShell */?/[...] , Glob/Grep path-shaped fields) without duplicating a regex per wildcard example. Each entry in globProtectedPaths is a `/`-separated path suffix matched against the CANDIDATE's trailing path segments, one segment at a time; a literal `*` segment (only ever the last one, e.g. '.ssh/*') means 'any single segment directly under this protected directory'. globProtectedExtensions are checked as a suffix ('.'+ext) against the candidate's final segment only.",
+    "$globSecretsJsonNote": "secrets.json/secret.json/.yaml/.yml/.toml are deliberately NOT in globProtectedPaths below (only in the exact-match `patterns` above, unchanged): their shared extension (.json/.yaml/.yml/.toml) is an extremely common, otherwise-unprotected extension used by countless ordinary, unrelated files. A fresh independent Security Reviewer confirmed that including them here denied '*.json'/'**/*.yml'/'*.toml' outright -- i.e. essentially all JSON/YAML/TOML wildcard operations repo-wide (linting, formatting, searching) -- to close a narrow, not-explicitly-required stem-obfuscation case (e.g. 'secret?.json'). Unlike '.env'/'id_rsa'/the pem-family extensions (each either the WHOLE narrow target or an extension with no broad legitimate unrelated use), a wildcard reaching 'secrets.json' specifically cannot be distinguished from one reaching 'package.json' without also matching the word 'secret' itself as literal text -- and denying the entire extension family to catch that one narrow case is a materially worse trade than leaving it as a disclosed residual (see docs/adr/0028-foundation-final-closure.md).",
     "globProtectedPaths": [
       ".env",
       ".npmrc",
@@ -149,14 +150,6 @@
       "id_ed25519",
       "id_ecdsa",
       "id_dsa",
-      "secrets.json",
-      "secrets.yaml",
-      "secrets.yml",
-      "secrets.toml",
-      "secret.json",
-      "secret.yaml",
-      "secret.yml",
-      "secret.toml",
       ".ssh/*",
       ".aws/credentials",
       ".kube/config",

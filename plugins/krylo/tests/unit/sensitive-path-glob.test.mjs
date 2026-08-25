@@ -537,6 +537,49 @@ test('shared risk policy: a bare wildcard segment in the MIDDLE (or first) posit
   }
 });
 
+test('shared risk policy: a wildcard reaching only the SHARED, otherwise-unprotected extension of secrets.json/secret.yaml/etc (not the "secret(s)" stem itself) is not denied, while the exact literal file still is (regression found by a fresh independent Security Reviewer)', () => {
+  // secrets.json/secret.json/.yaml/.yml/.toml share their entire
+  // identifying extension (.json/.yaml/.yml/.toml) with an enormous,
+  // ordinary population of unrelated files. Including them in
+  // globProtectedPaths let a leading star absorb the ENTIRE "secret(s)"
+  // stem while only the shared, generic extension matched literally --
+  // "*.json" (and "**/*.yml", "*.toml", ...) denied outright, breaking
+  // essentially all JSON/YAML/TOML wildcard operations repo-wide (lint,
+  // format, search) with no approval path, to guard against a narrow,
+  // not-explicitly-required stem-obfuscation case. Fixed by removing
+  // these four names from glob-aware matching (they remain in the
+  // original EXACT-match `patterns`, unaffected, so the literal file
+  // itself is still denied); see production-policy.json's own
+  // `$globSecretsJsonNote` for the full reasoning.
+  const dataRoot = tempDataRoot();
+  const mustPass = [
+    'ls *.json',
+    'eslint **/*.yml',
+    'cat *.toml',
+    'prettier --write **/*.yaml',
+  ];
+  for (const command of mustPass) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'pass', `expected pass (generic extension wildcard, not targeting "secret(s)" specifically): ${command}`);
+  }
+  const globPass = classifyRiskAction({ toolName: 'Glob', toolInput: { pattern: '**/*.json' }, cwd: process.cwd(), dataRoot });
+  assert.equal(globPass.action, 'pass');
+
+  // The exact literal file must still be denied (unaffected: this is the
+  // pre-existing exact-match regex, not the glob-aware addition).
+  const mustDeny = [
+    ['Read', { file_path: 'secrets.json' }],
+    ['Read', { file_path: 'config/secrets.yaml' }],
+    ['Bash', { command: 'cat secret.toml' }],
+    ['Bash', { command: 'cat secrets.yml' }],
+  ];
+  for (const [toolName, toolInput] of mustDeny) {
+    const result = classifyRiskAction({ toolName, toolInput, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for exact ${toolName}(${JSON.stringify(toolInput)})`);
+    assert.equal(result.category, 'sensitive-path');
+  }
+});
+
 test('shared risk policy: path traversal combined with glob syntax still resolves to the correct decision (denied when it reaches a real secret, allowed for an exact template)', () => {
   const dataRoot = tempDataRoot();
   const traversalToRealSecret = classifyRiskAction({ toolName: 'Bash', toolInput: { command: 'cat .env.example/../.e*' }, cwd: process.cwd(), dataRoot });
