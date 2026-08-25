@@ -29,29 +29,16 @@
 // command classifications) always denies regardless of permission_mode,
 // identical guarantee to the Claude host.
 //
-// Session-id bootstrapping (independent review finding, security-critical,
-// disclosed platform limitation -- see docs/adr/0029's own review-finding
-// addenda for the full history of two prior attempted fixes and why each
-// was found unsafe): current official Codex documentation does not expose
-// the real session_id to the MODEL anywhere -- only Hook payloads carry it
-// (confirmed open upstream gap, openai/codex#8923). A first fix attempt had
-// the model invent a placeholder session id (broke enforcement silently: a
-// invented id never matches the real one every later hook resolves). A
-// second attempt had THIS hook rewrite the placeholder to the real id via
-// PreToolUse's `permissionDecision:"allow"` + `updatedInput` -- confirmed,
-// by direct byte inspection of the SAME installed binary's own error-string
-// table, to ALSO be rejected outright on this build
-// ("PreToolUse hook returned unsupported permissionDecision:allow" /
-// "...unsupported updatedInput", immediately adjacent to the already-
-// confirmed `ask` rejection). Silently falling back to letting the
-// placeholder-bearing command run unmodified would reproduce the original
-// silent-total-loss-of-enforcement bug. Instead: THIS hook denies a
-// placeholder-bearing command outright, loudly, with an explanation --
-// converting an undetectable silent failure into an immediate, visible one.
-// This means automatic KRYLO run bootstrapping on Codex does not currently
-// work end to end on the verified-installed build; this is a disclosed,
-// confirmed capability gap (docs/codex-capability-matrix.md), not silently
-// papered over.
+// Session identity: this hook plays NO role in establishing which run is
+// active -- it resolves the ALREADY-bootstrapped run using the real
+// session_id from ITS OWN hook payload (`resolveActiveRun`), exactly the
+// same way scripts/security/risk-gate.mjs (Claude) always has. The run
+// itself is created exactly once, by scripts/security/user-prompt-submit-codex.mjs
+// (the Codex UserPromptSubmit hook), using the authoritative host-supplied
+// session_id from THAT event -- never a model-invented or model-rewritten
+// value. See docs/adr/0029-codex-host-packaging-and-approval-boundary.md's
+// review-finding history for the two earlier, unsafe model-side bootstrap
+// attempts this design replaces.
 
 import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
 import {
@@ -62,15 +49,6 @@ import {
 } from '../host/codex/hook-transport.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { classifyRiskAction } from './risk-policy.mjs';
-
-export const SESSION_PLACEHOLDER = 'KRYLO_CODEX_SESSION';
-
-const SESSION_PLACEHOLDER_REASON =
-  'KRYLO cannot currently resolve your real Codex session identity automatically on this Codex build: current Codex hook output '
-  + 'validation rejects every mechanism KRYLO could otherwise use to bridge the session id from a Hook payload back to a command '
-  + 'you run (confirmed by direct inspection of the installed binary). This is a disclosed platform limitation, not a bug you can '
-  + 'work around -- do not invent, guess, or hardcode a session id yourself. Report this as a blocker and stop the run rather than '
-  + 'attempting to proceed without correct session binding.';
 
 // shell/exec_command -> Bash; apply_patch keeps its own distinct identity
 // (never relabeled as Claude's Edit/Write, per the task's explicit
@@ -98,19 +76,6 @@ async function main() {
   if (!normalized.ok) failSafeOnUnreadablePayload();
   const payload = normalized.payload;
 
-  const toolName = normalizeCodexToolName(String(payload.tool_name ?? ''));
-  const toolInput = payload.tool_input && typeof payload.tool_input === 'object' ? payload.tool_input : {};
-  const cwd = typeof payload.cwd === 'string' ? payload.cwd : '';
-
-  // Checked before the active-run gate, deliberately: the bootstrapping
-  // init-run.mjs call is EXACTLY the case where no run is active yet, and
-  // this deny must still fire for it -- a silent allow here would recreate
-  // the original bug (a run created under a placeholder that no later hook
-  // can ever match).
-  if (toolName === 'Bash' && typeof toolInput.command === 'string' && toolInput.command.includes(SESSION_PLACEHOLDER)) {
-    emitCodexPreToolDeny(SESSION_PLACEHOLDER_REASON);
-  }
-
   const run = resolveActiveRun({
     projectRoot: normalized.identity.projectRoot,
     host: normalized.identity.host,
@@ -121,6 +86,10 @@ async function main() {
   const state = run.state;
 
   try {
+    const toolName = normalizeCodexToolName(String(payload.tool_name ?? ''));
+    const toolInput = payload.tool_input && typeof payload.tool_input === 'object' ? payload.tool_input : {};
+    const cwd = typeof payload.cwd === 'string' ? payload.cwd : '';
+
     const decision = classifyRiskAction({
       toolName,
       toolInput,

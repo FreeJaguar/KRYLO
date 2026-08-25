@@ -168,6 +168,24 @@ test('codex-hooks.json matches the real installed binary\'s confirmed PreToolUse
   }
 });
 
+// docs/adr/0029's UserPromptSubmit-based host-authoritative session bootstrap
+// (Section 12 correction): user-prompt-submit-codex.mjs is the ONLY place a
+// KRYLO Codex run is created, and it must actually be registered against the
+// confirmed-real UserPromptSubmit event, with no matcher (the official
+// rust-v0.120.0 source calls dispatcher::select_handlers with
+// matcher_input=None for this event -- no tool_name concept applies here).
+test('codex-hooks.json registers the UserPromptSubmit host-authoritative session bootstrap with no matcher', () => {
+  const codexHooksPath = path.join(PLUGIN_ROOT, 'hooks', 'codex-hooks.json');
+  const codexHooks = JSON.parse(fs.readFileSync(codexHooksPath, 'utf8'));
+  assert.ok(Array.isArray(codexHooks.UserPromptSubmit) && codexHooks.UserPromptSubmit.length > 0, 'UserPromptSubmit must be registered');
+  const entry = codexHooks.UserPromptSubmit[0];
+  assert.ok(!('matcher' in entry), 'UserPromptSubmit has no tool_name to match against and must not declare a matcher');
+  const commands = entry.hooks.map((h) => h.command).join(' ');
+  assert.match(commands, /user-prompt-submit-codex\.mjs/, 'UserPromptSubmit must invoke the real host-authoritative bootstrap script');
+  const scriptPath = path.join(PLUGIN_ROOT, 'scripts', 'security', 'user-prompt-submit-codex.mjs');
+  assert.ok(fs.existsSync(scriptPath), 'scripts/security/user-prompt-submit-codex.mjs referenced by codex-hooks.json must exist');
+});
+
 test('/krylo:run remains user-invocable and not model-invocable', () => {
   const block = frontmatterBlock(path.join(PLUGIN_ROOT, 'skills', 'run', 'SKILL.md'));
   assert.match(block, /^user-invocable:\s*true\s*$/m, 'the run skill must remain user-invocable');
