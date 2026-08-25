@@ -38,7 +38,7 @@ Shared Core owns:
 Host adapters own invocation syntax, host-specific Hook input/output translation (the Hook transport), host session metadata, host agent configuration, model mapping, packaging, and setup mechanics.
 
 - **Claude Host** (implemented and released): the public Claude Code plugin described below.
-- **Codex Host** (planned): no native Codex installation, invocation, or runtime support exists until a separate, approved Codex host plan is implemented and verified. This Foundation only generalizes Shared Core so that work does not require Core changes.
+- **Codex Host** (implemented, not yet released): a real Codex CLI plugin package (`plugins/krylo/.codex-plugin/plugin.json`), an explicit-only `krylo-run` Skill, and a Codex-specific Hook transport (`scripts/host/codex/`) built on the same Shared Core, per `docs/adr/0029-codex-host-packaging-and-approval-boundary.md` and `docs/process/CODEX_HOST_IMPLEMENTATION_PLAN.md`. Because current official Codex `PreToolUse` output does not support the native `ask` decision Claude uses (ADR-0027), a `require-approval` classification denies deterministically on Codex instead of prompting -- see `docs/codex-capability-matrix.md` for the full, host-by-host capability comparison and every documented fallback. Full VS Code (project-scoped hook) enforcement setup remains a disclosed follow-up, not yet implemented.
 
 ### Plugin interface
 

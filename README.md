@@ -92,6 +92,7 @@ The Risk Gate is **defense in depth, not an operating-system sandbox**: it is a 
 
 ## Roadmap (v0.2, indicative)
 
+- A Codex CLI plugin host (`$krylo-run`) is implemented on the same Shared Core (`docs/adr/0029-codex-host-packaging-and-approval-boundary.md`, `docs/codex-capability-matrix.md`) but not yet published or released.
 - Plugin `settings.json` with `subagentStatusLine` once the minimum supported CLI reaches 2.1.207+.
 - User-configurable risk-approval TTL.
 - Broaden MCP operation classification beyond name/pattern matching where the platform exposes richer tool metadata.

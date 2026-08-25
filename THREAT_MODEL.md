@@ -93,13 +93,15 @@ Controls:
 ### Host adapter boundary drift
 
 Threat:
-A host adapter (Claude Host today; a future Codex Host) translates platform-specific session, Hook, or model metadata into KRYLO's host-neutral contracts in a way that weakens or bypasses risk, approval, or completion policy, or a future cross-provider capability is treated as active before it is implemented and verified.
+A host adapter (Claude Host, Codex Host) translates platform-specific session, Hook, or model metadata into KRYLO's host-neutral contracts in a way that weakens or bypasses risk, approval, or completion policy, or a future cross-provider capability is treated as active before it is implemented and verified.
 
 Controls:
 
 - Shared Core owns risk classification, approvals, and completion policy; a host adapter may only translate metadata into host-neutral contracts, never redefine that policy.
-- Only the Claude Host is implemented and released. No native Codex host, and no cross-harness or cross-provider data flow, exists until a separate, approved host plan is implemented and verified.
-- Shared Core modules do not read host-specific environment variables or Hook payload fields directly (`docs/adr/0023-multi-host-product-and-shared-core.md`).
+- The Claude Host is implemented and released. The Codex Host is implemented (`docs/adr/0029-codex-host-packaging-and-approval-boundary.md`) but not yet published; no cross-harness or cross-provider data flow exists until a separate, approved plan is implemented and verified.
+- Shared Core modules do not read host-specific environment variables or Hook payload fields directly (`docs/adr/0023-multi-host-product-and-shared-core.md`); an automated `hostIsolation` check (`npm run validate:runtime`) scans `scripts/lib/` for Claude-specific identifiers on every validation run.
+- The Codex Host's `require-approval` boundary is a documented capability-driven asymmetry, not a silent weakening: because current Codex `PreToolUse` output does not support a native `ask` decision, and the rules/`PreToolUse`/`approval_policy` execution order is not documented upstream, KRYLO denies every `require-approval` action deterministically on Codex rather than trust an unverified mechanism (`docs/codex-capability-matrix.md`).
+- A new host adapter's PreToolUse deny path must never emit a decision shape the target host has confirmed unsupported (Codex: `permissionDecision:"ask"`, legacy `decision:"approve"`, `continue:false`, `stopReason`, `suppressOutput`) -- `risk-gate-codex.mjs`/`permission-request-codex.mjs` have no code path capable of producing any of them.
 
 ### Premature or false completion
 

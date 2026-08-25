@@ -6,7 +6,9 @@ KRYLO uses plugin hooks for deterministic policy and metadata capture. Hooks mus
 
 The policy each hook enforces (question gate, risk gate, completion gate, redaction, counters) is host-neutral Shared Core logic. Only the Hook transport, the mechanism that delivers host events into that policy and returns a host-specific response, is host-specific.
 
-On the Claude Host, the implemented Hook transport is Skill-scoped, per `docs/adr/0021-hook-scoping-to-run-skill.md`, and uses current Claude Code Hook input/output schemas. A Codex Hook transport is not implemented in this Foundation; any future Codex transport must call the same Shared Core policy without redefining it.
+On the Claude Host, the implemented Hook transport is Skill-scoped, per `docs/adr/0021-hook-scoping-to-run-skill.md`, and uses current Claude Code Hook input/output schemas.
+
+On the Codex Host, the implemented Hook transport (`scripts/host/codex/`, `docs/adr/0029-codex-host-packaging-and-approval-boundary.md`) is plugin-wide, not Skill-scoped -- Codex has no equivalent of Claude's Skill-scoped Hook lifecycle -- registered at an explicit `hooks/codex-hooks.json` path the Codex plugin manifest references directly (never the shared `hooks/hooks.json` Claude's own, deliberately empty, plugin-wide hooks file occupies). Every Codex hook entrypoint implements the inactive-run no-op path first: resolve identity, check for an active KRYLO run, and exit 0 with no output or state mutation if none, so an ordinary Codex session that never invokes `$krylo-run` still launches these processes but they do nothing. `PreToolUse` and `PermissionRequest` call the same host-neutral `risk-policy.mjs` classifier the Claude gate uses, translated into Codex's own confirmed-supported output shapes (never the unsupported `permissionDecision:"ask"`); `PostToolUse` mirrors the Claude telemetry hook exactly. See `docs/codex-capability-matrix.md` for which Codex lifecycle events are implemented versus deferred.
 
 ## Planned events
 

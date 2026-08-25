@@ -38,6 +38,13 @@ docs/adr/0023-multi-host-product-and-shared-core.md   # accepted: two first-clas
 docs/adr/0024-host-controlled-human-approval-boundary.md  # superseded by 0025; kept as history
 docs/adr/0025-native-permission-approval.md           # accepted: native Claude permission ask replaces KRYLO-APPROVE
 docs/adr/0026-powershell-risk-parity.md               # accepted: PowerShell risk classification parity with Bash
+docs/adr/0027-restore-native-approval-for-all-require-approval-classes.md  # accepted
+docs/adr/0028-foundation-final-closure.md             # accepted: Foundation live-testing + glob-closure checkpoint
+docs/adr/0029-codex-host-packaging-and-approval-boundary.md  # accepted: Codex CLI plugin host, fail-closed approval boundary
+docs/process/CODEX_HOST_IMPLEMENTATION_PLAN.md        # implemented: reconciles the Codex maintenance design
+                                                       # against re-verified current official Codex docs
+docs/codex-capability-matrix.md                       # implemented: per-capability locally-passed /
+                                                       # statically-inspected / deferred evidence record
 ```
 
 ## Plugin root
@@ -45,6 +52,22 @@ docs/adr/0026-powershell-risk-parity.md               # accepted: PowerShell ris
 ```text
 plugins/krylo/.claude-plugin/plugin.json    # implemented, with userConfig
 plugins/krylo/hooks/hooks.json              # implemented (6 events)
+plugins/krylo/.codex-plugin/plugin.json     # implemented (Codex CLI plugin manifest, docs/adr/0029)
+plugins/krylo/hooks/codex-hooks.json        # implemented (PreToolUse/PermissionRequest/PostToolUse;
+                                             # a separate file from hooks.json above by design -- see
+                                             # its own $comment for why)
+plugins/krylo/skills/krylo-run/             # implemented (Codex explicit-only Skill: SKILL.md,
+                                             # agents/openai.yaml)
+plugins/krylo/scripts/host/codex/           # implemented (context.mjs, hook-transport.mjs -- the
+                                             # Codex-only environment/payload normalization layer)
+plugins/krylo/scripts/lib/host-dispatch.mjs # implemented (host adapter registry; routes Shared Core
+                                             # runtime CLIs to the correct host adapter)
+plugins/krylo/scripts/security/risk-gate-codex.mjs          # implemented (Codex PreToolUse gate)
+plugins/krylo/scripts/security/permission-request-codex.mjs # implemented (Codex PermissionRequest hook)
+plugins/krylo/scripts/runtime/posttool-telemetry-codex.mjs  # implemented (Codex PostToolUse telemetry)
+plugins/krylo/scripts/setup/install-codex.mjs                # implemented (standalone-Skill install +
+                                                               # execpolicy rules generation, dry-run/
+                                                               # backup/uninstall)
 plugins/krylo/settings.json                 # NOT shipped in 0.1.0 (ADR-0016)
 plugins/krylo/monitors/monitors.json        # NOT shipped (optional; not needed, docs/07)
 plugins/krylo/README.md                     # implemented

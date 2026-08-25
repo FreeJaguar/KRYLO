@@ -26,7 +26,13 @@ Optional local convenience alias:
 /krylo <task>
 ```
 
-Codex receives its own explicit host invocation defined by a later approved plan; it is not implemented in the multi-host Foundation.
+On the Codex host, the explicit invocation is:
+
+```text
+$krylo-run <task>
+```
+
+Implemented per `docs/adr/0029-codex-host-packaging-and-approval-boundary.md` and `docs/process/CODEX_HOST_IMPLEMENTATION_PLAN.md`: a real Codex CLI plugin, explicit-only (implicit invocation disabled), reusing the same Shared Core as the Claude host. `docs/codex-capability-matrix.md` records exactly which capabilities are confirmed live versus statically inspected versus deferred, including the narrower `require-approval` guarantee on Codex (deterministic deny rather than a native approval prompt) and the still-pending full VS Code project-hook enforcement setup.
 
 ## Product goals
 
@@ -72,7 +78,13 @@ KRYLO v0.1.0 will not:
 - Generalize Shared Core so it does not depend on Claude-only session, option, model, or Hook-output field names.
 - Give every run a KRYLO-owned `runId` independent of any host session identifier.
 - Preserve all v0.1.0 Claude behavior, security controls, and success criteria unchanged while the Foundation lands.
-- Prepare, but do not ship, the Codex host: native Codex installation and runtime support remain out of scope until a separate, approved Codex host plan is implemented and verified.
+
+## Goals for 0.2 (Codex host)
+
+- Ship a real Codex CLI plugin (`.codex-plugin/plugin.json`, explicit-only `krylo-run` Skill, Codex Hook transport) reusing Shared Core, per `docs/adr/0029-codex-host-packaging-and-approval-boundary.md`.
+- Preserve every Claude host guarantee unchanged (regression-proven, `docs/codex-capability-matrix.md` and the full test suite).
+- Document every Codex capability gap with an explicit safe fallback rather than overclaim parity with Claude -- most notably, `require-approval` denies deterministically on Codex instead of using a native approval prompt, since current Codex `PreToolUse` output does not support one.
+- Cross-Harness advisory workers, scheduled upstream/ecosystem maintenance workflows, full VS Code project-hook enforcement setup, and the `0.2.0` version bump itself remain explicitly out of scope for this checkpoint and are tracked as separate, later work.
 
 ## User-visible terminal states
 
