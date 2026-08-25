@@ -247,43 +247,55 @@ test('risk-gate-codex: exec_command tool name normalizes to Bash, same as shell'
   }
 });
 
-// Security-critical, independent review finding: current Codex docs do not
-// expose the real session_id to the MODEL (only to Hooks -- confirmed open
-// upstream gap, openai/codex#8923). The Skill instructs the model to use a
-// fixed literal placeholder for --session; this hook -- the only place that
-// ever sees both the real session_id and the command about to run --
-// substitutes it before the command executes, via Codex's own
-// confirmed-supported "allow" + updatedInput rewrite. Without this, a
-// model-invented session id would never match the real one every
-// subsequent hook resolves, silently disabling enforcement for the whole
-// run (reproduced by an independent Reviewer against the unfixed code).
-test('risk-gate-codex: the KRYLO_CODEX_SESSION placeholder in the bootstrapping init-run.mjs call is rewritten to the REAL session id, even with no active run yet', () => {
+// Security-critical, independent review finding, TWICE-corrected: current
+// Codex docs do not expose the real session_id to the MODEL (only to Hooks
+// -- confirmed open upstream gap, openai/codex#8923). A first fix attempt
+// (model invents a placeholder id) silently disabled enforcement for the
+// whole run, since no later hook could ever match it. A second fix attempt
+// (this hook rewrites the placeholder via PreToolUse "allow"+updatedInput)
+// was independently found to ALSO be rejected outright on the installed
+// build (direct byte inspection of the same binary's own hook-output
+// validation error table: "PreToolUse hook returned unsupported
+// permissionDecision:allow" / "...unsupported updatedInput", immediately
+// adjacent to the already-confirmed `ask` rejection). The current design
+// denies a placeholder-bearing command outright instead -- converting an
+// undetectable silent failure into an immediate, visible one -- and is a
+// disclosed, confirmed capability gap (docs/codex-capability-matrix.md),
+// not a working end-to-end bootstrap mechanism.
+test('risk-gate-codex: a command containing the KRYLO_CODEX_SESSION placeholder is denied outright, even with no active run yet (the bootstrapping init-run.mjs case)', () => {
   const dataDir = mkTempDataDir('krylo-codex-hook-');
   try {
     // Deliberately NO createActiveRunCodexOnly() call: this is exactly the
-    // bootstrapping case, before any KRYLO run exists.
-    const realSessionId = 'real-codex-session-abc123';
-    const command = `node "\${PLUGIN_ROOT}/scripts/runtime/init-run.mjs" --goal "test" --session "KRYLO_CODEX_SESSION" --lane PATCH --risk low`;
+    // bootstrapping case, before any KRYLO run exists -- the deny must
+    // still fire here, or a run could be created bound to the literal
+    // placeholder text, reproducing the original silent-failure bug.
+    const command = 'node "${PLUGIN_ROOT}/scripts/runtime/init-run.mjs" --goal "test" --session "KRYLO_CODEX_SESSION" --lane PATCH --risk low';
     const payload = {
       hook_event_name: 'PreToolUse',
       tool_name: 'Bash',
       tool_input: { command },
       cwd: dataDir,
-      session_id: realSessionId,
+      session_id: 'real-codex-session-abc123',
       permission_mode: 'default',
     };
     const res = runHookCodexOnly(GATE, payload, dataDir);
     assert.equal(res.status, 0);
-    assert.equal(decision(res), 'allow', `expected an allow+rewrite decision, got: ${res.stdout}`);
-    const rewrittenCommand = res.json.hookSpecificOutput.updatedInput.command;
-    assert.ok(rewrittenCommand.includes(`--session "${realSessionId}"`), `rewritten command must contain the real session id, got: ${rewrittenCommand}`);
-    assert.ok(!rewrittenCommand.includes('KRYLO_CODEX_SESSION'), 'the placeholder must not remain in the rewritten command');
+    assert.equal(decision(res), 'deny', `expected a deny explaining the session-binding limitation, got: ${res.stdout}`);
+    assert.match(
+      res.json.hookSpecificOutput.permissionDecisionReason,
+      /session identity|session binding/i,
+      'the deny reason must explain the disclosed platform limitation, not just say "denied"',
+    );
+    // Confirmed-unsupported on the installed build: this decision must
+    // never carry allow/updatedInput.
+    assert.notEqual(decision(res), 'allow');
+    assert.equal(res.json.hookSpecificOutput.updatedInput, undefined);
   } finally {
     cleanup(dataDir);
   }
 });
 
-test('risk-gate-codex: the session placeholder rewrite also applies once a run is active (update-state.mjs/read-state.mjs calls)', () => {
+test('risk-gate-codex: the placeholder deny also applies once a run is active (update-state.mjs/read-state.mjs calls)', () => {
   const dataDir = mkTempDataDir('krylo-codex-hook-');
   try {
     createActiveRunCodexOnly(dataDir);
@@ -297,42 +309,34 @@ test('risk-gate-codex: the session placeholder rewrite also applies once a run i
       permission_mode: 'default',
     };
     const res = runHookCodexOnly(GATE, payload, dataDir);
-    assert.equal(decision(res), 'allow');
-    assert.ok(res.json.hookSpecificOutput.updatedInput.command.includes('--session "codex-hook-session"'));
+    assert.equal(decision(res), 'deny');
   } finally {
     cleanup(dataDir);
   }
 });
 
-test('risk-gate-codex: a placeholder-bearing command that would otherwise deny is NOT allowed through via the rewrite (rewrite never bypasses a deny)', () => {
+test('risk-gate-codex: apply_patch and other non-Bash tools carrying the placeholder text are unaffected (the placeholder deny is Bash-command-specific)', () => {
   const dataDir = mkTempDataDir('krylo-codex-hook-');
+  const projectDir = mkTempDataDir('krylo-codex-hook-project-');
   try {
-    createActiveRunCodexOnly(dataDir);
-    // A dangerous command that happens to also contain the literal
-    // placeholder text -- must still deny, never be rewritten-and-allowed.
-    const command = 'cat .env; echo "KRYLO_CODEX_SESSION"';
-    const payload = {
-      hook_event_name: 'PreToolUse',
-      tool_name: 'Bash',
-      tool_input: { command },
-      cwd: dataDir,
-      session_id: 'codex-hook-session',
-      permission_mode: 'default',
-    };
-    const res = runHookCodexOnly(GATE, payload, dataDir);
-    assert.equal(decision(res), 'deny', `a sensitive-path command must still deny even if it contains the session placeholder text, got: ${res.stdout}`);
+    createActiveRunCodexOnly(dataDir, { projectDir });
+    const patch = '*** Begin Patch\n*** Update File: notes.txt\n@@\n-KRYLO_CODEX_SESSION\n+x\n*** End Patch\n';
+    const res = runHookCodexOnly(GATE, applyPatchPayload(projectDir, patch), dataDir);
+    assert.equal(res.status, 0);
+    assert.equal(res.stdout, '', 'placeholder text inside an apply_patch payload must not trigger the Bash-specific session deny');
   } finally {
     cleanup(dataDir);
+    cleanup(projectDir);
   }
 });
 
-test('risk-gate-codex: a command with no placeholder is never rewritten (no spurious "allow" for an ordinary passing command)', () => {
+test('risk-gate-codex: a command with no placeholder is unaffected (no spurious session-binding deny for an ordinary passing command)', () => {
   const dataDir = mkTempDataDir('krylo-codex-hook-');
   try {
     createActiveRunCodexOnly(dataDir);
     const res = runHookCodexOnly(GATE, bashPayload(dataDir, 'ls -la'), dataDir);
     assert.equal(res.status, 0);
-    assert.equal(res.stdout, '', 'an ordinary command with no placeholder must pass silently, not go through the allow+rewrite path');
+    assert.equal(res.stdout, '', 'an ordinary command with no placeholder must pass silently');
   } finally {
     cleanup(dataDir);
   }

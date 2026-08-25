@@ -76,8 +76,17 @@ export function codexCwdFallbackIdentity() {
 
 /**
  * Emit a PreToolUse deny decision and exit 0. The ONLY PreToolUse decision
- * shape this module can produce besides silent allow -- confirmed-supported
- * per current official Codex hook docs.
+ * shape this module produces -- confirmed-supported by direct inspection of
+ * the installed codex-cli 0.120.0 binary's own hook-output validation error
+ * table. That same table also confirmed `permissionDecision: "allow"` (with
+ * or without `updatedInput`) is REJECTED on this build, alongside `ask` --
+ * an earlier version of this module briefly had an
+ * `emitCodexPreToolAllowWithRewrite` function for a session-id rewrite
+ * mechanism; it was removed once independent review found that shape does
+ * not actually work on the verified-installed build (see
+ * docs/adr/0029-codex-host-packaging-and-approval-boundary.md's own
+ * review-finding history). Do not reintroduce an "allow"-shaped emitter
+ * without first verifying, against a real build, that it is accepted.
  */
 export function emitCodexPreToolDeny(reason) {
   process.stdout.write(JSON.stringify({
@@ -85,25 +94,6 @@ export function emitCodexPreToolDeny(reason) {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
       permissionDecisionReason: reason,
-    },
-  }));
-  process.exit(0);
-}
-
-/**
- * Emit a PreToolUse allow decision with a rewritten command -- confirmed-
- * supported per current official Codex hook docs (an "allow" decision may
- * carry `updatedInput`). Used ONLY for the narrow, fixed KRYLO_CODEX_SESSION
- * placeholder substitution (see risk-gate-codex.mjs) -- there is no general
- * command-rewriting capability here, and this must never be used to alter
- * a command's security-relevant content.
- */
-export function emitCodexPreToolAllowWithRewrite(updatedInput) {
-  process.stdout.write(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'allow',
-      updatedInput,
     },
   }));
   process.exit(0);
