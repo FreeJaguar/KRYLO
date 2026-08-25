@@ -820,3 +820,64 @@ test('shared risk policy: generic-extension basename closure -- globs that speci
     assert.equal(result.category, 'sensitive-path');
   }
 });
+
+// -----------------------------------------------------------------------
+// FINAL bounded closure: the brace scanner stopped at the FIRST brace
+// pair in a candidate the moment that pair turned out to be genuinely
+// inert (`{foo}`, no comma/range), on the false assumption that "the
+// first pair is inert" means "nothing later in this token can expand."
+// A real shell evaluates every brace pair in a word independently:
+// `{foo}/.{env,x}` expands to `{foo}/.env` even though `{foo}` itself
+// never expands. Fixed by scanning left to right and skipping each
+// genuinely inert pair rather than giving up on the whole candidate.
+test('shared risk policy: an earlier genuinely-inert brace pair does not stop the scanner from finding a LATER real, expandable (or indeterminate) brace group in the same candidate', () => {
+  const dataRoot = tempDataRoot();
+  const mustDeny = [
+    // Case 1: a single inert group before the real dotenv-yielding group.
+    'cat {foo}/.{env,x}',
+    // Case 2: multiple inert groups before the real expansion.
+    'cat {foo}/{bar}/.{env,x}',
+    // Case 3: an inert group before an unsupported real RANGE -- must
+    // deny through INDETERMINATE, not fall through to inert/pass.
+    'cat {foo}/.{a..z}nv',
+  ];
+  for (const command of mustDeny) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny: ${command}`);
+    assert.equal(result.category, 'sensitive-path');
+  }
+
+  // Benign equivalents: an inert brace pair with no relevant group
+  // anywhere else in the candidate must still classify as pass.
+  const mustPass = [
+    'cat {foo}/notes.{txt,md}',
+    'cat {foo}/notes.txt',
+  ];
+  for (const command of mustPass) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'pass', `expected pass (no relevant brace group reachable): ${command}`);
+  }
+});
+
+test('real isolated shell fixture: Bash genuinely expands "{foo}/.{env,x}" to include a real "{foo}/.env" path, confirming an earlier inert brace pair does not stop a later real expansion in a real shell', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-brace-scan-fixture-'));
+  try {
+    const literalFooDir = path.join(dir, '{foo}');
+    fs.mkdirSync(literalFooDir);
+    // Never a real secret or real user directory: a throwaway temp dir
+    // with a placeholder value, deleted at the end of this test.
+    fs.writeFileSync(path.join(literalFooDir, '.env'), 'FAKE_TEST_TOKEN=not-a-real-secret\n');
+    let expanded;
+    try {
+      expanded = execFileSync('bash', ['-c', 'cd "$1" && echo {foo}/.{env,x}', 'bash-fixture', dir], { encoding: 'utf8' }).trim();
+    } catch {
+      // A real Bash is not available on this machine/CI image -- skip
+      // rather than fail the suite on an unrelated environment gap.
+      return;
+    }
+    const targets = expanded.split(' ');
+    assert.ok(targets.includes('{foo}/.env'), `Bash must have expanded "{foo}/.{env,x}" to include "{foo}/.env"; got: ${expanded}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -880,28 +880,55 @@ function atomsMatchGenericExtensionBasename(atoms, basenameLiteral, extensionSuf
 // in any supported shell either (no closing `}` at all, or a body with
 // neither a comma nor a range operator) -- there, "no expansion occurs"
 // is a fact about real shell behavior, not an analysis shortcut.
+//
+// A further review found a second, independent fail-open gap: scanning
+// stopped entirely the moment the FIRST `{...}` pair in the text turned
+// out to be genuinely inert (`{foo}`, no comma/range), on the mistaken
+// assumption that "the first pair is inert" implies "nothing later in
+// this token can expand" -- false in real Bash, which evaluates every
+// brace pair in a word independently (`{foo}/.{env,x}` expands to
+// `{foo}/.env` even though `{foo}` itself never expands). Fixed by
+// scanning left to right and SKIPPING each genuinely inert pair rather
+// than concluding the whole candidate is inert: `inert` is now returned
+// only once the scan reaches the end of the text with no relevant
+// (expandable or indeterminate) brace pair found anywhere. This scan is
+// linear in the text's own length (each `indexOf` call starts exactly
+// where the previous one left off, never re-scanning already-passed
+// text), and that length is already bounded by the caller's own
+// upstream command/field-length limits, so no separate bound is needed
+// here.
 function expandFirstBraceGroup(text) {
-  const open = text.indexOf('{');
-  if (open === -1) return { status: 'inert' };
-  const close = text.indexOf('}', open + 1);
-  if (close === -1) return { status: 'inert' }; // unterminated: not valid brace syntax in a real shell either
-  const body = text.slice(open + 1, close);
-  if (body.includes('{') || body.includes('}')) {
-    return { status: 'indeterminate' }; // nested braces ARE valid, expandable bash syntax we do not implement
+  let searchFrom = 0;
+  for (;;) {
+    const open = text.indexOf('{', searchFrom);
+    if (open === -1) return { status: 'inert' }; // no brace pair anywhere left to scan
+    const close = text.indexOf('}', open + 1);
+    if (close === -1) return { status: 'inert' }; // unterminated: not valid brace syntax in a real shell either
+    const body = text.slice(open + 1, close);
+    if (body.includes('{') || body.includes('}')) {
+      return { status: 'indeterminate' }; // nested braces ARE valid, expandable bash syntax we do not implement
+    }
+    // A brace RANGE ({a..z}, {0..9}, {1..10..2}) has no comma at all but
+    // is valid, common, expandable bash syntax -- flagged indeterminate
+    // rather than falling through to "no comma -> inert" below.
+    if (/^[^,]*\.\.[^,]*$/.test(body)) {
+      return { status: 'indeterminate' };
+    }
+    const branches = body.split(',');
+    if (branches.length < 2) {
+      // Genuinely inert -- but only THIS pair. A later brace pair in the
+      // same text is evaluated by a real shell independently of this
+      // one, so keep scanning rather than concluding nothing else here
+      // can expand.
+      searchFrom = close + 1;
+      continue;
+    }
+    if (branches.length > MAX_BRACE_BRANCHES) return { status: 'indeterminate' };
+    if (branches.some((b) => b.length > MAX_BRACE_BRANCH_LENGTH)) return { status: 'indeterminate' };
+    const prefix = text.slice(0, open);
+    const suffix = text.slice(close + 1);
+    return { status: 'expanded', candidates: branches.map((b) => `${prefix}${b}${suffix}`) };
   }
-  // A brace RANGE ({a..z}, {0..9}, {1..10..2}) has no comma at all but is
-  // valid, common, expandable bash syntax -- flagged indeterminate rather
-  // than falling through to "no comma -> inert" below.
-  if (/^[^,]*\.\.[^,]*$/.test(body)) {
-    return { status: 'indeterminate' };
-  }
-  const branches = body.split(',');
-  if (branches.length < 2) return { status: 'inert' }; // neither a comma-list nor a range: genuinely not brace syntax
-  if (branches.length > MAX_BRACE_BRANCHES) return { status: 'indeterminate' };
-  if (branches.some((b) => b.length > MAX_BRACE_BRANCH_LENGTH)) return { status: 'indeterminate' };
-  const prefix = text.slice(0, open);
-  const suffix = text.slice(close + 1);
-  return { status: 'expanded', candidates: branches.map((b) => `${prefix}${b}${suffix}`) };
 }
 
 // Iterates expandFirstBraceGroup() to a fixed point so MULTIPLE groups in
