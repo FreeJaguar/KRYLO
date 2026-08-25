@@ -222,12 +222,29 @@ async function main() {
   const invocationId = `chi-${crypto.randomBytes(6).toString('hex')}`;
   const invocationDir = crossHarnessInvocationDir(runId, invocationId);
   ensureDir(invocationDir);
-  const outputSchemaPath = path.join(invocationDir, 'result-schema.json');
-  fs.writeFileSync(outputSchemaPath, JSON.stringify(CROSS_HARNESS_RESULT_JSON_SCHEMA), 'utf8');
 
-  const systemPrompt = buildWorkerSystemPrompt(request.role);
-  const stdinPayload = buildWorkerStdinPayload({ role: request.role, packet: packetResult.packet });
+  // L4 (Reviewer): everything from here to the first finish()/return call
+  // below can in principle throw before finish() itself takes over cleanup
+  // duty (e.g. a disk-full writeFileSync) -- without this try/catch, that
+  // exception would propagate to main().catch() below, which reports
+  // SPAWN_FAILED but has no access to invocationDir and so would leave the
+  // disposable directory behind. Catch here, clean up, then rethrow so the
+  // existing outer catch still reports the failure the same way.
+  try {
+    const outputSchemaPath = path.join(invocationDir, 'result-schema.json');
+    fs.writeFileSync(outputSchemaPath, JSON.stringify(CROSS_HARNESS_RESULT_JSON_SCHEMA), 'utf8');
 
+    const systemPrompt = buildWorkerSystemPrompt(request.role);
+    const stdinPayload = buildWorkerStdinPayload({ role: request.role, packet: packetResult.packet });
+
+    await runWorkerAndFinish({ request, invocationDir, invocationId, runId, codexCliPath, claudeCliPath, outputSchemaPath, systemPrompt, stdinPayload, packetResult, args });
+  } catch (err) {
+    cleanupDir(invocationDir);
+    throw err;
+  }
+}
+
+async function runWorkerAndFinish({ request, invocationDir, invocationId, runId, codexCliPath, claudeCliPath, outputSchemaPath, systemPrompt, stdinPayload, packetResult, args }) {
   // NOTE: process.exit() terminates synchronously and does NOT run a
   // pending try/finally -- every exit point below explicitly calls
   // cleanupDir(invocationDir) itself via finish() rather than relying on a
