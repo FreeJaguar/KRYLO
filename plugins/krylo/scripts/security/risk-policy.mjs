@@ -75,6 +75,19 @@ const HOOK_ENTRYPOINT_FILENAMES = [
   'fingerprint.mjs',
   'agent-events.mjs',
   'stop-gate.mjs',
+  // Codex hook entrypoints: distinct filenames from their Claude
+  // counterparts (never a bare substring of the Claude names above, e.g.
+  // "risk-gate-codex.mjs" does not contain "risk-gate.mjs"), so each one
+  // needs its own explicit entry or it is silently uncovered. A fresh
+  // independent Security Reviewer confirmed this gap by direct invocation:
+  // a model could run user-prompt-submit-codex.mjs itself with fabricated
+  // stdin to forge a fresh run bootstrap -- including resurrecting a run
+  // past a RISK_APPROVAL_REQUIRED/SAFE_BLOCKED halt that existed
+  // specifically to force human review, with no real Codex event involved.
+  'user-prompt-submit-codex.mjs',
+  'risk-gate-codex.mjs',
+  'permission-request-codex.mjs',
+  'posttool-telemetry-codex.mjs',
 ];
 
 /**

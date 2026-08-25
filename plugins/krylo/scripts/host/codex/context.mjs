@@ -26,13 +26,29 @@ import { createHostIdentity } from '../../lib/host-context.mjs';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT_FROM_SOURCE = path.resolve(HERE, '..', '..', '..');
 
-// Unlike Claude (which sets a real CLAUDE_SESSION_ID environment variable
-// as a documented legacy fallback), current official Codex docs do not
-// document any standalone environment variable carrying the session id --
-// only the hook payload's own session_id field. No environment fallback is
-// invented here.
-export function resolveCodexSessionId({ explicitSessionId, hookPayload } = {}) {
-  for (const value of [explicitSessionId, hookPayload?.session_id]) {
+// A KRYLO Codex run is only ever CREATED by the UserPromptSubmit hook
+// (scripts/security/user-prompt-submit-codex.mjs), bound to payload.session_id
+// from that hook's own event -- never to anything read here. This function
+// exists for the LATER step: once a run already exists, resolving which
+// existing run a bare CLI call (read-state.mjs/update-state.mjs, invoked
+// directly by the model's own shell after the hook already bootstrapped a
+// run) should read or update, when the caller supplies no explicit
+// --session. env.CODEX_THREAD_ID is the platform-injected shell-execution
+// environment variable confirmed by codex-rs/core/src/exec_env.rs to carry
+// the same underlying ThreadId as session_id -- used here purely as a
+// lookup convenience, mirroring exactly how resolveClaudeSessionId already
+// falls back to env.CLAUDE_SESSION_ID for the identical purpose. Without
+// this, every session-less CLI call fell back to readActiveRunPointer's
+// ADR-0020 "most recently updated pointer" heuristic, which a fresh
+// independent Reviewer found lets one Codex session's CLI calls silently
+// mutate a DIFFERENT concurrent Codex session's run in the same project --
+// exactly the cross-session collision this checkpoint's own isolation
+// requirement (Section 6E) forbids. This is still never used to CREATE or
+// bind a run's identity (that stays exclusively the hook's job), so it
+// carries no more trust than the identical, already-accepted Claude
+// pattern.
+export function resolveCodexSessionId({ explicitSessionId, hookPayload, env = process.env } = {}) {
+  for (const value of [explicitSessionId, hookPayload?.session_id, env.CODEX_THREAD_ID]) {
     if (typeof value === 'string' && value.trim() !== '') return value.trim();
   }
   return null;
@@ -61,7 +77,7 @@ export function resolveCodexPluginRoot(env = process.env) {
 }
 
 export function createCodexHostIdentity({ explicitSessionId, hookPayload, projectRoot = process.cwd(), env = process.env } = {}) {
-  const hostSessionId = resolveCodexSessionId({ explicitSessionId, hookPayload });
+  const hostSessionId = resolveCodexSessionId({ explicitSessionId, hookPayload, env });
   if (!hostSessionId) throw new Error('Codex host session id is unavailable');
   return createHostIdentity({
     host: 'codex',

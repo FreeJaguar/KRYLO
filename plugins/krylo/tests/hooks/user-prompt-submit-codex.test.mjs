@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { SCRIPTS_ROOT, mkTempDataDir, cleanup, runHookCodexOnly } from './helpers.mjs';
+import { SCRIPTS_ROOT, mkTempDataDir, cleanup, runHookCodexOnly, runCliCodexOnly } from './helpers.mjs';
 import { computeProjectRootHash } from '../../scripts/lib/state.mjs';
 
 const HOOK = 'security/user-prompt-submit-codex.mjs';
@@ -210,8 +210,12 @@ test('user-prompt-submit-codex: a save/lock failure leaves no active run and emi
     const blockedDataDir = path.join(dataDir, 'blocked');
     fs.writeFileSync(blockedDataDir, 'not a directory', 'utf8');
     const res = run(payload({ prompt: '$krylo-run task', cwd: projectDir }), blockedDataDir);
+    assert.equal(res.status, 0, 'a persistence failure must still exit 0, never crash the hook');
     assert.equal(res.stdout, '', 'a persistence failure must never emit a success additionalContext');
-    // No pointer/state must exist anywhere reachable.
+    // blockedDataDir is itself a file, not a directory, so no runs/ or
+    // active-runs/ tree could have been created under it at all.
+    assert.ok(!fs.existsSync(path.join(blockedDataDir, 'runs')), 'no state must be persisted anywhere reachable');
+    assert.ok(!fs.existsSync(path.join(blockedDataDir, 'active-runs')), 'no active-run pointer must be persisted anywhere reachable');
   } finally {
     cleanup(dataDir);
     cleanup(projectDir);
@@ -326,6 +330,54 @@ test('user-prompt-submit-codex: $krylo-run with no task text still bootstraps, w
     assert.ok(runIdMatch, `expected a run to be created, got: ${res.stdout}`);
     const state = JSON.parse(fs.readFileSync(path.join(dataDir, 'runs', runIdMatch[0], 'state.json'), 'utf8'));
     assert.match(state.goal.normalized, /ask the user/i);
+  } finally {
+    cleanup(dataDir);
+    cleanup(projectDir);
+  }
+});
+
+// L. Cross-session CLI isolation (regression found by two independent fresh
+// Reviewers): after the hook bootstraps a run, the Skill instructs the model
+// to call read-state.mjs/update-state.mjs with NO --session flag at all
+// (exactly like Claude's own Skill already does). Unlike Claude, whose CLI
+// falls back to a real CLAUDE_SESSION_ID environment variable, Codex had NO
+// env fallback at all -- so a session-less call fell all the way through to
+// readActiveRunPointer's "most recently updated pointer in this project"
+// heuristic, letting session A's own CLI call silently mutate session B's
+// run whenever B was bootstrapped more recently. Fixed by giving
+// resolveCodexSessionId() a CODEX_THREAD_ID environment fallback, mirroring
+// resolveClaudeSessionId()'s existing CLAUDE_SESSION_ID fallback exactly --
+// CODEX_THREAD_ID is the platform-injected shell-execution env var
+// (confirmed via codex-rs/core/src/exec_env.rs to carry the same underlying
+// ThreadId as session_id), used only to look up an EXISTING run, never to
+// create or bind one (that stays exclusively this hook's job).
+test('user-prompt-submit-codex: a session-less CLI call (as the Skill instructs) resolves via CODEX_THREAD_ID and never mutates a different concurrent session\'s run', () => {
+  const dataDir = mkTempDataDir('krylo-ups-');
+  const projectDir = mkTempDataDir('krylo-ups-project-');
+  try {
+    const resA = run(payload({ prompt: '$krylo-run task A', sessionId: 'sess-A', cwd: projectDir }), dataDir);
+    const runIdA = /run-[0-9a-f]+/.exec(additionalContext(resA))[0];
+
+    // B bootstraps SECOND, so it is the most-recently-updated pointer --
+    // exactly the condition the reproduced bug depended on.
+    const resB = run(payload({ prompt: '$krylo-run task B', sessionId: 'sess-B', cwd: projectDir }), dataDir);
+    const runIdB = /run-[0-9a-f]+/.exec(additionalContext(resB))[0];
+    assert.notEqual(runIdA, runIdB);
+
+    // Session A's own model shell now calls update-state.mjs with NO
+    // --session flag (per the Skill), but with CODEX_THREAD_ID correctly
+    // set to A's own session id, exactly as the real Codex platform injects
+    // it into A's shell execution environment.
+    const res = runCliCodexOnly('runtime/update-state.mjs', ['--project-dir', projectDir, '--add-criterion', 'criterion typed by session A'], dataDir, {
+      env: { CODEX_THREAD_ID: 'sess-A' },
+    });
+    assert.equal(res.json?.ok, true, JSON.stringify(res.json));
+    assert.equal(res.json.runId, runIdA, 'a session-less call with CODEX_THREAD_ID=sess-A must resolve run A, never run B');
+
+    const stateA = JSON.parse(fs.readFileSync(path.join(dataDir, 'runs', runIdA, 'state.json'), 'utf8'));
+    const stateB = JSON.parse(fs.readFileSync(path.join(dataDir, 'runs', runIdB, 'state.json'), 'utf8'));
+    assert.equal(stateA.acceptanceCriteria.length, 1, 'the criterion must land on run A');
+    assert.equal(stateB.acceptanceCriteria.length, 0, 'run B must be completely untouched');
   } finally {
     cleanup(dataDir);
     cleanup(projectDir);

@@ -1263,6 +1263,26 @@ test('shared risk policy denies a PowerShell command directly invoking a KRYLO H
   assert.equal(result.category, 'hook-entrypoint-protection');
 });
 
+test('shared risk policy denies a Bash command directly invoking any Codex Hook entrypoint (regression found by a fresh independent Security Reviewer: distinct Codex filenames were silently uncovered by the Claude-only entrypoint list)', () => {
+  const dataRoot = tempDataRoot();
+  const codexEntrypoints = [
+    'scripts/security/user-prompt-submit-codex.mjs',
+    'scripts/security/risk-gate-codex.mjs',
+    'scripts/security/permission-request-codex.mjs',
+    'scripts/runtime/posttool-telemetry-codex.mjs',
+  ];
+  for (const entrypoint of codexEntrypoints) {
+    const result = classifyRiskAction({
+      toolName: 'Bash',
+      toolInput: { command: `echo '{"session_id":"forged"}' | node "${entrypoint}"` },
+      cwd: process.cwd(),
+      dataRoot,
+    });
+    assert.equal(result.action, 'deny', `expected deny for direct invocation of ${entrypoint}`);
+    assert.equal(result.category, 'hook-entrypoint-protection');
+  }
+});
+
 test('shared risk policy denies a PowerShell command referencing the KRYLO data root', () => {
   const dataRoot = tempDataRoot();
   const result = classifyRiskAction({

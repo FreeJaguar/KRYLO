@@ -172,11 +172,11 @@ function codexOnlyEnv(dataDir, extra = {}) {
   return env;
 }
 
-export function runCliCodexOnly(scriptRelPath, args, dataDir) {
+export function runCliCodexOnly(scriptRelPath, args, dataDir, { env } = {}) {
   const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath), ...args], {
     encoding: 'utf8',
     cwd: dataDir,
-    env: codexOnlyEnv(dataDir),
+    env: codexOnlyEnv(dataDir, env),
   });
   let json;
   try {

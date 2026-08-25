@@ -119,11 +119,18 @@ async function main() {
   const projectRootHash = computeProjectRootHash(projectRoot);
 
   // Idempotency (required behavior C/D/I): reuse an already-active,
-  // non-terminal run bound to this EXACT session rather than silently
-  // creating a second one. Any lookup/parse failure here is treated as
-  // "no existing run found" (fail safe toward attempting a fresh,
-  // correctly-scoped bootstrap, never toward silently adopting the wrong
-  // state).
+  // non-terminal run bound to this EXACT session and project rather than
+  // silently creating a second one. Any lookup/parse failure here is
+  // treated as "no existing run found" (fail safe toward attempting a
+  // fresh, correctly-scoped bootstrap, never toward silently adopting the
+  // wrong state). The emit itself happens OUTSIDE this try block: an
+  // earlier version called emitAdditionalContext() (which writes to stdout
+  // and calls process.exit) from inside the try -- a fresh independent
+  // Reviewer found that a write failure there (e.g. a broken pipe) would be
+  // swallowed by this function's own catch and fall through into creating a
+  // second run for a session that already had one, silently contradicting
+  // the "never silently duplicated" guarantee this comment documents.
+  let existingRunId = null;
   try {
     const existingPointer = readActiveRunPointer({ projectRootHash, host: 'codex', hostSessionId: sessionId });
     if (existingPointer.ok && existingPointer.value?.runId) {
@@ -133,16 +140,20 @@ async function main() {
         && existingState.value.terminalState === null
         && existingState.value.host?.name === 'codex'
         && existingState.value.host?.sessionId === sessionId
+        && existingState.value.project?.rootHash === projectRootHash
       ) {
-        emitAdditionalContext(
-          `KRYLO Codex run ${existingPointer.value.runId} is already active for this host session. `
-          + 'Follow the krylo-run Skill workflow using this existing run; do not initialize another run.',
-        );
-        return;
+        existingRunId = existingPointer.value.runId;
       }
     }
   } catch {
     // Fall through to a fresh bootstrap attempt below.
+  }
+  if (existingRunId) {
+    emitAdditionalContext(
+      `KRYLO Codex run ${existingRunId} is already active for this host session. `
+      + 'Follow the krylo-run Skill workflow using this existing run; do not initialize another run.',
+    );
+    return;
   }
 
   const goalText = invocation.task !== ''
