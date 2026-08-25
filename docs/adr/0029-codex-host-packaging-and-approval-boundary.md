@@ -96,6 +96,8 @@ Fixed: `resolveCodexSessionId()` (`scripts/host/codex/context.mjs`) now falls ba
 
 Both fixes were verified against the full regression suite (`npm test`, 443+ passing) before this ADR was updated to reflect them.
 
+One further, low-severity note from the same round: `hook-transport.mjs`'s `normalizeCodexHookPayload()` degraded-identity path (used when a PreToolUse-shaped payload lacks a usable `session_id`) now binds directly to `CODEX_THREAD_ID` instead of falling through to `hostSessionId: undefined`, whenever that variable happens to be present in the Hook process's own environment -- an improvement if so, but whether Codex actually sets `CODEX_THREAD_ID` in a Hook's own spawned process (as opposed to the model's own later shell execution environment, which `codex-rs/core/src/exec_env.rs` does confirm) is unverified and untested; treat this path as unverified, not regressed.
+
 ## Supersedes
 
 None. Extends ADR-0023 exactly as that ADR anticipated ("Codex receives its own explicit host invocation in a later ADR"). Does not modify ADR-0021 (Claude-only Skill-scoped Hooks), ADR-0025/ADR-0027 (Claude native-approval design, unchanged), or ADR-0028 (Foundation glob-closure, unrelated).

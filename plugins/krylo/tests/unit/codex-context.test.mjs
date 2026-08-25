@@ -28,18 +28,40 @@ test('explicit Codex session wins over hook payload session_id', () => {
   const session = resolveCodexSessionId({
     explicitSessionId: 'explicit',
     hookPayload: { session_id: 'hook' },
+    env: {},
   });
   assert.equal(session, 'explicit');
 });
 
 test('hook payload session_id is used when no explicit override is supplied', () => {
-  const session = resolveCodexSessionId({ hookPayload: { session_id: 'hook' } });
+  const session = resolveCodexSessionId({ hookPayload: { session_id: 'hook' }, env: {} });
   assert.equal(session, 'hook');
 });
 
-test('Codex resolves no session id from environment alone -- unlike Claude, no legacy env var is documented, so an absent explicit/hook session id is unresolvable', () => {
-  const session = resolveCodexSessionId({ hookPayload: {} });
+test('Codex resolves no session id at all when neither explicit/hook session id NOR CODEX_THREAD_ID is present', () => {
+  const session = resolveCodexSessionId({ hookPayload: {}, env: {} });
   assert.equal(session, null);
+});
+
+// CODEX_THREAD_ID is a lookup-only convenience for resolving an EXISTING
+// run from a later, session-less CLI call (mirroring resolveClaudeSessionId's
+// existing CLAUDE_SESSION_ID fallback) -- added after a fresh independent
+// Reviewer and Security Reviewer both reproduced a cross-session CLI
+// collision without it. It must never be read implicitly from the real
+// process.env in a test that does not intend to exercise it, which is why
+// every other case in this file passes an explicit env object.
+test('CODEX_THREAD_ID resolves a session id only when no explicit/hook session id is supplied', () => {
+  assert.equal(resolveCodexSessionId({ hookPayload: {}, env: { CODEX_THREAD_ID: 'thread-x' } }), 'thread-x');
+  assert.equal(
+    resolveCodexSessionId({ explicitSessionId: 'explicit', hookPayload: {}, env: { CODEX_THREAD_ID: 'thread-x' } }),
+    'explicit',
+    'CODEX_THREAD_ID must never override an explicit session id',
+  );
+  assert.equal(
+    resolveCodexSessionId({ hookPayload: { session_id: 'hook' }, env: { CODEX_THREAD_ID: 'thread-x' } }),
+    'hook',
+    'CODEX_THREAD_ID must never override a hook-payload session id',
+  );
 });
 
 test('PLUGIN_DATA (native plugin install) is used as the data root when KRYLO_DATA_ROOT is unset', () => {

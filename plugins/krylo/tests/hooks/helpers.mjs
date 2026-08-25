@@ -157,19 +157,26 @@ export function createActiveRunClaudeOnly(dataDir, { projectDir = dataDir, goal 
 /**
  * Codex-only variants of runCli()/runHook()/createActiveRun(): set ONLY
  * PLUGIN_DATA and PLUGIN_ROOT (never KRYLO_DATA_ROOT, never a
- * CLAUDE_SESSION_ID-style env fallback, since Codex has none) plus
- * KRYLO_HOST=codex so host-dispatch.mjs's detection is exercised the same
- * way a real Codex plugin invocation would set it, and every write/read
- * genuinely exercises the Codex host adapter's own PLUGIN_DATA ->
- * KRYLO_DATA_ROOT bootstrap instead of a directly-set host-neutral override.
+ * CLAUDE_SESSION_ID-style env fallback for Claude) plus KRYLO_HOST=codex so
+ * host-dispatch.mjs's detection is exercised the same way a real Codex
+ * plugin invocation would set it, and every write/read genuinely exercises
+ * the Codex host adapter's own PLUGIN_DATA -> KRYLO_DATA_ROOT bootstrap
+ * instead of a directly-set host-neutral override. Any CODEX_THREAD_ID
+ * inherited from the real outer shell is stripped BEFORE `extra` is
+ * applied, so a test that does not care about it never accidentally
+ * exercises resolveCodexSessionId()'s CODEX_THREAD_ID fallback via ambient
+ * process.env leakage, while a test that explicitly wants to exercise that
+ * fallback can still pass `{ env: { CODEX_THREAD_ID: '...' } }` and have it
+ * take effect.
  */
 function codexOnlyEnv(dataDir, extra = {}) {
-  const env = { ...process.env, PLUGIN_DATA: dataDir, PLUGIN_ROOT: dataDir, KRYLO_HOST: 'codex', ...extra };
+  const env = { ...process.env, PLUGIN_DATA: dataDir, PLUGIN_ROOT: dataDir, KRYLO_HOST: 'codex' };
   delete env.KRYLO_DATA_ROOT;
   delete env.CLAUDE_PLUGIN_DATA;
   delete env.CLAUDE_PLUGIN_ROOT;
   delete env.CLAUDE_SESSION_ID;
-  return env;
+  delete env.CODEX_THREAD_ID;
+  return { ...env, ...extra };
 }
 
 export function runCliCodexOnly(scriptRelPath, args, dataDir, { env } = {}) {
