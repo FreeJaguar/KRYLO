@@ -497,7 +497,22 @@ function matchesSensitivePath(policy, text) {
   // on disk), so appending either to an otherwise-matched secret path
   // bypassed the pattern's own end-of-string anchors. Stripped the same
   // way as the ADS suffix above, before the exception and pattern checks.
-  const normalized = withoutAds.replace(/[ .]+$/, '');
+  //
+  // A sixth review round then found this introduced its own false
+  // positive: applying the trim unconditionally exposed ordinary free
+  // text ending in a real extension to the extension-only patterns
+  // (`.pem`/`.key`/...), which -- unlike the `.env`/`id_rsa` patterns --
+  // are not anchored to a path-start boundary. `git commit -m "regenerate
+  // cert.pem."` denied outright, though it never referenced an actual
+  // path. Scoped the trim to when it would not be masking ordinary prose:
+  // only applied when the FINAL path component (after any separator),
+  // once trimmed, has no remaining internal space -- true for a genuine
+  // bare file reference (`.env `) or a real path whose filename segment
+  // has no space (`my dir/.env.`), false for a free-text sentence.
+  const trimmedTrailing = withoutAds.replace(/[ .]+$/, '');
+  const lastSep = Math.max(trimmedTrailing.lastIndexOf('/'), trimmedTrailing.lastIndexOf('\\'));
+  const lastSegment = lastSep >= 0 ? trimmedTrailing.slice(lastSep + 1) : trimmedTrailing;
+  const normalized = lastSegment.includes(' ') ? withoutAds : trimmedTrailing;
   if (ENV_TEMPLATE_EXCEPTION.test(normalized)) return false;
   return policy.sensitivePaths.patterns.some((p) => new RegExp(p, 'i').test(normalized));
 }
@@ -525,9 +540,18 @@ function matchesSensitivePath(policy, text) {
  * cannot re-lose the internal space the SHELL_WORD tokenizer preserves
  * inside a quoted segment (round 4's fix for `cat "my dir/.env"`): only
  * quote characters themselves are removed, and a space is not one.
+ *
+ * A sixth review round confirmed, against a real Bash process, that Bash
+ * ANSI-C (`$'...'`) and locale (`$"..."`) quoting still bypassed this:
+ * `cat $'.env'` reads the real `.env`, but the SHELL_WORD tokenizer glues
+ * the leading `$` into the token as ordinary text, so after stripping
+ * only the quote characters the token becomes `$.env` -- the leading `$`
+ * defeats the sensitivePaths patterns' own `(^|[\\/])` start-of-path
+ * anchor. A `$` immediately before a quote character is part of that
+ * quoting syntax, not path text, and is stripped along with the quote.
  */
 function stripSurroundingQuotes(token) {
-  return token.replace(/["']/g, '');
+  return token.replace(/\$(?=["'])/g, '').replace(/["']/g, '');
 }
 
 // Splitting on whitespace before stripping quotes (the original approach)

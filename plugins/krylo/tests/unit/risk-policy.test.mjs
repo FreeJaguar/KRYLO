@@ -462,6 +462,55 @@ test('shared risk policy denies quote-concatenated sensitive paths and a trailin
   assert.equal(template.action, 'pass');
 });
 
+test('shared risk policy: the trailing-space/dot trim does not deny ordinary free text ending in a real extension, and ANSI-C/locale Bash quoting no longer bypasses secret-path detection (two further findings from a sixth, final independent review)', () => {
+  // (1) Applying the trailing space/dot trim unconditionally exposed
+  // ordinary prose ending in a real file extension to the extension-only
+  // sensitivePaths patterns (.pem/.key/...), which -- unlike the .env/
+  // id_rsa patterns -- are not anchored to a path-start boundary.
+  // `git commit -m "regenerate cert.pem."` denied outright even though it
+  // never referenced an actual path. Fixed by only applying the trim when
+  // the final path component, once trimmed, has no remaining internal
+  // space -- true for a genuine bare/real path reference, false for a
+  // free-text sentence.
+  const dataRoot = tempDataRoot();
+  const benignFreeText = [
+    'git commit -m "regenerate cert.pem."',
+    'echo "done with config.key."',
+  ];
+  for (const command of benignFreeText) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'pass', `expected pass for benign free text: ${command}`);
+  }
+
+  // A real path with a space in an EARLIER segment (not the filename
+  // itself) and a genuine trailing dot must still be denied.
+  const realPathWithEarlierSpace = classifyRiskAction({
+    toolName: 'Bash', toolInput: { command: 'cat "my dir/.env."' }, cwd: process.cwd(), dataRoot,
+  });
+  assert.equal(realPathWithEarlierSpace.action, 'deny');
+  assert.equal(realPathWithEarlierSpace.category, 'sensitive-path');
+
+  // (2) Bash ANSI-C ($'...') and locale ($"...") quoting -- confirmed
+  // against a real Bash process to read the literal file .env -- still
+  // bypassed detection because the tokenizer glued the leading `$` into
+  // the token as ordinary text. Fixed by stripping a `$` immediately
+  // before a quote character along with the quote itself.
+  const ansiCQuoted = [
+    "cat $'.env'",
+    'cat $".env"',
+  ];
+  for (const command of ansiCQuoted) {
+    const result = classifyRiskAction({ toolName: 'Bash', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for: ${command}`);
+    assert.equal(result.category, 'sensitive-path');
+  }
+
+  // An unrelated, legitimate use of `$` immediately before a path-like
+  // string (not ANSI-C quoting) must not be affected.
+  const unrelatedDollar = classifyRiskAction({ toolName: 'Bash', toolInput: { command: 'echo $5.env' }, cwd: process.cwd(), dataRoot });
+  assert.equal(unrelatedDollar.action, 'pass');
+});
+
 test('shared risk policy denies direct writes into the KRYLO data root', () => {
   const dataRoot = tempDataRoot();
   const result = classifyRiskAction({
