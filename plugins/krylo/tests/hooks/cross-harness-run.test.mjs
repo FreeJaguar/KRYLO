@@ -40,7 +40,7 @@ function rmSyncRetry(dir, attempts = 8) {
 
 /** Claude-native env: detectHost() resolves 'claude', so the worker provider is always 'codex'. */
 function claudeNativeEnv(dataDir, extra = {}) {
-  const env = { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, KRYLO_CROSS_HARNESS_CODEX_CLI: FAKE_WORKER, FAKE_WORKER_PROVIDER: 'codex', ...extra };
+  const env = { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, KRYLO_CROSS_HARNESS_TEST_MODE: '1', KRYLO_CROSS_HARNESS_CODEX_CLI: FAKE_WORKER, FAKE_WORKER_PROVIDER: 'codex', ...extra };
   delete env.KRYLO_DATA_ROOT;
   delete env.PLUGIN_DATA;
   delete env.PLUGIN_ROOT;

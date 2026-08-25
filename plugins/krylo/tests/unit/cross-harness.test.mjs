@@ -1,5 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 import {
   CROSS_HARNESS_ROLES,
@@ -111,6 +116,35 @@ test('context packet excludes never-transfer paths (.env, .ssh, secrets.json) an
   assert.ok(result.excludedPaths.includes('.env'));
   assert.ok(result.excludedPaths.some((p) => p.includes('id_rsa')));
   assert.ok(result.excludedPaths.some((p) => p.includes('secrets.json')));
+});
+
+// Regression: a fresh independent Reviewer found the never-transfer list
+// missed .config/gh/hosts.yml (the GitHub CLI OAuth token store), which
+// production-policy.json's own sensitivePaths already protects elsewhere
+// in KRYLO -- a real, if narrow, parity gap between the two independent
+// lists. Fixed by adding the pattern directly; this test both proves the
+// fix and cross-checks parity against production-policy.json's own
+// globProtectedPaths so the two lists cannot silently diverge again
+// without at least this specific entry failing loudly.
+test('context packet excludes .config/gh/hosts.yml (GitHub CLI OAuth token store), matching production-policy.json protection', () => {
+  const result = buildContextPacket({
+    task: 'review',
+    fileExcerpts: [{ path: '.config/gh/hosts.yml', content: 'oauth_token: ghp_xxx' }],
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.packet.fileExcerpts.length, 0);
+  assert.ok(result.excludedPaths.includes('.config/gh/hosts.yml'));
+});
+
+test('every literal protected path production-policy.json declares (globProtectedPaths) is also excluded by the Cross-Harness never-transfer list', () => {
+  const productionPolicy = JSON.parse(
+    fs.readFileSync(path.resolve(__dirname, '..', '..', 'policies', 'production-policy.json'), 'utf8'),
+  );
+  const protectedPaths = productionPolicy.sensitivePaths.globProtectedPaths.filter((p) => !p.endsWith('/*'));
+  for (const protectedPath of protectedPaths) {
+    const result = buildContextPacket({ task: 'review', fileExcerpts: [{ path: protectedPath, content: 'x' }] });
+    assert.equal(result.packet.fileExcerpts.length, 0, `${protectedPath} (protected by production-policy.json) must also be excluded from the Cross-Harness context packet`);
+  }
 });
 
 test('context packet excludes an absolute path and a traversal path as unsafe-to-classify', () => {

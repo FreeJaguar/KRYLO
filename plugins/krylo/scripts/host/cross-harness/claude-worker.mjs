@@ -7,9 +7,9 @@
 // Read-only enforcement (task Section 10), layered rather than trusting one
 // mechanism alone: `--tools Read,Grep,Glob` (no Bash/PowerShell/Write/Edit/
 // NotebookEdit/WebFetch/WebSearch tool is even AVAILABLE to the worker,
-// regardless of what it is told), `--permission-mode plan` (defense in
-// depth on top of the tool restriction), `--strict-mcp-config` with no
-// `--mcp-config` (zero MCP servers), `--setting-sources ""` (no user/
+// regardless of what it is told -- this is the real, sufficient enforcement),
+// `--strict-mcp-config` with no `--mcp-config` (zero MCP servers),
+// `--setting-sources ""` (no user/
 // project/local settings file is loaded, so no personal hook or MCP
 // configuration can apply inside the worker's own process), `--no-session-
 // persistence` (the worker's own conversation is never saved/resumable).
@@ -43,8 +43,9 @@ const READ_ONLY_TOOLS = 'Read,Grep,Glob';
 
 export function detectClaudeWorkerCapability({ cliPath = 'claude', env = process.env } = {}) {
   try {
-    const { command, args } = platformSpawnTarget(cliPath, ['--version']);
-    const res = spawnSync(command, args, { encoding: 'utf8', shell: false, timeout: 10_000, maxBuffer: 64 * 1024, env });
+    const target = platformSpawnTarget(cliPath, ['--version']);
+    if (!target) return { available: false, reason: 'WORKER_UNAVAILABLE' };
+    const res = spawnSync(target.command, target.args, { encoding: 'utf8', shell: false, timeout: 10_000, maxBuffer: 64 * 1024, env });
     if (res.error || res.status !== 0 || typeof res.stdout !== 'string') {
       return { available: false, reason: 'WORKER_UNAVAILABLE' };
     }
@@ -68,11 +69,20 @@ export function detectClaudeWorkerCapability({ cliPath = 'claude', env = process
  * authoritative regardless of whether the platform enforces it.
  */
 export function buildClaudeWorkerArgv({ systemPrompt, jsonSchema }) {
+  // Deliberately NOT --permission-mode plan (present in an earlier draft
+  // of this function, and once genuinely a live suspect while debugging
+  // the --json-schema structured-output failure -- a fresh independent
+  // Reviewer caught it still being shipped after this comment, ADR-0030,
+  // and the capability matrix all already documented its removal, which
+  // was itself a real bug, now fixed here to match). --tools above already
+  // excludes every write-capable tool regardless of permission mode, so
+  // Plan Mode's own "conclude with a plan" semantics add no verified
+  // protection for a worker that will never have a Write tool to plan
+  // into -- pure surface area, removed.
   return [
     '-p',
     '--setting-sources', '',
     '--tools', READ_ONLY_TOOLS,
-    '--permission-mode', 'plan',
     '--strict-mcp-config',
     '--output-format', 'json',
     '--no-session-persistence',
@@ -92,13 +102,19 @@ export function buildClaudeWorkerEnv({ runId, parentEnv = process.env }) {
   for (const key of ['PATH', 'HOME', 'USERPROFILE', 'TEMP', 'TMP']) {
     if (typeof parentEnv[key] === 'string') allowed[key] = parentEnv[key];
   }
-  // Test-only hook: a real KRYLO run never sets a FAKE_WORKER_*-prefixed
-  // variable, so this has zero effect on production behavior -- it exists
-  // only so tests/fixtures/cross-harness/fake-worker.mjs can be told which
-  // scenario to simulate, without weakening the real environment allowlist
-  // above for anything else.
-  for (const [key, value] of Object.entries(parentEnv)) {
-    if (key.startsWith('FAKE_WORKER_') && typeof value === 'string') allowed[key] = value;
+  // Test-only hook, gated behind the same KRYLO_CROSS_HARNESS_TEST_MODE
+  // sentinel as the CLI-path override (cross-harness-run.mjs) -- a fresh
+  // independent Reviewer found the earlier, unconditional version of this
+  // passthrough was reachable in a real production invocation (nothing
+  // gated it), so any FAKE_WORKER_*-prefixed variable an attacker could
+  // smuggle into the environment would silently reach the real worker
+  // process. Only tests/fixtures/cross-harness/fake-worker.mjs consumes
+  // these, and only plugins/krylo/tests/hooks/cross-harness-run.test.mjs
+  // sets the sentinel.
+  if (parentEnv.KRYLO_CROSS_HARNESS_TEST_MODE === '1') {
+    for (const [key, value] of Object.entries(parentEnv)) {
+      if (key.startsWith('FAKE_WORKER_') && typeof value === 'string') allowed[key] = value;
+    }
   }
   return {
     ...allowed,
@@ -119,7 +135,9 @@ export function buildClaudeWorkerEnv({ runId, parentEnv = process.env }) {
 export function spawnClaudeWorker({ cliPath = 'claude', cwd, systemPrompt, jsonSchema, stdinPayload, runId, timeoutMs = CROSS_HARNESS_TIMEOUT_MS, env = process.env }) {
   const argv = buildClaudeWorkerArgv({ systemPrompt, jsonSchema });
   const childEnv = buildClaudeWorkerEnv({ runId, parentEnv: env });
-  const { command, args } = platformSpawnTarget(cliPath, argv);
+  const target = platformSpawnTarget(cliPath, argv);
+  if (!target) return { ok: false, failureCode: 'WORKER_UNAVAILABLE' };
+  const { command, args } = target;
   try {
     const res = spawnSync(command, args, {
       cwd,
@@ -130,6 +148,19 @@ export function spawnClaudeWorker({ cliPath = 'claude', cwd, systemPrompt, jsonS
       maxBuffer: CROSS_HARNESS_MAX_OUTPUT_BYTES,
       env: childEnv,
     });
+    // ENOBUFS (real maxBuffer overflow) is checked BEFORE the timeout
+    // check: a fresh independent Reviewer found spawnSync sets BOTH
+    // res.error.code='ENOBUFS' AND res.signal='SIGTERM' when the child's
+    // output exceeds maxBuffer (confirmed directly: an oversized-output
+    // fixture was reported as TIMEOUT, not OUTPUT_TOO_LARGE, in the
+    // original branch order). spawnSync never throws on maxBuffer overflow
+    // -- that is an execSync/execFileSync-only behavior -- so the old
+    // `catch (err) { if (err?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') ... }`
+    // below was dead code, removed.
+    if (res.error?.code === 'ENOBUFS') {
+      killProcessTree(res.pid);
+      return { ok: false, failureCode: 'OUTPUT_TOO_LARGE' };
+    }
     if (res.error?.code === 'ETIMEDOUT' || res.signal === 'SIGTERM') {
       // See codex-worker.mjs's identical comment: spawnSync's own timeout
       // only reaches the direct cmd.exe wrapper on Windows, never the
@@ -144,10 +175,7 @@ export function spawnClaudeWorker({ cliPath = 'claude', cwd, systemPrompt, jsonS
       return { ok: false, failureCode: res.status === 0 ? 'INVALID_OUTPUT' : 'WORKER_EXIT_FAILED' };
     }
     return { ok: true, stdout: res.stdout, stderr: res.stderr ?? '', status: res.status };
-  } catch (err) {
-    if (err?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
-      return { ok: false, failureCode: 'OUTPUT_TOO_LARGE' };
-    }
+  } catch {
     return { ok: false, failureCode: 'SPAWN_FAILED' };
   }
 }

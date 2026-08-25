@@ -52,6 +52,22 @@ test('buildCodexWorkerEnv/buildClaudeWorkerEnv never pass through an arbitrary s
   }
 });
 
+// Regression: a fresh independent Security Reviewer found the FAKE_WORKER_*
+// passthrough was reachable in a real (non-test-mode) invocation -- nothing
+// gated it. Without KRYLO_CROSS_HARNESS_TEST_MODE=1, a FAKE_WORKER_*
+// variable must never reach the child, even if present in the parent env.
+test('buildCodexWorkerEnv/buildClaudeWorkerEnv only pass through FAKE_WORKER_* when KRYLO_CROSS_HARNESS_TEST_MODE=1 is also set', () => {
+  const parentEnvWithoutTestMode = { PATH: '/usr/bin', FAKE_WORKER_MODE: 'malicious-output' };
+  const parentEnvWithTestMode = { PATH: '/usr/bin', KRYLO_CROSS_HARNESS_TEST_MODE: '1', FAKE_WORKER_MODE: 'malicious-output' };
+  for (const build of [buildCodexWorkerEnv, buildClaudeWorkerEnv]) {
+    const withoutTestMode = build({ runId: 'run-abc', parentEnv: parentEnvWithoutTestMode });
+    assert.ok(!('FAKE_WORKER_MODE' in withoutTestMode), 'FAKE_WORKER_MODE must never reach the child without the test-mode sentinel');
+
+    const withTestMode = build({ runId: 'run-abc', parentEnv: parentEnvWithTestMode });
+    assert.equal(withTestMode.FAKE_WORKER_MODE, 'malicious-output', 'the sentinel must genuinely enable the test-only hook (proving this is a real gate, not a no-op)');
+  }
+});
+
 // End-to-end: a malicious TASK string (the one field that ultimately comes
 // from the model/user and could contain shell metacharacters) must never
 // reach argv or be interpreted as shell syntax anywhere in the real
@@ -69,6 +85,7 @@ test('a task string containing shell metacharacters cannot inject a command thro
       env: {
         ...process.env,
         CLAUDE_PLUGIN_DATA: dataDir,
+        KRYLO_CROSS_HARNESS_TEST_MODE: '1',
         KRYLO_CROSS_HARNESS_CODEX_CLI: FAKE_WORKER,
         FAKE_WORKER_PROVIDER: 'codex',
         FAKE_WORKER_MODE: 'valid',

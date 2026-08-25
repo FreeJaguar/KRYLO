@@ -30,6 +30,7 @@ import {
   CROSS_HARNESS_RESULT_JSON_SCHEMA,
 } from '../lib/cross-harness.mjs';
 import { crossHarnessInvocationDir, ensureDir } from '../lib/paths.mjs';
+import { deepRedact } from '../lib/redact.mjs';
 import { readActiveRunPointer, computeProjectRootHash } from '../lib/state.mjs';
 import { bootstrapStorageEnvironment, resolveSessionId, detectHost } from '../lib/host-dispatch.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
@@ -62,21 +63,51 @@ function cleanupDir(dir) {
 
 const UPDATE_STATE_CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), 'update-state.mjs');
 
+// A fresh independent Reviewer found the original version of this function
+// recorded a worker's own reported severity verbatim -- since findingStatus
+// blocks VERIFIED_COMPLETE on any OPEN critical/high finding, an untrusted,
+// possibly hallucinating or prompt-injected worker could report 32 "critical"
+// findings and unilaterally hold the native run's completion hostage, with
+// no code path forcing independent confirmation first. This directly
+// violates the task's own explicit requirement (Section 16): "Critical/High
+// findings from a cross-provider worker must be independently checked by the
+// native host before they are treated as confirmed." Recorded severity is
+// therefore capped at 'medium' (never blocking on its own) regardless of
+// what the worker reported; the native host that reads the finding and
+// agrees it is genuinely critical/high must re-file it itself via its own
+// --add-finding call, which is what "independently checked... before being
+// treated as confirmed" means in practice. The worker's OWN reported
+// severity is preserved in the summary text so nothing is lost, only
+// demoted from auto-blocking to advisory.
+const NON_BLOCKING_SEVERITY_CAP = 'medium';
+
+function cappedSeverity(reportedSeverity) {
+  return ['critical', 'high'].includes(reportedSeverity) ? NON_BLOCKING_SEVERITY_CAP : reportedSeverity;
+}
+
 /**
  * Record a Cross-Harness result into the run's own canonical state via the
  * SAME runtime CLI the Skill itself uses (--add-evidence/--add-finding/
  * --mark-external-worker) -- reuses the one validated, locked mutation path
- * rather than a second, parallel state-writing implementation. Best-effort:
- * a failure here never changes the CrossHarnessResult already returned to
- * the caller (task Section 16 -- a worker's findings are advisory evidence
- * for the native host to act on, not an authority that can itself decide
- * anything, so a bookkeeping failure here is logged, never fatal).
+ * rather than a second, parallel state-writing implementation. A recording
+ * failure never changes the CrossHarnessResult already returned to the
+ * caller (task Section 16 -- a worker's findings are advisory evidence for
+ * the native host to act on, never an authority that can itself decide
+ * anything) -- but, unlike an earlier version a fresh independent Reviewer
+ * found silently discarded every failure despite its own comment claiming
+ * otherwise, a failure here IS now recorded to telemetry and reflected in
+ * the returned `recorded` flag, so the caller/model can tell state
+ * bookkeeping did not land rather than wrongly assuming it did.
  */
 function recordResultAsEvidence({ runId, session, projectDir, request, result }) {
   const baseArgs = ['--run', runId, ...(session ? ['--session', session] : []), ...(projectDir ? ['--project-dir', projectDir] : [])];
   const run = (extra) => spawnSync(process.execPath, [UPDATE_STATE_CLI, ...baseArgs, ...extra], { encoding: 'utf8', timeout: 15_000 });
+  const ok = (res) => res.status === 0 && !res.error;
 
-  run(['--mark-external-worker']);
+  let recorded = true;
+
+  const markResult = run(['--mark-external-worker']);
+  if (!ok(markResult)) recorded = false;
 
   const evidence = {
     type: 'review',
@@ -85,15 +116,22 @@ function recordResultAsEvidence({ runId, session, projectDir, request, result })
     result: result.status === 'completed' ? 'info' : 'blocked',
     summary: result.summary.slice(0, 300),
   };
-  run(['--add-evidence', JSON.stringify(evidence)]);
+  const evidenceResult = run(['--add-evidence', JSON.stringify(evidence)]);
+  if (!ok(evidenceResult)) recorded = false;
 
   for (const finding of result.findings) {
-    run(['--add-finding', JSON.stringify({
-      severity: finding.severity,
-      summary: `[cross-harness:${request.workerProvider}:${request.role}] ${finding.title}`.slice(0, 300),
+    const findingResult = run(['--add-finding', JSON.stringify({
+      severity: cappedSeverity(finding.severity),
+      summary: `[cross-harness:${request.workerProvider}:${request.role}, worker-reported severity: ${finding.severity}, unconfirmed] ${finding.title}`.slice(0, 300),
       source: `cross-harness:${request.workerProvider}:${request.role}`,
     })]);
+    if (!ok(findingResult)) recorded = false;
   }
+
+  if (!recorded) {
+    recordEvent(runId, { event: 'cross-harness', provider: request.workerProvider, role: request.role, status: 'failed', category: 'evidence-record-failed' });
+  }
+  return recorded;
 }
 
 async function main() {
@@ -134,12 +172,25 @@ async function main() {
   }
   const request = built.request;
 
-  // Overridable only for deterministic fake-worker tests
-  // (tests/fixtures/cross-harness/) -- a real KRYLO run never sets these,
-  // so production behavior always resolves the real "codex"/"claude" on
-  // PATH.
-  const codexCliPath = process.env.KRYLO_CROSS_HARNESS_CODEX_CLI || 'codex';
-  const claudeCliPath = process.env.KRYLO_CROSS_HARNESS_CLAUDE_CLI || 'claude';
+  // Overridable ONLY when KRYLO_CROSS_HARNESS_TEST_MODE=1 is ALSO set --
+  // both fresh independent Reviewers found the earlier, unconditional
+  // version of this override genuinely reachable in a production
+  // invocation (nothing gated it), meaning an attacker who could smuggle
+  // an env-var assignment ahead of the already-approved
+  // cross-harness-run.mjs command (e.g. `KRYLO_CROSS_HARNESS_CODEX_CLI=./evil.sh
+  // node .../cross-harness-run.mjs ...`) could substitute an arbitrary,
+  // completely unsandboxed binary for the worker the human believed they
+  // were approving. Requiring a SECOND, distinctly-named sentinel alongside
+  // the override raises the bar (an attacker now needs the human-visible
+  // approved command to carry two suspicious env assignments, not one) --
+  // disclosed honestly as defense-in-depth, not a strong guarantee: no
+  // env-var gate is a true security boundary against a compromised local
+  // command line. The real security boundary remains the native-ask/deny
+  // gate on invoking this script at all. tests/hooks/cross-harness-run.test.mjs
+  // sets both variables explicitly for every fixture-driven test.
+  const testModeEnabled = process.env.KRYLO_CROSS_HARNESS_TEST_MODE === '1';
+  const codexCliPath = (testModeEnabled && process.env.KRYLO_CROSS_HARNESS_CODEX_CLI) || 'codex';
+  const claudeCliPath = (testModeEnabled && process.env.KRYLO_CROSS_HARNESS_CLAUDE_CLI) || 'claude';
 
   const capability = request.workerProvider === 'codex'
     ? detectCodexWorkerCapability({ cliPath: codexCliPath })
@@ -224,9 +275,18 @@ async function main() {
     findingCount: validated.result.findings.length,
   });
 
-  recordResultAsEvidence({ runId, session: args.session, projectDir: args.projectDir, request, result: validated.result });
+  const recorded = recordResultAsEvidence({ runId, session: args.session, projectDir: args.projectDir, request, result: validated.result });
 
-  finish({ ok: true, runId, invocationId, result: validated.result });
+  // A fresh independent Security Reviewer correctly noted the worker's own
+  // result (returned here to the orchestrating model's own context, not
+  // just to canonical state) had never been redacted -- unlike the copy
+  // recordResultAsEvidence() persists to state.json, which update-state.mjs
+  // already deepRedacts. A prompt-injected worker could otherwise address
+  // the parent model directly through an unredacted summary/recommendation/
+  // description field. deepRedact() here matches the exact same masking
+  // already applied everywhere else untrusted content reaches persisted or
+  // displayed KRYLO output.
+  finish({ ok: true, runId, invocationId, recorded, result: deepRedact(validated.result) });
 }
 
 main().catch((err) => {

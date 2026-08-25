@@ -27,8 +27,9 @@ import { platformSpawnTarget, killProcessTree } from '../../lib/spawn-platform.m
 
 export function detectCodexWorkerCapability({ cliPath = 'codex', env = process.env } = {}) {
   try {
-    const { command, args } = platformSpawnTarget(cliPath, ['--version']);
-    const res = spawnSync(command, args, { encoding: 'utf8', shell: false, timeout: 10_000, maxBuffer: 64 * 1024, env });
+    const target = platformSpawnTarget(cliPath, ['--version']);
+    if (!target) return { available: false, reason: 'WORKER_UNAVAILABLE' };
+    const res = spawnSync(target.command, target.args, { encoding: 'utf8', shell: false, timeout: 10_000, maxBuffer: 64 * 1024, env });
     if (res.error || res.status !== 0 || typeof res.stdout !== 'string') {
       return { available: false, reason: 'WORKER_UNAVAILABLE' };
     }
@@ -73,13 +74,14 @@ export function buildCodexWorkerEnv({ runId, parentEnv = process.env }) {
   for (const key of ['PATH', 'HOME', 'USERPROFILE', 'TEMP', 'TMP']) {
     if (typeof parentEnv[key] === 'string') allowed[key] = parentEnv[key];
   }
-  // Test-only hook: a real KRYLO run never sets a FAKE_WORKER_*-prefixed
-  // variable, so this has zero effect on production behavior -- it exists
-  // only so tests/fixtures/cross-harness/fake-worker.mjs can be told which
-  // scenario to simulate, without weakening the real environment allowlist
-  // above for anything else.
-  for (const [key, value] of Object.entries(parentEnv)) {
-    if (key.startsWith('FAKE_WORKER_') && typeof value === 'string') allowed[key] = value;
+  // Test-only hook, gated behind the same KRYLO_CROSS_HARNESS_TEST_MODE
+  // sentinel as the CLI-path override (cross-harness-run.mjs) -- see
+  // claude-worker.mjs's identical comment for why this is no longer
+  // unconditional.
+  if (parentEnv.KRYLO_CROSS_HARNESS_TEST_MODE === '1') {
+    for (const [key, value] of Object.entries(parentEnv)) {
+      if (key.startsWith('FAKE_WORKER_') && typeof value === 'string') allowed[key] = value;
+    }
   }
   return {
     ...allowed,
@@ -98,7 +100,9 @@ export function buildCodexWorkerEnv({ runId, parentEnv = process.env }) {
 export function spawnCodexWorker({ cliPath = 'codex', cwd, outputSchemaPath, stdinPayload, runId, timeoutMs = CROSS_HARNESS_TIMEOUT_MS, env = process.env }) {
   const argv = buildCodexWorkerArgv({ cwd, outputSchemaPath });
   const childEnv = buildCodexWorkerEnv({ runId, parentEnv: env });
-  const { command, args } = platformSpawnTarget(cliPath, argv);
+  const target = platformSpawnTarget(cliPath, argv);
+  if (!target) return { ok: false, failureCode: 'WORKER_UNAVAILABLE' };
+  const { command, args } = target;
   try {
     const res = spawnSync(command, args, {
       cwd,
@@ -109,6 +113,18 @@ export function spawnCodexWorker({ cliPath = 'codex', cwd, outputSchemaPath, std
       maxBuffer: CROSS_HARNESS_MAX_OUTPUT_BYTES,
       env: childEnv,
     });
+    // ENOBUFS (real maxBuffer overflow) is checked BEFORE the timeout
+    // check -- see claude-worker.mjs's identical comment: spawnSync sets
+    // BOTH res.error.code='ENOBUFS' AND res.signal='SIGTERM' on a real
+    // maxBuffer overflow, confirmed directly (an oversized-output fixture
+    // was misreported as TIMEOUT under the original branch order).
+    // spawnSync never throws on maxBuffer overflow, so the old
+    // `catch (err) { if (err?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') ... }`
+    // below was dead code, removed.
+    if (res.error?.code === 'ENOBUFS') {
+      killProcessTree(res.pid);
+      return { ok: false, failureCode: 'OUTPUT_TOO_LARGE' };
+    }
     if (res.error?.code === 'ETIMEDOUT' || res.signal === 'SIGTERM') {
       // spawnSync's own timeout only reliably reaches the DIRECT child --
       // platformSpawnTarget's cmd.exe wrapper on Windows -- never the
@@ -124,10 +140,7 @@ export function spawnCodexWorker({ cliPath = 'codex', cwd, outputSchemaPath, std
       return { ok: false, failureCode: res.status === 0 ? 'INVALID_OUTPUT' : 'WORKER_EXIT_FAILED' };
     }
     return { ok: true, stdout: res.stdout, stderr: res.stderr ?? '', status: res.status };
-  } catch (err) {
-    if (err?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
-      return { ok: false, failureCode: 'OUTPUT_TOO_LARGE' };
-    }
+  } catch {
     return { ok: false, failureCode: 'SPAWN_FAILED' };
   }
 }

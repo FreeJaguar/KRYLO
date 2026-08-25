@@ -86,6 +86,24 @@ test('a crafted string containing "://" far from a long non-matching run still r
   assert.ok(out.includes('https://[REDACTED]@example.com/path'));
 });
 
+// Regression: a fresh independent Security Reviewer's report prompted
+// discovery of a real RangeError ("Maximum call stack size exceeded")
+// thrown when redacting a single very long (multi-megabyte) unbroken
+// token-like run -- distinct from the maskUrlCredentials ReDoS above, and
+// not tied to any one specific masking pass. redactText must never throw;
+// oversized input is masked outright via MAX_REDACT_INPUT_LENGTH instead.
+test('does not throw a RangeError on a very large single-token input, and masks it outright', () => {
+  const huge = 'a'.repeat(9_000_000);
+  const out = redactText(huge);
+  assert.equal(out, '[REDACTED]', 'oversized input is masked outright rather than processed');
+});
+
+test('deepRedact does not throw when a nested string value is oversized', () => {
+  const out = deepRedact({ note: 'ok', blob: 'a'.repeat(9_000_000) });
+  assert.equal(out.note, 'ok');
+  assert.equal(out.blob, '[REDACTED]');
+});
+
 test('masks long hex and base64 runs', () => {
   const hex = 'a'.repeat(40);
   const out = redactText(`hash: ${hex}`);

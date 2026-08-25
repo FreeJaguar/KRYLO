@@ -32,6 +32,8 @@ export const CROSS_HARNESS_FAILURE_CODES = Object.freeze([
   'DEPTH_LIMIT',
   'INVALID_ROLE',
   'INVALID_PROVIDER',
+  'INVALID_REQUEST',
+  'NO_ACTIVE_RUN',
   'SPAWN_FAILED',
   'TIMEOUT',
   'OUTPUT_TOO_LARGE',
@@ -138,17 +140,23 @@ export function buildCrossHarnessRequest({
   if (!CROSS_HARNESS_ROLES.includes(role)) {
     return { ok: false, failureCode: 'INVALID_ROLE', error: `role must be one of: ${CROSS_HARNESS_ROLES.join(', ')}` };
   }
+  // A fresh independent Reviewer found every one of the four checks below
+  // reused the 'INVALID_ROLE' failure code, even though none of them are
+  // about the role field -- a model reading INVALID_ROLE back for a
+  // malformed runId would reasonably retry with a different --role and
+  // fail again forever. Each structural-validation failure below uses the
+  // distinct 'INVALID_REQUEST' code instead.
   if (typeof runId !== 'string' || !/^[A-Za-z0-9_-]{4,64}$/.test(runId)) {
-    return { ok: false, failureCode: 'INVALID_ROLE', error: 'runId is required and must be a valid run identifier.' };
+    return { ok: false, failureCode: 'INVALID_REQUEST', error: 'runId is required and must be a valid run identifier.' };
   }
   if (typeof projectRootHash !== 'string' || !/^[a-f0-9]{64}$/.test(projectRootHash)) {
-    return { ok: false, failureCode: 'INVALID_ROLE', error: 'projectRootHash is required and must be a 64-char lowercase hex string.' };
+    return { ok: false, failureCode: 'INVALID_REQUEST', error: 'projectRootHash is required and must be a 64-char lowercase hex string.' };
   }
   if (typeof nativeSessionId !== 'string' || nativeSessionId.trim() === '') {
-    return { ok: false, failureCode: 'INVALID_ROLE', error: 'nativeSessionId is required.' };
+    return { ok: false, failureCode: 'INVALID_REQUEST', error: 'nativeSessionId is required.' };
   }
   if (typeof task !== 'string' || task.trim() === '') {
-    return { ok: false, failureCode: 'INVALID_ROLE', error: 'task is required.' };
+    return { ok: false, failureCode: 'INVALID_REQUEST', error: 'task is required.' };
   }
 
   return {
@@ -246,6 +254,7 @@ const NEVER_TRANSFER_PATH_PATTERNS = [
   /(^|[\\/])\.codex([\\/]|$)/i,
   /(^|[\\/])\.claude([\\/]|$)/i,
   /(^|[\\/])\.kube([\\/]|$)/i,
+  /(^|[\\/])\.config[\\/]gh[\\/]hosts\.ya?ml$/i,
   /(^|[\\/])id_(rsa|ed25519|ecdsa|dsa)($|\.)/i,
   /\.(pem|pfx|p12|key|keystore|jks)$/i,
   /(^|[\\/])secrets?\.(json|ya?ml|toml)$/i,
@@ -256,14 +265,21 @@ function isNeverTransferPath(relativePath) {
 }
 
 /**
- * Build the bounded context packet a worker actually receives. Every file
- * path is checked against the never-transfer list; anything excluded is
- * reported back (never silently dropped without a trace an operator could
- * inspect), and the whole packet is redacted and size-capped. Only
- * repository-RELATIVE logical paths are ever included -- an absolute path
- * or one escaping the repository (`..`) is excluded as unsafe-to-classify,
- * per the task's own "if it cannot be classified safely, exclude it"
- * instruction, never included by best-effort guessing.
+ * Build the bounded context packet a worker actually receives. Every
+ * `fileExcerpts[].path` is checked against the never-transfer list --
+ * a fresh independent Reviewer correctly noted this earlier version of
+ * this comment overclaimed "every file path": `boundedDiff`, `testResults`,
+ * and `knownFindings` are free-form strings, never path-checked, and only
+ * pass through deepRedact()'s content-pattern-based masking. Callers must
+ * not put a sensitive file's content into those fields expecting the
+ * never-transfer list to catch it -- only fileExcerpts gets that guarantee.
+ * Anything excluded from fileExcerpts is reported back (never silently
+ * dropped without a trace an operator could inspect), and the whole packet
+ * is redacted and size-capped. Only repository-RELATIVE logical paths are
+ * ever included in fileExcerpts -- an absolute path or one escaping the
+ * repository (`..`) is excluded as unsafe-to-classify, per the task's own
+ * "if it cannot be classified safely, exclude it" instruction, never
+ * included by best-effort guessing.
  */
 export function buildContextPacket({
   task,

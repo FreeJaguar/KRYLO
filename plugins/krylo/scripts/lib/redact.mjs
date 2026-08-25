@@ -88,12 +88,38 @@ function maskLongOpaqueRuns(s) {
     .replace(/\b[A-Za-z0-9+/]{32,}={0,2}\b/g, MASK);
 }
 
+// A fresh independent Security Reviewer found a real RangeError ("Maximum
+// call stack size exceeded") thrown when redacting a single very long
+// (multi-megabyte) unbroken token-like run -- distinct from the
+// maskUrlCredentials catastrophic-backtracking ReDoS already fixed
+// elsewhere in this file, and not fully root-caused given time
+// constraints. Bounding the length any single masking pass is asked to
+// process is a safe, general guard regardless of which specific regex
+// pattern is responsible: content beyond this bound is masked outright
+// rather than risk any V8 regex engine's internal limit on a future input
+// shape not yet identified. No legitimate secret-scanning need ever
+// requires examining a single 5MB+ blob character-by-character for token
+// shapes that are, by definition, short.
+const MAX_REDACT_INPUT_LENGTH = 2_000_000;
+
 /**
  * Redact secrets, tokens, credentials, and home-directory paths from a string.
- * Non-string input is returned unchanged.
+ * Non-string input is returned unchanged. Never throws -- this function's
+ * own contract (relied on throughout state/telemetry/Cross-Harness) is to
+ * always return a safe string, never propagate an internal regex-engine
+ * failure to the caller.
  */
 export function redactText(input) {
   if (typeof input !== 'string') return input;
+  if (input.length > MAX_REDACT_INPUT_LENGTH) return MASK;
+  try {
+    return redactTextUnbounded(input);
+  } catch {
+    return MASK;
+  }
+}
+
+function redactTextUnbounded(input) {
   let out = input;
   out = maskPem(out);
   out = maskGithubTokens(out);
