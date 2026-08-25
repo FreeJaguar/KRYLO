@@ -115,7 +115,12 @@ Controls:
 - The context packet excludes secret/credential-shaped paths and is redacted and size-bounded before it ever leaves the process; only repository-relative logical paths are included.
 - The worker receives no write-capable tool, no MCP access, no data root, and an explicit environment allowlist (never the parent's full environment or any credential).
 - The worker's output is schema-validated and untrusted: it cannot itself prove a criterion, resolve an approval, set completion, or cause an automatic patch/command to run.
-- Process spawning uses argv arrays with `shell:false`; task/context content is sent via stdin, never argv.
+- Process spawning uses argv arrays with `shell:false`; task/context content is sent via stdin, never argv. On Windows, the target npm `.cmd` shim's real underlying executable is resolved and invoked directly (never via `cmd.exe`), closing a confirmed command-injection vulnerability an earlier cmd.exe-wrapping design had (an embedded double-quote in an argv element broke out of cmd.exe's own command-line re-parsing); see ADR-0030's second review-round section for the full account.
+
+Residual, disclosed, not fixed:
+
+- **Approval-class evasion.** The `cross-harness-invocation` `require-approval` pattern, like every other text-matching class in `production-policy.json`, can in principle be evaded by string-splitting, globbing, a shell-variable indirection, or a dynamic `import()` of the same script -- reproduced directly by an independent Security Reviewer. Not fixed with a KRYLO-local approval-record re-check inside `cross-harness-run.mjs`, since ADR-0025 already permanently forecloses a local approval record ever independently authorizing execution. Because this class gates irreversible third-party data egress rather than a locally-reversible action, the consequence of evasion here is worse than for most other classes, but the underlying text-matching-evasion limitation is pre-existing and system-wide, not specific to Cross-Harness.
+- **Worker's own unbounded read access.** `NEVER_TRANSFER_PATH_PATTERNS`, the context-packet size cap, and redaction bound what KRYLO sends the worker, not what the worker's own read-only tool/sandbox access might independently read and thereby transmit to its own provider as part of its own conversation, if a prompt-injected instruction inside the context packet convinced it to do so. The `securityNotice` stdin field is the only mitigation and does not claim to be a security boundary. Marked PLAUSIBLE (not independently confirmed) by the reviewer who raised it.
 
 ### Premature or false completion
 

@@ -131,6 +131,23 @@ test('cross-harness-run: an unsupported role (builder) is deterministically reje
   }
 });
 
+// Regression (L1, Reviewer): invoking cross-harness-run.mjs with no active
+// run for the resolved session previously reported failureCode INVALID_ROLE
+// (reused from an unrelated branch), which is misleading -- the real reason
+// is that no run exists to attach the invocation to, not that the role was
+// wrong. Must report the dedicated NO_ACTIVE_RUN code instead.
+test('cross-harness-run: with no active run for the session, failureCode is NO_ACTIVE_RUN, not INVALID_ROLE', () => {
+  const dataDir = mkTempDataDir();
+  try {
+    const res = runCli(dataDir, ['--role', 'reviewer', '--task', 'x', '--session', 'ch-session'], { FAKE_WORKER_MODE: 'valid' });
+    assert.equal(res.json?.ok, false);
+    assert.equal(res.json.failureCode, 'NO_ACTIVE_RUN');
+    assert.equal(res.json.error, 'no-current-run');
+  } finally {
+    rmSyncRetry(dataDir);
+  }
+});
+
 // J. Output parsing
 test('cross-harness-run: malformed JSON output is rejected as INVALID_OUTPUT', () => {
   const dataDir = mkTempDataDir();

@@ -151,7 +151,7 @@ async function main() {
   const hostSessionId = resolveSessionId({ explicitSessionId: args.session }) || undefined;
   const pointer = readActiveRunPointer({ projectRootHash, host: nativeHost, hostSessionId });
   if (!pointer.ok || !pointer.value?.runId) {
-    output({ ok: false, failureCode: 'INVALID_ROLE', error: 'no-current-run' });
+    output({ ok: false, failureCode: 'NO_ACTIVE_RUN', error: 'no-current-run' });
     process.exit(1);
     return;
   }
