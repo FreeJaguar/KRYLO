@@ -156,8 +156,8 @@
     },
     {
       "path": "RELEASE_READINESS.md",
-      "bytes": 15621,
-      "sha256": "0e3d5e41a62ef7ddc57fc1a68e31bcf61a7a08bffe6d10093175055e234f9a94"
+      "bytes": 21561,
+      "sha256": "3659afb8f2fb7d64823a66ecec77db22f4aad9cdb589fa0b0f7fa64ae917341a"
     },
     {
       "path": "SECURITY.md",
