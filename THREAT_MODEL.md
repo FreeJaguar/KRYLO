@@ -161,7 +161,7 @@ Controls:
 - Dependency, secret, and workflow scans.
 - SBOM and release attestation.
 - No install-time remote code download in KRYLO Core.
-- **Ecosystem Maintenance drift detection (ADR-0031)**: a monthly, read-only checker independently verifies over the network that every pinned GitHub Action SHA still resolves to the exact commit its own version comment claims (catching a force-moved tag or a stale re-pin comment), and that KRYLO's documented Claude Code/Codex minimum/tested versions are still genuinely available upstream -- both are evidence for a human, never an automatic pin change. Upstream data (release metadata, tag/commit responses) is treated as untrusted: parsed only for the small, bounded fields needed (`tag_name`, `sha`, `published_at`), never eval'd, never used to construct a shell command, and never used to auto-download or auto-execute anything.
+- **Ecosystem Maintenance drift detection (ADR-0031)**: a monthly, read-only checker independently verifies over the network that every pinned GitHub Action SHA still resolves to the exact commit its own version comment claims (catching a force-moved tag or a stale re-pin comment), and that KRYLO's documented Claude Code/Codex minimum/tested versions are still genuinely available upstream -- both are evidence for a human, never an automatic pin change. Upstream data (release metadata, tag/commit responses) is treated as untrusted: parsed only for the small, bounded fields actually used (`tag_name`, `sha`), never eval'd, never used to construct a shell command, and never used to auto-download or auto-execute anything.
 
 ### Upstream drift causing an undetected internal inconsistency
 
