@@ -73,6 +73,21 @@ test('a missing version source is reported as blocked, not silently skipped', as
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });
 
+// Regression (MEDIUM-5, Reviewer, CONFIRMED): a missing source previously
+// MASKED a genuine, simultaneous disagreement among the sources that WERE
+// present -- downgrading a real, unambiguous version drift to a merely
+// 'blocked'/medium finding (and dropping the exit-1 a real disagreement
+// deserves) instead of 'changed'/high.
+test('a missing source does NOT mask a genuine disagreement among the remaining sources (MEDIUM-5)', async () => {
+  const repoRoot = makeFixtureRepo({ codexPluginVersion: '0.0.9' });
+  fs.rmSync(path.join(repoRoot, '.claude-plugin', 'marketplace.json'));
+  const results = await runInternalDriftChecks({ repoRoot });
+  const check = results.find((r) => r.id === 'product-version-agreement');
+  assert.equal(check.status, 'changed', 'a real disagreement must be reported even when another source is also missing');
+  assert.equal(check.severity, 'high');
+  fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
 test('malformed package.json engines is flagged, not silently accepted', async () => {
   const repoRoot = makeFixtureRepo();
   const pkgPath = path.join(repoRoot, 'package.json');

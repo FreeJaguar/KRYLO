@@ -200,6 +200,10 @@ plugins/krylo/tests/unit/cross-harness.test.mjs                # + coordinator: 
 plugins/krylo/tests/unit/spawn-platform.test.mjs                # + Windows shell:false-safe spawn wrapper
 plugins/krylo/tests/hooks/cross-harness-run.test.mjs            # + end-to-end CLI, real fake-worker fixtures
 plugins/krylo/tests/fixtures/cross-harness/                     # + deterministic fake Claude/Codex worker CLI
+plugins/krylo/tests/maintenance/*.test.mjs   # + Ecosystem Maintenance: version parsing, upstream-client
+                                              # safety, per-category checks, result schema, offline/live
+                                              # integration (docs/adr/0031)
+plugins/krylo/tests/governance/ecosystem-maintenance-workflow.test.mjs   # + static read-only-workflow proof
 plugins/krylo/evals/evals.json
 plugins/krylo/evals/expected-behaviors.md
 ```

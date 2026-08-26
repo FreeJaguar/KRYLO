@@ -59,17 +59,28 @@ export async function runInternalDriftChecks({ repoRoot }) {
   const allAgree = presentValues.length > 0 && presentValues.every((v) => v === presentValues[0]);
   const missing = sources.filter((s) => s.value === null);
 
+  // A fresh independent Reviewer found and reproduced that evaluating
+  // `missing.length > 0` BEFORE `allAgree` let a missing source MASK a
+  // genuine, simultaneous version disagreement among the sources that
+  // WERE present: the combined case (one source missing, and the
+  // remaining sources disagree with each other) previously downgraded to
+  // 'blocked'/'medium' -- dropping computeExitCode's exit 1 -- instead of
+  // the 'changed'/'high' a real disagreement deserves. Disagreement among
+  // present values is now evaluated independently and takes priority; a
+  // missing source alone (with the rest agreeing) still reports
+  // 'blocked'/'medium', never silently "ok".
+  const disagreement = presentValues.length > 0 && !allAgree;
   results.push(
     buildCheckResult({
       id: 'product-version-agreement',
       category: 'internal-drift',
-      status: missing.length > 0 ? 'blocked' : allAgree ? 'ok' : 'changed',
-      severity: missing.length > 0 ? 'medium' : allAgree ? 'info' : 'high',
+      status: disagreement ? 'changed' : missing.length > 0 ? 'blocked' : 'ok',
+      severity: disagreement ? 'high' : missing.length > 0 ? 'medium' : 'info',
       current: presentValues[0] ?? null,
       observed: sources.map((s) => `${s.label}=${s.value ?? 'missing'}`).join('; '),
       evidence: sources.map((s) => s.label),
-      recommendedAction: missing.length > 0 || !allAgree ? 'Reconcile the KRYLO product version across all listed sources.' : 'none',
-      requiresHumanReview: missing.length > 0 || !allAgree,
+      recommendedAction: disagreement || missing.length > 0 ? 'Reconcile the KRYLO product version across all listed sources.' : 'none',
+      requiresHumanReview: disagreement || missing.length > 0,
     }),
   );
 

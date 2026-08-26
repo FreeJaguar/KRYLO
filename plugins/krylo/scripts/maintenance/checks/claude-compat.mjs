@@ -160,17 +160,31 @@ export async function runClaudeCompatChecks({ repoRoot, offline, upstream }) {
   }
 
   const floorRelease = await upstream.getGithubReleaseByTag('anthropics', 'claude-code', `v${floor}`);
+  // A fresh independent Verifier reproduced (directly, via a real GitHub
+  // API probe that hit the unauthenticated 60/hour rate limit mid-session)
+  // that every upstream.getGithubReleaseByTag() failure reason -- a
+  // genuine 404 (the release was truly removed), but ALSO a transient
+  // 429/5xx/timeout/network-error -- was collapsed into the same
+  // 'changed'/'high'/requiresHumanReview:true result. Ordinary rate
+  // limiting on a shared CI runner IP would therefore produce a false
+  // high-severity "pinned floor unavailable" alert every time it happens.
+  // Only a genuine 'not-found' means the release itself is gone; every
+  // other failure reason is transport-level and must be 'unavailable',
+  // matching this checker's own documented "a transport failure becomes
+  // unavailable, never a fabricated pass OR a fabricated break" design
+  // intent (ADR-0031).
+  const floorGenuinelyMissing = !floorRelease.ok && floorRelease.reason === 'not-found';
   results.push(
     buildCheckResult({
       id: 'claude-pinned-floor-still-available-upstream',
       category: 'claude-compat',
-      status: floorRelease.ok ? 'ok' : 'changed',
-      severity: floorRelease.ok ? 'info' : 'high',
+      status: floorRelease.ok ? 'ok' : floorGenuinelyMissing ? 'changed' : 'unavailable',
+      severity: floorRelease.ok ? 'info' : floorGenuinelyMissing ? 'high' : 'info',
       current: floor,
       observed: floorRelease.ok ? 'available' : floorRelease.reason,
       evidence: [`https://api.github.com/repos/anthropics/claude-code/releases/tags/v${floor}`],
-      recommendedAction: floorRelease.ok ? 'none' : 'The pinned minimum-supported Claude Code release is no longer available upstream.',
-      requiresHumanReview: !floorRelease.ok,
+      recommendedAction: floorGenuinelyMissing ? 'The pinned minimum-supported Claude Code release is no longer available upstream.' : 'none',
+      requiresHumanReview: floorGenuinelyMissing,
     }),
   );
 

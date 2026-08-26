@@ -109,6 +109,32 @@ test('unavailable upstream: the pinned floor no longer resolves -> changed/high,
   fs.rmSync(repoRoot, { recursive: true, force: true });
 });
 
+// Regression (Verifier, CONFIRMED via a real live GitHub API rate-limit
+// hit mid-review): a transient upstream failure (rate-limited, timeout,
+// network-error, server-error) previously collapsed into the SAME
+// 'changed'/'high'/requiresHumanReview:true result as a genuine 404 --
+// meaning ordinary GitHub API rate limiting on a shared CI runner would
+// produce a false high-severity "pinned floor unavailable" alert on
+// every affected monthly run. Only a genuine not-found means the release
+// itself is actually gone.
+test('a transient upstream failure (rate-limited) is reported as unavailable, never as a false "floor unavailable" alert', async () => {
+  const repoRoot = makeFixtureRepo();
+  const upstream = {
+    async getGithubReleaseByTag() {
+      return { ok: false, reason: 'rate-limited' };
+    },
+    async getLatestGithubRelease() {
+      return { ok: false, reason: 'rate-limited' };
+    },
+  };
+  const results = await runClaudeCompatChecks({ repoRoot, offline: false, upstream });
+  const floorCheck = results.find((r) => r.id === 'claude-pinned-floor-still-available-upstream');
+  assert.equal(floorCheck.status, 'unavailable');
+  assert.equal(floorCheck.severity, 'info');
+  assert.equal(floorCheck.requiresHumanReview, false);
+  fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
 test('offline mode: live-only checks report "unavailable", never a false "ok"', async () => {
   const repoRoot = makeFixtureRepo();
   const results = await runClaudeCompatChecks({ repoRoot, offline: true, upstream: fakeUpstream() });

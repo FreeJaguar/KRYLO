@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { fetchUpstreamJson } from '../../scripts/lib/upstream-client.mjs';
+import { fetchUpstreamJson, getGithubCommitForRef } from '../../scripts/lib/upstream-client.mjs';
 
 test('allowed domain (api.github.com): a normal 200 JSON response is returned', async (t) => {
   t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ tag_name: 'v1.0.0' }), { status: 200 }));
@@ -106,6 +106,105 @@ test('a genuine network error is retried exactly once, not zero and not more tha
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'network-error');
   assert.equal(fetchMock.mock.callCount(), 2, 'exactly one retry after the first network-level failure');
+});
+
+// Regression (Security Reviewer M-1, CONFIRMED via a real local slow-body
+// server: 35s observed against a 10s configured cap): the request timeout
+// previously covered only fetch()'s own headers-received phase --
+// clearTimeout(timer) fired the instant fetch() resolved, before the body
+// was ever read, so a server returning headers instantly and then
+// dribbling the body indefinitely could hang the checker forever (the 2MB
+// size cap never helps, since the byte count never gets there).
+//
+// This test proves the STRUCTURAL fix directly -- clearTimeout is not
+// called until the entire hop (headers AND body) completes -- via a spy on
+// the real global clearTimeout, rather than trying to simulate the actual
+// 10-second timer firing. An earlier version of this test used node:test's
+// mock timers to simulate the real 10s cap elapsing; that approach proved
+// flaky (correct when run in isolation, hanging when run alongside this
+// file's other tests, apparently a mock-timers/global-fetch-mock
+// interaction) and was replaced with this deterministic, race-free shape,
+// which is a strictly stronger test of the actual bug anyway: it proves
+// the timer is never cleared prematurely, which is the exact root cause,
+// rather than depending on a simulated timer callback also firing
+// correctly.
+test('the timer is not cleared until the ENTIRE hop (headers AND body) completes -- closes the M-1 premature-clearTimeout bug', async (t) => {
+  const clearTimeoutCalls = [];
+  const realClearTimeout = globalThis.clearTimeout;
+  t.mock.method(globalThis, 'clearTimeout', (...args) => {
+    clearTimeoutCalls.push(Date.now());
+    return realClearTimeout(...args);
+  });
+
+  let releaseBody;
+  const bodyGate = new Promise((resolve) => { releaseBody = resolve; });
+  let stage = 'gated'; // gated -> chunk -> done
+  const jsonBytes = new TextEncoder().encode('{"ok":true}');
+  const gatedBody = {
+    getReader() {
+      return {
+        async read() {
+          if (stage === 'gated') {
+            await bodyGate;
+            stage = 'chunk';
+            return { done: false, value: jsonBytes };
+          }
+          if (stage === 'chunk') {
+            stage = 'done';
+            return { done: true, value: undefined };
+          }
+          return { done: true, value: undefined };
+        },
+        cancel: async () => {},
+      };
+    },
+  };
+  t.mock.method(globalThis, 'fetch', async () => ({ status: 200, headers: { get: () => null }, body: gatedBody }));
+
+  const resultPromise = fetchUpstreamJson('https://api.github.com/repos/x/y/releases/latest');
+  // Let the async chain reach readBoundedBody()'s pending reader.read()
+  // call -- a handful of microtask turns, not a real-time wait.
+  for (let i = 0; i < 5; i += 1) await Promise.resolve();
+  assert.equal(clearTimeoutCalls.length, 0, 'clearTimeout must not fire while the body read is still pending -- this was exactly the M-1 bug (it fired right after headers, before the body was ever read)');
+
+  releaseBody();
+  const result = await resultPromise;
+  assert.equal(result.ok, true);
+  assert.equal(clearTimeoutCalls.length, 1, 'clearTimeout must fire exactly once, only after the body read actually completes');
+});
+
+test('the domain allowlist checks scheme and port, not only hostname: a plaintext http:// redirect to an allowlisted host is refused', async (t) => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async (url) => {
+    if (String(url) === 'https://api.github.com/repos/x/y/releases/latest') {
+      return new Response(null, { status: 302, headers: { location: 'http://api.github.com/repos/x/y/releases/latest' } });
+    }
+    return new Response('{"stolen":true}', { status: 200 });
+  });
+  const result = await fetchUpstreamJson('https://api.github.com/repos/x/y/releases/latest');
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'domain-not-allowed');
+  assert.equal(fetchMock.mock.callCount(), 1, 'the plaintext-http redirect target must never actually be fetched');
+});
+
+test('the domain allowlist rejects a non-443 port on an otherwise-allowlisted host', async (t) => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async () => new Response('{}', { status: 200 }));
+  const result = await fetchUpstreamJson('https://api.github.com:8080/repos/x/y/releases/latest');
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'domain-not-allowed');
+  assert.equal(fetchMock.mock.callCount(), 0);
+});
+
+// Regression (Security Reviewer L-3): owner/repo ultimately originate from
+// parsed workflow-file text (actions-pins.mjs), not a fixed literal --
+// an unencoded "/" in owner/repo could otherwise let a crafted value
+// address a different API path segment.
+test('getGithubCommitForRef URL-encodes owner/repo, closing a path-segment-injection shape at the source', async (t) => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async (url) => {
+    assert.ok(!String(url).includes('/../'), `owner/repo must be encoded, not left to form a literal path segment: ${url}`);
+    return new Response(JSON.stringify({ sha: 'abc' }), { status: 200 });
+  });
+  await getGithubCommitForRef('evil/..', 'also-evil', 'v1.0.0');
+  assert.equal(fetchMock.mock.callCount(), 1);
 });
 
 test('a network error that succeeds on the single retry returns the successful result', async (t) => {

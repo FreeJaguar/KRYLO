@@ -26,12 +26,42 @@ import { platformSpawnTarget } from '../../lib/spawn-platform.mjs';
  * environment where npm was installed by some other, cmd-shim-based means)
  * if the colocated npm-cli.js is not found.
  */
-function resolveNpmInvocation(args) {
+// Exported for direct testability (MEDIUM-9, Reviewer: this fix previously
+// had zero test coverage of any kind -- neither the colocated-npm-cli.js
+// branch, the platformSpawnTarget fallback, nor the null-resolution guard
+// were ever exercised by a test).
+export function resolveNpmInvocation(args) {
   const colocatedNpmCli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
   if (fs.existsSync(colocatedNpmCli)) {
     return { command: process.execPath, args: [colocatedNpmCli, ...args] };
   }
   return platformSpawnTarget('npm', args);
+}
+
+/**
+ * Run `npm audit --json` for real and return { ok, json } or { ok:false }.
+ * Extracted into its own exported function (MEDIUM-9, Reviewer) so tests
+ * can inject a fake in place of it via runDependenciesChecks's
+ * `runNpmAudit` parameter, exercising the severity-mapping logic below
+ * without spawning a real process or depending on real npm-registry
+ * network reachability.
+ */
+export function runNpmAuditForReal(repoRoot) {
+  try {
+    const target = resolveNpmInvocation(['audit', '--json']);
+    if (!target) return { ok: false };
+    const res = spawnSync(target.command, target.args, {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      shell: false,
+      timeout: 30_000,
+      maxBuffer: 2 * 1024 * 1024,
+    });
+    if (res.error || typeof res.stdout !== 'string' || res.stdout.trim() === '') return { ok: false };
+    return { ok: true, json: JSON.parse(res.stdout) };
+  } catch {
+    return { ok: false };
+  }
 }
 
 function readJson(repoRoot, relPath) {
@@ -49,7 +79,7 @@ function countDeps(pkgJson) {
   return { deps, devDeps, total: deps + devDeps };
 }
 
-export async function runDependenciesChecks({ repoRoot, offline }) {
+export async function runDependenciesChecks({ repoRoot, offline, runNpmAudit = runNpmAuditForReal }) {
   const results = [];
 
   const pkgJson = readJson(repoRoot, 'package.json');
@@ -120,28 +150,7 @@ export async function runDependenciesChecks({ repoRoot, offline }) {
     return results;
   }
 
-  let auditResult;
-  try {
-    const target = resolveNpmInvocation(['audit', '--json']);
-    if (!target) {
-      auditResult = { ok: false };
-    } else {
-      const res = spawnSync(target.command, target.args, {
-        cwd: repoRoot,
-        encoding: 'utf8',
-        shell: false,
-        timeout: 30_000,
-        maxBuffer: 2 * 1024 * 1024,
-      });
-      if (res.error || typeof res.stdout !== 'string' || res.stdout.trim() === '') {
-        auditResult = { ok: false };
-      } else {
-        auditResult = { ok: true, json: JSON.parse(res.stdout) };
-      }
-    }
-  } catch {
-    auditResult = { ok: false };
-  }
+  const auditResult = runNpmAudit(repoRoot);
 
   if (!auditResult.ok) {
     results.push(
