@@ -1101,13 +1101,13 @@
     },
     {
       "path": "plugins/krylo/scripts/host/cross-harness/claude-worker.mjs",
-      "bytes": 11399,
-      "sha256": "7f86276ea161cf04451d67def1b36828463d522a8f87eb8af77d359c5003424c"
+      "bytes": 12172,
+      "sha256": "0c2409a5f0ae949ffa1d378965ac1a7d1e867e2aefc3825411d7b7899f07510c"
     },
     {
       "path": "plugins/krylo/scripts/host/cross-harness/codex-worker.mjs",
-      "bytes": 7821,
-      "sha256": "c024b67ee90ee114b6a03db89a6e65f8f17afb943e9d89dfa68a685524b5dc83"
+      "bytes": 8657,
+      "sha256": "5b96f6e3e616cd3600a9a5de98d2f604e9a40c350335e9a30a7f44901a73686b"
     },
     {
       "path": "plugins/krylo/scripts/lib/action-fingerprint.mjs",
@@ -1466,8 +1466,8 @@
     },
     {
       "path": "plugins/krylo/tests/hooks/cross-harness-run.test.mjs",
-      "bytes": 17073,
-      "sha256": "870477edf777192f5f04e6121fbaa2b12ca3da506ad0710fbcd4b3477140232d"
+      "bytes": 17388,
+      "sha256": "c251fba3d546c0975f564dd577ca772839e81c81d4d0a0a16c610d3032250950"
     },
     {
       "path": "plugins/krylo/tests/hooks/fingerprint.test.mjs",
