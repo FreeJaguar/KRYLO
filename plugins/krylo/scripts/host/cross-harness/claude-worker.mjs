@@ -148,15 +148,27 @@ export function spawnClaudeWorker({ cliPath = 'claude', cwd, systemPrompt, jsonS
       maxBuffer: CROSS_HARNESS_MAX_OUTPUT_BYTES,
       env: childEnv,
     });
-    // ENOBUFS (real maxBuffer overflow) is checked BEFORE the timeout
-    // check: a fresh independent Reviewer found spawnSync sets BOTH
+    // A real maxBuffer overflow's signaling is NOT consistent across
+    // platforms -- see codex-worker.mjs's identical comment. On this
+    // project's own Windows dev machine, spawnSync reliably sets BOTH
     // res.error.code='ENOBUFS' AND res.signal='SIGTERM' when the child's
-    // output exceeds maxBuffer (confirmed directly: an oversized-output
-    // fixture was reported as TIMEOUT, not OUTPUT_TOO_LARGE, in the
-    // original branch order). spawnSync never throws on maxBuffer overflow
-    // -- that is an execSync/execFileSync-only behavior -- so the old
-    // `catch (err) { if (err?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') ... }`
-    // below was dead code, removed.
+    // output exceeds maxBuffer (confirmed directly there, and checked
+    // BEFORE the timeout check below since the original branch order
+    // misreported it as TIMEOUT). A fresh evidence-first investigation of a
+    // real Ubuntu CI failure confirmed Linux instead silently truncates
+    // res.stdout to (approximately) maxBuffer bytes with NO res.error and
+    // NO res.signal at all, misreported as INVALID_OUTPUT once the
+    // truncated, unparseable text reached the caller. Checking res.stdout's
+    // own length against the configured limit first is the one signal that
+    // is unambiguous and platform-independent: no legitimate worker result
+    // should ever approach CROSS_HARNESS_MAX_OUTPUT_BYTES (every field this
+    // schema accepts is separately length-capped elsewhere). The ENOBUFS
+    // check below is kept as a second, redundant signal for whichever
+    // platform still sets it.
+    if (typeof res.stdout === 'string' && res.stdout.length >= CROSS_HARNESS_MAX_OUTPUT_BYTES) {
+      killProcessTree(res.pid);
+      return { ok: false, failureCode: 'OUTPUT_TOO_LARGE' };
+    }
     if (res.error?.code === 'ENOBUFS') {
       killProcessTree(res.pid);
       return { ok: false, failureCode: 'OUTPUT_TOO_LARGE' };

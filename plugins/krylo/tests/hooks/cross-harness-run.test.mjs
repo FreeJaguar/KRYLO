@@ -213,11 +213,15 @@ test('cross-harness-run: a slow worker exceeding the timeout is reported as TIME
 
 // Regression (M1, Reviewer, plus a Verifier-flagged coverage gap in a later
 // round): spawnSync sets BOTH res.error.code='ENOBUFS' AND res.signal=
-// 'SIGTERM' on a real maxBuffer overflow -- the original branch order
-// checked SIGTERM/timeout first and misreported oversized worker output as
-// TIMEOUT. The fake worker's 'huge-output' mode writes 50MB, well past
-// CROSS_HARNESS_MAX_OUTPUT_BYTES (2MB), to exercise this live rather than
-// only via static code reading.
+// 'SIGTERM' on a real maxBuffer overflow on Windows -- the original branch
+// order checked SIGTERM/timeout first and misreported oversized worker
+// output as TIMEOUT. A later real Ubuntu CI failure found Linux does not
+// set res.error/res.signal for the same overflow at all, silently
+// truncating stdout instead, which fell through to INVALID_OUTPUT -- fixed
+// by also checking res.stdout's own length against the configured limit
+// directly (platform-independent). The fake worker's 'huge-output' mode
+// writes 50MB, well past CROSS_HARNESS_MAX_OUTPUT_BYTES (2MB), to exercise
+// this live rather than only via static code reading.
 test('cross-harness-run: oversized worker output is reported as OUTPUT_TOO_LARGE, never misreported as TIMEOUT', () => {
   const dataDir = mkTempDataDir();
   try {
