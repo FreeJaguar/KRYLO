@@ -411,18 +411,22 @@ test('shared risk policy: every analysis-bound overflow introduced by the glob-c
   // ".env" alone, since the extra 2 groups always contribute something) --
   // but more importantly, real Bash DOES exercise every group in the
   // cross-product, unlike the old single-pass-then-give-up expander.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-glob-groups-fixture-'));
   try {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-glob-groups-fixture-'));
+    fs.writeFileSync(path.join(dir, '.envab'), 'FAKE_TEST_TOKEN=not-a-real-secret\n');
+    let expanded;
     try {
-      fs.writeFileSync(path.join(dir, '.envab'), 'FAKE_TEST_TOKEN=not-a-real-secret\n');
-      const expanded = execFileSync('bash', ['-c', 'cd "$1" && echo $2', 'bash-fixture', dir, over4Groups], { encoding: 'utf8' }).trim().split(/\s+/);
-      assert.ok(expanded.includes('.envab'), `expected real Bash cross-product of "${over4Groups}" to include ".envab", got: ${expanded.join(' ')}`);
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
+      // `over4Groups` is a hardcoded literal (never attacker/task input) and
+      // must be interpolated into the script's literal source text -- Bash
+      // brace expansion is lexical/parse-time and never re-applies to a
+      // shell variable's runtime value (see the earlier fixture above).
+      expanded = execFileSync('bash', ['-c', `cd "$1" && echo ${over4Groups}`, 'bash-fixture', dir], { encoding: 'utf8' }).trim().split(/\s+/);
+    } catch {
+      return; // no real Bash available on this machine/CI image -- skip, the classifyRiskAction assertions above already cover the requirement
     }
-  } catch {
-    // no real Bash available -- skip this specific confirmation, the
-    // classifyRiskAction assertions above already cover the requirement
+    assert.ok(expanded.includes('.envab'), `expected real Bash cross-product of "${over4Groups}" to include ".envab", got: ${expanded.join(' ')}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -461,12 +465,17 @@ test('shared risk policy: brace RANGE syntax ({a..z}, {1..10}) is not silently t
   assert.equal(result.action, 'deny', 'brace-range syntax not analyzed must fail INDETERMINATE (deny), not silently pass');
   assert.equal(result.category, 'sensitive-path');
 
+  let expanded;
   try {
-    const expanded = execFileSync('bash', ['-c', 'echo $1', 'bash-fixture', rangeExpr], { encoding: 'utf8' }).trim().split(/\s+/);
-    assert.ok(expanded.includes('.env'), `expected real Bash to expand "${rangeExpr}" to include ".env", got: ${expanded.join(' ')}`);
+    // `rangeExpr` is a hardcoded literal (never attacker/task input) and
+    // must be interpolated into the script's literal source text -- Bash
+    // brace expansion is lexical/parse-time and never re-applies to a
+    // shell variable's runtime value.
+    expanded = execFileSync('bash', ['-c', `echo ${rangeExpr}`], { encoding: 'utf8' }).trim().split(/\s+/);
   } catch {
-    // no real Bash available -- skip this specific confirmation
+    return; // no real Bash available on this machine/CI image -- skip this specific confirmation
   }
+  assert.ok(expanded.includes('.env'), `expected real Bash to expand "${rangeExpr}" to include ".env", got: ${expanded.join(' ')}`);
 });
 
 test('shared risk policy: brace expansion combined with a dense bracket-class candidate does not compound into a multi-second stall, and (per the tri-state fail-safe redesign) correctly DENIES as indeterminate rather than silently passing once the per-pattern bracket-class budget is genuinely exceeded (796 classes, far over MAX_CLASS_ATOMS_PER_PATTERN=32)', () => {
