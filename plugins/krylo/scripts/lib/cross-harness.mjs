@@ -17,8 +17,6 @@
 // environment marker alone, and never trusts a caller-supplied depth --
 // requestCrossHarnessInvocation() always computes it itself).
 
-import path from 'node:path';
-
 import { deepRedact, redactText } from './redact.mjs';
 
 export const CROSS_HARNESS_ROLES = Object.freeze(['verifier', 'reviewer', 'security-reviewer', 'architect']);
@@ -264,6 +262,31 @@ function isNeverTransferPath(relativePath) {
   return NEVER_TRANSFER_PATH_PATTERNS.some((re) => re.test(relativePath));
 }
 
+// Host-independent lexical path classifier. `path.isAbsolute()` uses the
+// RUNNING host's own semantics -- POSIX only recognizes a leading `/`, so a
+// Windows drive-absolute path like `C:\Users\someone\.env` is (wrongly)
+// classified as relative when this code runs on Linux/macOS. A fresh
+// independent review confirmed this as a real, reproduced Ubuntu CI
+// failure. isLexicallyUnsafePath() below recognizes, regardless of host OS:
+//   - POSIX absolute paths: /...
+//   - Windows drive-absolute paths: C:\... and C:/...
+//   - Windows UNC paths: \\server\share\... and //server/share/... (both
+//     already collapse to a leading `/` after separator normalization)
+//   - any `..` traversal path component
+// Deliberately conservative, matching NEVER_TRANSFER_PATH_PATTERNS' own
+// stance above: anything that could plausibly escape the intended
+// repository-relative root is treated as unsafe.
+const WINDOWS_DRIVE_ABSOLUTE_RE = /^[a-zA-Z]:\//;
+
+function isLexicallyUnsafePath(p) {
+  if (typeof p !== 'string' || p === '') return true;
+  const normalized = p.replace(/\\/g, '/');
+  if (normalized.startsWith('/')) return true;
+  if (WINDOWS_DRIVE_ABSOLUTE_RE.test(normalized)) return true;
+  if (normalized.split('/').includes('..')) return true;
+  return false;
+}
+
 /**
  * Build the bounded context packet a worker actually receives. Every
  * `fileExcerpts[].path` is checked against the never-transfer list --
@@ -293,8 +316,9 @@ export function buildContextPacket({
   const excludedPaths = [];
   const safeExcerpts = [];
   for (const excerpt of fileExcerpts) {
-    const relPath = typeof excerpt?.path === 'string' ? excerpt.path.replace(/\\/g, '/') : '';
-    if (relPath === '' || path.isAbsolute(relPath) || relPath.split('/').includes('..')) {
+    const rawPath = typeof excerpt?.path === 'string' ? excerpt.path : '';
+    const relPath = rawPath.replace(/\\/g, '/');
+    if (isLexicallyUnsafePath(rawPath)) {
       excludedPaths.push(relPath || '(unnamed)');
       continue;
     }
@@ -324,11 +348,7 @@ export function buildContextPacket({
 }
 
 function isSafeEvidencePath(p) {
-  if (typeof p !== 'string' || p === '') return false;
-  const normalized = p.replace(/\\/g, '/');
-  if (path.isAbsolute(normalized)) return false;
-  if (normalized.split('/').includes('..')) return false;
-  return true;
+  return typeof p === 'string' && p !== '' && !isLexicallyUnsafePath(p);
 }
 
 /**

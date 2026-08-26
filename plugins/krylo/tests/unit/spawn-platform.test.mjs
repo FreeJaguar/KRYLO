@@ -12,12 +12,43 @@ test('on POSIX, the command and args pass through unchanged', { skip: os.platfor
   assert.deepEqual(result, { command: 'claude', args: ['--version'] });
 });
 
-test('on Windows, a real installed npm CLI (claude) resolves to its REAL underlying target, never cmd.exe', { skip: os.platform() !== 'win32' }, () => {
-  const result = platformSpawnTarget('claude', ['--version', '--foo']);
-  assert.ok(result, 'claude must resolve on this environment');
-  assert.doesNotMatch(result.command.toLowerCase(), /cmd\.exe$/, 'must never route through cmd.exe -- see spawn-platform.mjs header comment for why');
-  assert.match(result.command.toLowerCase(), /\.exe$/);
-  assert.deepEqual(result.args.slice(-2), ['--version', '--foo']);
+// Regression: this test originally called `platformSpawnTarget('claude', ...)`
+// directly, requiring a REAL Claude Code CLI to be installed on whatever
+// machine runs the suite -- it passed on this project's own dev machine
+// (which has claude installed) but failed outright on a generic
+// GitHub-hosted Windows CI runner with neither claude nor codex
+// preinstalled ("claude must resolve on this environment"), confirmed via
+// the actual failing CI run. Rewritten to use a controlled, disposable
+// `.cmd` shim fixture (in the exact npm `cmd-shim` shape this module
+// documents supporting) added to a temporary PATH prefix instead --
+// exercises the SAME production code path (`resolveOnPath()`'s real
+// `where` lookup, then `resolveWindowsShimTarget()`'s real shim parsing)
+// without depending on any specific CLI being present on the runner
+// image. The one real, always-available executable every environment
+// running this test already has is `node.exe` itself (`process.execPath`),
+// used here as the fixture shim's own real target.
+test('on Windows, an npm-style CLI resolves to its REAL underlying target via a controlled fixture shim, never cmd.exe', { skip: os.platform() !== 'win32' }, () => {
+  const fixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-shim-fixture-'));
+  const shimPath = path.join(fixtureDir, 'krylo-fixture-cli.cmd');
+  // The exact npm cmd-shim single-target shape: one quoted absolute path,
+  // then a bare %* forwarding every argument.
+  fs.writeFileSync(shimPath, `@ECHO off\r\n"${process.execPath}" %*\r\n`);
+  const originalPath = process.env.PATH;
+  try {
+    process.env.PATH = `${fixtureDir}${path.delimiter}${originalPath}`;
+    const result = platformSpawnTarget('krylo-fixture-cli', ['--version', '--foo']);
+    assert.ok(result, 'the fixture shim must resolve via the real PATH-lookup + shim-parsing code path');
+    assert.doesNotMatch(result.command.toLowerCase(), /cmd\.exe$/, 'must never route through cmd.exe -- see spawn-platform.mjs header comment for why');
+    assert.match(result.command.toLowerCase(), /\.exe$/);
+    assert.deepEqual(result.args.slice(-2), ['--version', '--foo']);
+    // Prove it actually spawns, not just resolves: node.exe --version.
+    const res = spawnSync(result.command, [...result.args.slice(0, -2), '--version'], { encoding: 'utf8', shell: false, timeout: 10_000 });
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /^v?\d+\.\d+\.\d+/);
+  } finally {
+    process.env.PATH = originalPath;
+    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  }
 });
 
 test('on Windows, spawning the resolved real target actually works (real process, real version output)', { skip: os.platform() !== 'win32' }, () => {
@@ -69,21 +100,57 @@ test('spawning a bare, unresolvable command name fails closed (returns null), ne
   assert.equal(target, null);
 });
 
-test('resolveWindowsShimTarget correctly parses the real installed claude.cmd and codex.cmd shims', { skip: os.platform() !== 'win32' }, () => {
-  const res = spawnSync('where', ['claude'], { encoding: 'utf8', shell: false });
-  const claudeCmd = res.stdout.split(/\r?\n/).map((l) => l.trim()).find((l) => l.toLowerCase().endsWith('.cmd'));
-  assert.ok(claudeCmd, 'claude.cmd must be resolvable on PATH in this environment');
-  const target = resolveWindowsShimTarget(claudeCmd);
-  assert.ok(target);
-  assert.match(target.command.toLowerCase(), /claude\.exe$/);
+// Regression: this test originally shelled out to `where claude` / `where
+// codex` and required both real CLIs to be installed on PATH -- it passed
+// on this project's own dev machine but failed on a generic GitHub-hosted
+// Windows CI runner ("claude.cmd must be resolvable on PATH in this
+// environment"), confirmed via the actual failing CI run. Rewritten to
+// build two controlled, disposable fixture `.cmd` files reproducing the two
+// real npm cmd-shim shapes this module documents supporting (single quoted
+// .exe target, and the node.exe+colocated-script shape with %dp0%/%_prog%
+// substitution and surrounding control-flow junk, mirroring the real
+// installed claude.cmd/codex.cmd shapes characterized when this module was
+// written) -- exercising the exact same parsing logic without requiring
+// either CLI to be present. The node+script fixture deliberately has no
+// node.exe colocated, forcing the shim's own documented PATH-fallback
+// branch (`%_prog%` -> bare `node`) through `resolveOnPath()`; `node` is
+// guaranteed present on any environment capable of running this test suite
+// at all, so this needs no external dependency.
+test('resolveWindowsShimTarget correctly parses controlled fixture cmd-shims (single-exe shape and node+script shape), independent of any preinstalled claude/codex CLI', { skip: os.platform() !== 'win32' }, () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-shim-parse-fixture-'));
+  try {
+    const singleShim = path.join(dir, 'fixture-single.cmd');
+    fs.writeFileSync(singleShim, `@ECHO off\r\n"${process.execPath}" %*\r\n`);
+    const singleTarget = resolveWindowsShimTarget(singleShim);
+    assert.ok(singleTarget);
+    assert.equal(singleTarget.command, process.execPath);
+    assert.deepEqual(singleTarget.prefixArgs, []);
 
-  const res2 = spawnSync('where', ['codex'], { encoding: 'utf8', shell: false });
-  const codexCmd = res2.stdout.split(/\r?\n/).map((l) => l.trim()).find((l) => l.toLowerCase().endsWith('.cmd'));
-  assert.ok(codexCmd, 'codex.cmd must be resolvable on PATH in this environment');
-  const codexTarget = resolveWindowsShimTarget(codexCmd);
-  assert.ok(codexTarget);
-  assert.match(codexTarget.command.toLowerCase(), /node\.exe$/);
-  assert.ok(codexTarget.prefixArgs.length === 1 && /codex\.js$/i.test(codexTarget.prefixArgs[0]));
+    const nodeShim = path.join(dir, 'fixture-node-script.cmd');
+    fs.writeFileSync(nodeShim, [
+      '@ECHO off',
+      'GOTO start',
+      ':find_dp0',
+      'SET dp0=%~dp0',
+      'EXIT /b',
+      ':start',
+      'SETLOCAL',
+      'CALL :find_dp0',
+      'IF EXIST "%dp0%node.exe" (',
+      '  SET "_prog=%dp0%node.exe"',
+      ') ELSE (',
+      '  SET "_prog=node"',
+      ')',
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%" "%dp0%fixture-script.js" %*',
+      '',
+    ].join('\r\n'));
+    const scriptTarget = resolveWindowsShimTarget(nodeShim);
+    assert.ok(scriptTarget, 'the node+script fixture shim must resolve via the documented %_prog% PATH-fallback branch');
+    assert.match(scriptTarget.command.toLowerCase(), /node\.exe$/);
+    assert.ok(scriptTarget.prefixArgs.length === 1 && /fixture-script\.js$/i.test(scriptTarget.prefixArgs[0]));
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('resolveWindowsShimTarget fails closed (returns null) on an unrecognized shim format, never guesses', { skip: os.platform() !== 'win32' }, () => {

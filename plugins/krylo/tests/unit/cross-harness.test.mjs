@@ -160,6 +160,34 @@ test('context packet excludes an absolute path and a traversal path as unsafe-to
   assert.equal(result.excludedPaths.length, 2);
 });
 
+// Regression: buildContextPacket() used to classify path safety with
+// `path.isAbsolute()`, which uses the RUNNING host's own semantics -- a
+// Windows drive-absolute path like `C:\Users\x\secret.txt` is silently
+// treated as relative (and therefore included) when this code runs on
+// Linux/macOS, confirmed as a real Ubuntu CI failure. This must classify
+// identically no matter which host OS actually runs it.
+test('context packet file-path safety classification is identical regardless of host OS', () => {
+  const unsafePaths = [
+    '/etc/passwd', // POSIX absolute
+    'C:\\Users\\eliyahus\\secret.txt', // Windows drive-absolute, backslash
+    'C:/Users/eliyahus/secret.txt', // Windows drive-absolute, forward slash
+    '\\\\server\\share\\secret.txt', // Windows UNC, backslash
+    '//server/share/secret.txt', // Windows UNC, forward slash
+    '../../etc/passwd', // traversal
+    'src/../../etc/passwd', // embedded traversal
+  ];
+  for (const unsafePath of unsafePaths) {
+    const result = buildContextPacket({ task: 'review', fileExcerpts: [{ path: unsafePath, content: 'x' }] });
+    assert.equal(result.ok, true);
+    assert.equal(result.packet.fileExcerpts.length, 0, `${unsafePath} must be excluded as unsafe-to-classify`);
+    assert.equal(result.excludedPaths.length, 1);
+  }
+
+  const safeResult = buildContextPacket({ task: 'review', fileExcerpts: [{ path: 'src/lib/config.js', content: 'x' }] });
+  assert.equal(safeResult.packet.fileExcerpts.length, 1, 'an ordinary repository-relative path must still be included');
+  assert.equal(safeResult.excludedPaths.length, 0);
+});
+
 test('context packet redacts secret-shaped content inside an otherwise-allowed file excerpt', () => {
   const result = buildContextPacket({
     task: 'review',
@@ -258,6 +286,29 @@ test('a path-traversal finding evidence entry is rejected', () => {
     findings: [{ severity: 'low', title: 'x', confidence: 'high', recommendation: 'y', evidence: [{ path: '../../secrets.json', description: 'z' }] }],
   }));
   assert.equal(result.ok, false);
+});
+
+test('finding evidence path safety classification is identical regardless of host OS', () => {
+  const unsafePaths = [
+    '/etc/passwd',
+    'C:\\Users\\eliyahus\\secret.txt',
+    'C:/Users/eliyahus/secret.txt',
+    '\\\\server\\share\\secret.txt',
+    '//server/share/secret.txt',
+    '../../secrets.json',
+  ];
+  for (const unsafePath of unsafePaths) {
+    const result = validateCrossHarnessResult(validResult({
+      findings: [{ severity: 'low', title: 'x', confidence: 'high', recommendation: 'y', evidence: [{ path: unsafePath, description: 'z' }] }],
+    }));
+    assert.equal(result.ok, false, `${unsafePath} must be rejected as an unsafe evidence path`);
+    assert.equal(result.failureCode, 'INVALID_OUTPUT');
+  }
+
+  const safeResult = validateCrossHarnessResult(validResult({
+    findings: [{ severity: 'low', title: 'x', confidence: 'high', recommendation: 'y', evidence: [{ path: 'src/lib/config.js', description: 'z' }] }],
+  }));
+  assert.equal(safeResult.ok, true, 'an ordinary repository-relative evidence path must still be accepted');
 });
 
 test('a malformed line number is rejected', () => {

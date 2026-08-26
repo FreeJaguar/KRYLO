@@ -328,3 +328,24 @@ test('cross-harness-run: the disposable worker invocation directory is cleaned u
     rmSyncRetry(dataDir);
   }
 });
+
+// Regression: fake-worker.sh is a shebang script meant to be exec'd
+// directly on POSIX by cross-harness-process.mjs. It was previously
+// committed to git as mode 100644 (non-executable), which had no effect on
+// this project's own Windows dev machine (Windows has no POSIX exec-bit
+// concept) but broke every Ubuntu CI checkout: the fixture became
+// unrunnable, and every test depending on it surfaced as a generic
+// WORKER_UNAVAILABLE instead of its intended specific failure code. A real
+// filesystem-permission check can't be written portably (Windows has no
+// exec bit to inspect), so this asserts on git's OWN tracked mode instead
+// -- `git ls-files -s` reports it independent of the checkout OS, and git
+// preserves it correctly through a POSIX checkout regardless of which OS
+// committed it, as long as the index itself says 100755.
+test('fake-worker.sh is tracked in git with the executable mode bit (100755), never 100644', () => {
+  const repoRoot = path.resolve(__dirname, '..', '..', '..', '..');
+  const relPath = 'plugins/krylo/tests/fixtures/cross-harness/fake-worker.sh';
+  const res = spawnSync('git', ['ls-files', '-s', relPath], { cwd: repoRoot, encoding: 'utf8', shell: false });
+  assert.equal(res.status, 0, res.stderr);
+  const mode = res.stdout.trim().split(/\s+/)[0];
+  assert.equal(mode, '100755', `${relPath} must be tracked as executable (100755); git reports: ${res.stdout.trim()}`);
+});

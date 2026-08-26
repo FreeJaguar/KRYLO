@@ -324,7 +324,14 @@ test('real isolated shell fixture: Bash genuinely expands a 33-branch brace grou
     const expr = `.{env,${branches}}`;
     let expanded;
     try {
-      expanded = execFileSync('bash', ['-c', 'cd "$1" && echo $2', 'bash-fixture', dir, expr], { encoding: 'utf8' }).trim().split(/\s+/);
+      // `expr` is fully test-generated/deterministic (never attacker or
+      // task input), and must be interpolated directly into the script's
+      // literal source text: Bash brace expansion is a lexical, parse-time
+      // transformation applied to literal `{...}` text in the command
+      // SOURCE, not re-applied when a shell variable's runtime VALUE
+      // happens to contain brace syntax (confirmed directly: passing `expr`
+      // as `$2` left it completely unexpanded on real Ubuntu CI).
+      expanded = execFileSync('bash', ['-c', `cd "$1" && echo ${expr}`, 'bash-fixture', dir], { encoding: 'utf8' }).trim().split(/\s+/);
     } catch {
       return; // no real Bash available on this machine/CI image -- skip
     }
