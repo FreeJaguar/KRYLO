@@ -1691,8 +1691,8 @@
     },
     {
       "path": "plugins/krylo/tests/unit/sensitive-path-glob.test.mjs",
-      "bytes": 49438,
-      "sha256": "dc3bf9179e39bd6402d5155af3e8ec1fd8ccca6140bd3f7943c5a0c420bd1c04"
+      "bytes": 50024,
+      "sha256": "b969c6ec6c7b4189c4e1805c572856caf2aabf596292b557aaa03b16de025689"
     },
     {
       "path": "plugins/krylo/tests/unit/session-isolation.test.mjs",
