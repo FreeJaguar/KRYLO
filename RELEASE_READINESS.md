@@ -74,6 +74,10 @@ No unresolved Critical, High, or valid Medium finding remains open.
 
 See `README.md`'s "Known limitations" section (kept in sync with this document): MCP classification is name/pattern-based, not semantic; risk-approval TTL is a fixed 15 minutes; `subagentStatusLine` remains deferred; hook-scoping relies on documented (and now live-CLI-confirmed) Claude Code skill-frontmatter behavior; no macOS CI runner.
 
+## Ecosystem Maintenance (added, ADR-0031)
+
+A read-only drift checker (`plugins/krylo/scripts/maintenance/check-ecosystem.mjs`) and a monthly, `contents: read`-only scheduled workflow (`.github/workflows/ecosystem-maintenance.yml`) now detect Claude Code/Codex version drift, GitHub Action pin drift, Node/dependency drift, and internal version-reference drift. Live-verified against this real repository: `npm test` 594 total (593 pass, 0 fail, 1 expected POSIX-only skip), a live run of the checker itself correctly identified two real, current, non-blocking drift conditions (a newer Claude Code release exists beyond the pinned floor; Codex's tested version is behind current upstream) and confirmed all 25 pinned GitHub Action SHAs still resolve correctly. This document's own **Validation matrix, test counts, and "Repository reality" section above remain the last full release-readiness pass (0.1.1 hardening checkpoint) and are known stale** relative to the current repository state (Codex Host, Cross-Harness, and now Ecosystem Maintenance have all since shipped) -- refreshing them is release-preparation scope, explicitly out of bounds for this checkpoint (task Section 25: "Plan 4 is NOT Plan 5... it must not prepare the release"), and is tracked as a prerequisite for the next actual release-readiness pass, not done here.
+
 ## Release items requiring GitHub-hosted execution or approval
 
 - Pushing `hardening/v0.1.1` (or merging it to `main`) and observing all 9 workflows (plus the new `claude-code-compat.yml`, on its own schedule) run against the real content of this branch — not done in this pass; requires explicit approval per the task's safety boundaries.

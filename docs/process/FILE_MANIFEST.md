@@ -51,6 +51,12 @@ docs/process/CROSS_HARNESS_IMPLEMENTATION_PLAN.md     # implemented: Cross-Harne
                                                        # reconciliation against real installed CLIs
 docs/claude-capability-matrix.md                      # implemented: Claude-side Cross-Harness capability
                                                        # evidence record (worker CLI, spawn platform fix)
+docs/adr/0031-ecosystem-maintenance-drift-checker.md  # accepted: read-only, official-source-only,
+                                                       # non-authoritative drift checker for KRYLO's own
+                                                       # pinned Claude/Codex/Actions/Node/dependency state
+docs/process/ECOSYSTEM_MAINTENANCE_IMPLEMENTATION_PLAN.md  # implemented: design/verification reconciliation
+.github/workflows/ecosystem-maintenance.yml           # implemented: monthly + workflow_dispatch,
+                                                       # contents:read only, invokes check-ecosystem.mjs
 ```
 
 ## Plugin root
@@ -77,6 +83,16 @@ plugins/krylo/scripts/runtime/posttool-telemetry-codex.mjs  # implemented (Codex
 plugins/krylo/scripts/setup/install-codex.mjs                # implemented (standalone-Skill install +
                                                                # execpolicy rules generation, dry-run/
                                                                # backup/uninstall)
+plugins/krylo/scripts/maintenance/check-ecosystem.mjs        # implemented (Ecosystem Maintenance CLI,
+                                                               # docs/adr/0031)
+plugins/krylo/scripts/maintenance/checks/{claude-compat,codex-compat,actions-pins,
+  node-runtime,dependencies,internal-drift}.mjs               # implemented (six check categories)
+plugins/krylo/scripts/lib/maintenance-schema.mjs              # implemented (MaintenanceReport model)
+plugins/krylo/scripts/lib/upstream-client.mjs                 # implemented (safe, allowlisted GitHub
+                                                               # API fetch helper)
+plugins/krylo/scripts/lib/version-compare.mjs                 # implemented (narrow, explicit-failure
+                                                               # version comparator; not a semver library)
+plugins/krylo/schemas/maintenance-report.schema.json          # implemented (cross-checked reference)
 plugins/krylo/settings.json                 # NOT shipped in 0.1.0 (ADR-0016)
 plugins/krylo/monitors/monitors.json        # NOT shipped (optional; not needed, docs/07)
 plugins/krylo/README.md                     # implemented

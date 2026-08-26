@@ -17,6 +17,7 @@
     "test:status": "node --test \"plugins/krylo/tests/status/*.test.mjs\"",
     "test:setup": "node --test \"plugins/krylo/tests/setup/*.test.mjs\"",
     "test:governance": "node --test \"plugins/krylo/tests/governance/*.test.mjs\"",
+    "test:maintenance": "node --test \"plugins/krylo/tests/maintenance/*.test.mjs\"",
     "syntax": "node plugins/krylo/scripts/validation/validate-runtime.mjs --syntax-only",
     "validate:runtime": "node plugins/krylo/scripts/validation/validate-runtime.mjs"
   }

@@ -1,0 +1,46 @@
+name: ecosystem-maintenance
+
+# Read-only drift detection (docs/adr/0031-ecosystem-maintenance-drift-checker.md).
+# Deliberately monthly, not weekly: unlike claude-code-compat.yml (which
+# answers "does the plugin still validate against @latest"), this workflow
+# checks provider/Actions-pin/dependency/internal-version drift, none of
+# which changes fast enough to warrant weekly noise on top of the existing
+# weekly check. Never runs on push/pull_request -- it cannot block a PR or
+# a release, and it never writes to the repository.
+
+on:
+  schedule:
+    - cron: "5 6 1 * *" # monthly, 1st of the month, 06:05 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecosystem-maintenance-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  maintenance:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Run Ecosystem Maintenance checker (live, human-readable)
+        # Explicit exit-code capture rather than relying on the shell's
+        # pipefail default: `node ... | tee` would otherwise report the
+        # exit code of `tee`, not the checker, silently masking a real
+        # exit 1/2 (task Section 21's own "do not produce permanent noisy
+        # CI" cuts both ways -- a masked real failure is just as wrong as
+        # a false one).
+        run: |
+          set +e
+          node plugins/krylo/scripts/maintenance/check-ecosystem.mjs > report.txt
+          code=$?
+          cat report.txt >> "$GITHUB_STEP_SUMMARY"
+          cat report.txt
+          exit "$code"

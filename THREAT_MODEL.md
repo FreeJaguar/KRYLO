@@ -161,6 +161,18 @@ Controls:
 - Dependency, secret, and workflow scans.
 - SBOM and release attestation.
 - No install-time remote code download in KRYLO Core.
+- **Ecosystem Maintenance drift detection (ADR-0031)**: a monthly, read-only checker independently verifies over the network that every pinned GitHub Action SHA still resolves to the exact commit its own version comment claims (catching a force-moved tag or a stale re-pin comment), and that KRYLO's documented Claude Code/Codex minimum/tested versions are still genuinely available upstream -- both are evidence for a human, never an automatic pin change. Upstream data (release metadata, tag/commit responses) is treated as untrusted: parsed only for the small, bounded fields needed (`tag_name`, `sha`, `published_at`), never eval'd, never used to construct a shell command, and never used to auto-download or auto-execute anything.
+
+### Upstream drift causing an undetected internal inconsistency
+
+Threat:
+KRYLO's own documentation, pinned versions, and CI configuration silently diverge from each other or from what is actually available upstream, and nobody notices until a release or a user is affected.
+
+Controls:
+
+- Internal-consistency checks (product version across `package.json`/plugin manifests/marketplace manifest/`CHANGELOG.md`; Node.js engines floor across `package.json`/`package-lock.json`/CI workflow matrices) run fully offline, deterministically, on every scheduled or manual Ecosystem Maintenance run -- no network access required for this class of finding, so it cannot be silently skipped by a network outage.
+- A forward-looking planning document mentioning a future product-version line (e.g. `PRODUCT_SPEC.md`'s "Goals for 0.2" section, or `CHANGELOG.md`'s own `[Unreleased]` entries) is never compared as if it were the current released version -- only exact, structured version fields are compared, never free-form prose, closing a documented false-positive risk before it could ever ship.
+- A malformed or missing version value anywhere in this comparison is an explicit `blocked` finding, never silently treated as "no drift."
 
 ### User-settings corruption
 
