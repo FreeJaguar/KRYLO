@@ -1,6 +1,6 @@
 {
   "name": "krylo-marketplace",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Development workspace for the KRYLO Claude Code plugin and marketplace. The published artifact is the repository itself; this package exists for tests and CI only.",
   "type": "module",

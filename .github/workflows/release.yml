@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag in the current `claude plugin tag` format (for example krylo--v0.1.1). Must match plugin.json's name and version."
+        description: "Release tag in the current `claude plugin tag` format (for example krylo--v0.2.0). Must match plugin.json's name and version."
         required: true
 
 permissions:

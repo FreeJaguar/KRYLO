@@ -6,6 +6,27 @@ The project follows Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-26
+
+KRYLO becomes a genuine multi-host product: Shared Core, the released Claude Code host, and a shipped (not yet published) Codex CLI host, plus two new optional capabilities built on the same Core -- Cross-Harness and Ecosystem Maintenance. See `docs/adr/0023-multi-host-product-and-shared-core.md` onward for the full accepted-ADR trail this release represents.
+
+### Compatibility
+
+- Claude Code: minimum supported `2.1.223`; validated locally against the installed `2.1.197` (below the floor -- a disclosed, pre-existing gap; see `docs/adr/0022-claude-code-compatibility-policy.md` and `RELEASE_READINESS.md` for the full npm-vs-GitHub-Releases account) and, where the exact pinned binary was available, against a real `2.1.223` release binary.
+- Codex CLI: tested against the installed `codex-cli 0.120.0`; no formal minimum-supported floor yet, since the Codex host is not yet published (`docs/codex-capability-matrix.md`).
+- Node.js `>=22.0.0`; CI matrix covers 22 and 24; `ubuntu-latest` and `windows-latest` runners (no macOS CI runner -- see Known limitations).
+- One product version across both hosts: Claude plugin manifest, Codex plugin manifest, and the marketplace manifest all report `0.2.0` together, verified by a dedicated internal-consistency check (`plugins/krylo/scripts/maintenance/checks/internal-drift.mjs`, also runnable standalone via `node plugins/krylo/scripts/maintenance/check-ecosystem.mjs`).
+
+### Known limitations
+
+- **Codex `require-approval` denies deterministically instead of prompting** -- no verified in-hook mechanism exists on the tested Codex build to produce a real human `ask` decision the way Claude's native permission UI does. A KRYLO Codex run therefore cannot perform a `require-approval`-classified action autonomously at all.
+- **The Codex host is implemented and ships in this release but is not yet published** through any Codex-native distribution mechanism (`codex plugin` management subcommands do not exist on the tested build); install is via KRYLO's own setup script from a repository clone.
+- **Cross-Harness is optional, advisory, and depth-1** -- never write-capable, never authoritative over completion, requires the opposite provider's CLI installed and authenticated, and the Codex-native -> Claude-worker direction specifically cannot obtain real human approval today (inherits the Codex approval limitation above).
+- **Ecosystem Maintenance is detection-only** -- it never edits a repository file, updates a pin/dependency automatically, or opens a PR/issue.
+- **The Risk Gate remains defense-in-depth, not an OS sandbox**, on both hosts.
+- No macOS CI runner is exercised; macOS support relies on portable Node.js and POSIX-path test coverage, not a locally executed macOS test run.
+- GitHub-hosted CI has not run on this exact release candidate until it is actually pushed; every validation result recorded for this release was produced by local execution (`RELEASE_READINESS.md`).
+
 ### Changed
 
 - **Native permission approval replaces KRYLO-APPROVE (ADR-0024, superseded; ADR-0025).** Human approval authority for a `require-approval` classification now belongs to Claude Code's own native permission UI (`permissionDecision: "ask"`), not to any KRYLO-local chat-phrase or approval record a prompt-injected model could forge. `scripts/security/human-approval-gate.mjs` and `risk-policy.mjs`'s `consumeMatchingApproval()`/`isApprovalUsable()` are deleted: a KRYLO-local approval record can no longer independently authorize execution, for any tool.
@@ -28,10 +49,6 @@ The project follows Semantic Versioning.
 - `plugins/krylo/scripts/audit/audit-tool.mjs`: exact-match alias resolution (repository URL / owner-repo / package name -> canonical catalog id), so an external tool can be audited by any of its common names without ever matching a look-alike by substring.
 - `plugins/krylo/scripts/setup/doctor.mjs`: read-only detection for all three new adapters (executable/version probe for `omniroute` and `code-review-graph`; a read-only `~/.claude/settings.json` check for the `mattpocock-skills` plugin).
 - 11 new focused tests (`plugins/krylo/tests/security/external-adapters.test.mjs`): catalog identity, alias resolution, version-drift refusal, look-alike-name rejection, prototype-lookup safety, doctor detection with and without the adapters present, the `external-write` gate, and a bounded-time regression check against catastrophic regex backtracking.
-
-### Pending
-
-- No plugin/marketplace version bump: this addition is purely additive (new optional adapters, no existing behavior changed) and does not, by itself, require a release. The maintainer should fold it into whichever release is cut next.
 
 ## [0.1.1] - 2026-07-20
 

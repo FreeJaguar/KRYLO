@@ -1,7 +1,7 @@
 {
   "name": "krylo",
   "displayName": "KRYLO",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Autonomous, evidence-driven software-development workflow. One explicit command turns a task into a controlled run: acceptance criteria, minimal agent team, deterministic verification, independent review, bounded Orbit loop, and an evidence-backed final report.",
   "author": {
     "name": "KRYLO Maintainers"

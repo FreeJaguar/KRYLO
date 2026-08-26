@@ -13,3 +13,11 @@ Thumbs.db
 # Local test artifacts
 .tmp/
 *.log
+
+# Local checkpoint/review artifacts (task input, generated diffs/status for
+# independent review) -- never product files, never shipped, never committed.
+# See docs/process/FILE_MANIFEST.md and RELEASE_READINESS.md.
+prompt.md
+*.patch
+*-commits.txt
+*-status.txt
