@@ -22,11 +22,11 @@ function gitTrackedFiles() {
   return new Set(out.split('\n').filter(Boolean));
 }
 
-export function verifyManifest() {
+export function verifyManifest({ manifestPath = MANIFEST_PATH } = {}) {
   const errors = [];
   let manifest;
   try {
-    manifest = JSON.parse(fs.readFileSync(MANIFEST_PATH, 'utf8'));
+    manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   } catch (err) {
     return { ok: false, errors: [`could not read/parse RELEASE_MANIFEST.json: ${String(err?.message || err)}`] };
   }

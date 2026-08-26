@@ -40,7 +40,7 @@ test('doctor: healthy environment -> exit 0, correct inventory, read-only', () =
     const res = runDoctor(dataDir, home);
     assert.equal(res.status, 0, res.stdout);
     assert.equal(res.json.ok, true);
-    assert.equal(res.json.versions.krylo, '0.1.1');
+    assert.equal(res.json.versions.krylo, '0.2.0');
     // 5, not 6: the Codex Skill (krylo-run) lives at codex/skills/krylo-run,
     // deliberately outside Claude's own auto-discovered skills/ directory
     // this doctor scan counts -- an independent review found it would

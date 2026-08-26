@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const ALIAS_VERSION = '0.1.1';
+const ALIAS_VERSION = '0.2.0';
 
 function homeDir() {
   return process.env.KRYLO_TEST_HOME && process.env.KRYLO_TEST_HOME.trim() !== ''

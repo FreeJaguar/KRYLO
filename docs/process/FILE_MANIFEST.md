@@ -145,6 +145,12 @@ plugins/krylo/scripts/setup/remove-alias.mjs
 plugins/krylo/scripts/setup/doctor.mjs
 plugins/krylo/scripts/audit/audit-tool.mjs
 plugins/krylo/scripts/validation/validate-runtime.mjs
+plugins/krylo/scripts/release/generate-release-manifest.mjs   # implemented (deterministic
+                                                                # RELEASE_MANIFEST.json generation from
+                                                                # `git ls-files` + git blob hashing --
+                                                                # never the working tree, never a timestamp)
+plugins/krylo/scripts/release/verify-release-manifest.mjs     # implemented (independent hash/coverage
+                                                                # re-verification of RELEASE_MANIFEST.json)
 plugins/krylo/scripts/lib/cross-harness.mjs            # implemented (ADR-0030: request/depth/role
                                                         # validation, egress classification, context-packet
                                                         # builder, worker-result schema validation)

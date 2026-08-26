@@ -37,7 +37,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
-const RULES_VERSION = '0.1.1';
+const RULES_VERSION = '0.2.0';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 function homeDir() {
