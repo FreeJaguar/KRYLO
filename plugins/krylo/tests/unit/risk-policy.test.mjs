@@ -954,6 +954,26 @@ test('shared risk policy: trailing Windows path-component noise on an INTERMEDIA
   assert.equal(result.category, 'plugin-installation-protection');
 });
 
+// docs/adr/0034-codex-runtime-compatibility-gate.md: the new compatibility
+// contract and its evaluation module both live under pluginRoot, so both
+// must already be covered by touchesPluginInstallation() with zero new
+// code -- proven here, not assumed.
+test('shared risk policy denies writing/editing the Codex runtime compatibility contract or its evaluation module (docs/adr/0034)', () => {
+  const dataRoot = tempDataRoot();
+  const fakePluginRoot = path.join(os.tmpdir(), 'krylo-risk-policy-test-fake-plugin-root-0034');
+  const targets = [
+    path.join(fakePluginRoot, 'policies', 'codex-runtime-compatibility.json'),
+    path.join(fakePluginRoot, 'scripts', 'host', 'codex', 'runtime-compat.mjs'),
+  ];
+  for (const target of targets) {
+    const result = classifyRiskAction({
+      toolName: 'Write', toolInput: { file_path: target, content: '{}' }, cwd: process.cwd(), dataRoot, pluginRoot: fakePluginRoot,
+    });
+    assert.equal(result.action, 'deny', `expected deny for Write(${target})`);
+    assert.equal(result.category, 'plugin-installation-protection');
+  }
+});
+
 test('shared risk policy still allows the legitimate runtime CLIs the model is meant to call directly', () => {
   const dataRoot = tempDataRoot();
   for (const command of [

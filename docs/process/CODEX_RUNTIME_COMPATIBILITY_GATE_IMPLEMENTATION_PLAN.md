@@ -20,17 +20,16 @@ Companion to `docs/adr/0034-codex-runtime-compatibility-gate.md` and `docs/proce
 ## Modified files
 
 1. `plugins/krylo/scripts/security/user-prompt-submit-codex.mjs` -- gate call inserted per the design doc's integration section.
-2. `plugins/krylo/scripts/security/risk-policy.mjs` -- `HOOK_ENTRYPOINT_FILENAMES` gains `'runtime-compat.mjs'`.
-3. `plugins/krylo/tests/hooks/user-prompt-submit-codex.test.mjs` -- new gate-blocking/gate-passing cases, `KRYLO_CODEX_CLI_PATH` wired through `codexOnlyEnv()` in `tests/hooks/helpers.mjs`.
-4. `plugins/krylo/tests/unit/risk-policy.test.mjs` -- new entrypoint-protection and policy-file-protection cases.
-5. `docs/codex-capability-matrix.md`, `docs/07-hooks-and-observability.md`, `SECURITY.md`, `THREAT_MODEL.md`, `docs/process/FILE_MANIFEST.md`, `CHANGELOG.md` -- updated only where behavior actually changed.
+2. `plugins/krylo/tests/hooks/user-prompt-submit-codex.test.mjs` -- new gate-blocking/gate-passing cases, `KRYLO_CODEX_CLI_PATH` wired through `codexOnlyEnv()` in `tests/hooks/helpers.mjs`.
+3. `plugins/krylo/tests/unit/risk-policy.test.mjs` -- new write-protection regression cases naming both new files (no code change: already covered by `touchesPluginInstallation()`; `runtime-compat.mjs` is deliberately NOT added to `HOOK_ENTRYPOINT_FILENAMES`, since it has no side-effecting `main()`/stdin consumer of its own -- see ADR-0034's Security boundary section).
+4. `docs/codex-capability-matrix.md`, `docs/07-hooks-and-observability.md`, `SECURITY.md`, `THREAT_MODEL.md`, `docs/process/FILE_MANIFEST.md`, `CHANGELOG.md` -- updated only where behavior actually changed.
 
 ## Task sequence
 
 1. `parseCodexVersion`/contract-loading unit tests (malformed JSON, missing file, wrong schema version, non-array fields, missing `version` field) -- red, then `loadCompatibilityContract()`.
 2. `probeCodexVersion()` unit tests against the fake-CLI fixture (success, non-zero exit, malformed stdout, missing executable, timeout) -- red, then implementation.
 3. `evaluateCodexRuntimeCompatibility()` unit tests covering the full decision table -- red, then implementation (composes 1+2, adds exact-match lookup).
-4. `risk-policy.mjs` entrypoint-protection regression test for `runtime-compat.mjs` -- red, then the one-line `HOOK_ENTRYPOINT_FILENAMES` addition; plus a policy-file-protection case for the new JSON file (should already pass via `touchesPluginInstallation()` -- a regression test proving it, not a code change).
+4. `risk-policy.mjs` write-protection regression test naming both new files -- proves `touchesPluginInstallation()` already covers them, zero code change.
 5. `user-prompt-submit-codex.mjs` integration tests -- red (gate not wired yet): supported version bootstraps normally; unverified/blocked/probe-failed version reaches `SAFE_BLOCKED` with a finding and no active pointer; ordinary prompt unaffected; resume-of-active-run unaffected (gate not even consulted); model-supplied prompt content cannot influence the verdict. Then wire the gate into the hook.
 6. Full regression: existing `stop-gate-codex.test.mjs`, `session-start-codex.test.mjs`, `session-end-codex.test.mjs`, `codex-project-hook-launcher.test.mjs`, `risk-gate-codex.test.mjs` (if present) re-run unmodified, confirmed still green.
 7. Docs pass: capability matrix new row, `07-hooks-and-observability.md` note on the new pre-bootstrap check, `SECURITY.md`/`THREAT_MODEL.md` control entries, `FILE_MANIFEST.md`, `CHANGELOG.md`.
