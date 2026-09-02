@@ -56,7 +56,7 @@ SessionStart never calls any state-creating function. It reuses the same `resolv
 
 ## 5. SessionEnd hook behavior
 
-Given the confirmed ~1-3 second platform teardown budget (ADR-0033), this handler does at most one locked read and, conditionally, one telemetry write -- never a scan, never a bulk operation, never a call into `scripts/runtime/cleanup.mjs` (wrong scope: sessionless, retention-based, operates across every run in the data root).
+Given the confirmed ~1-3 second platform teardown budget (ADR-0033), this handler does at most one already-validated state read (via `resolveActiveRun()`) and, conditionally, one telemetry write -- never a scan, never a bulk operation, never a call into `scripts/runtime/cleanup.mjs` (wrong scope: sessionless, retention-based, operates across every run in the data root). It deliberately takes no run lock: SessionEnd's own platform kill window is shorter than the lock's retry budget, and the lock has no staleness recovery, so holding it here risked orphaning it and degrading later locked callers for the same run (found and live-reproduced by independent review; `recordEvent()` is an already-atomic append and needs no lock).
 
 | Condition | Action |
 |---|---|

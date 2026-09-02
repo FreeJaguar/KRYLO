@@ -153,6 +153,51 @@ function realpathBestEffort(candidatePath) {
   }
 }
 
+/**
+ * A fresh independent Reviewer AND a fresh independent Security Reviewer
+ * both found, and live-reproduced on Windows, that an earlier fix here
+ * (which stripped a trailing space/dot only at the very END of the whole
+ * path string) missed the identical bypass on an INTERMEDIATE component:
+ * `.codex./hooks.json`, `.codex/krylo./x.mjs`, and `.claude/settings.json.`
+ * all resolve to the exact real, protected file on disk (Windows silently
+ * ignores a trailing space/dot on ANY path component, not just the last
+ * one), while a plain end-anchored string comparison still classified them
+ * `pass`. This must run AFTER path.resolve() has already collapsed every
+ * `.`/`..` component -- applied any earlier, the same regex would destroy
+ * a genuine `..` segment, since `..` itself is entirely dots.
+ */
+function stripWindowsPathComponentNoise(resolvedPath) {
+  return resolvedPath.replace(/[ .]+(?=[\\/]|$)/g, '');
+}
+
+/**
+ * Companion to stripWindowsPathComponentNoise() for the Bash/PowerShell
+ * text-matching arms below, which search raw, free-form command text for a
+ * small, FIXED set of literal path fragments (never resolved through
+ * path.resolve()) -- transforming the whole command string the same way
+ * the resolved-path arm does would risk mangling unrelated command text
+ * that merely happens to contain "<word>. /<word>" or similar (matchesSensitivePath()'s
+ * own history above documents exactly this class of false positive from an
+ * over-broad text transform). Instead, this expands each FIXED fragment
+ * itself into the bounded set of literal variants Windows would treat as
+ * the same real path (a trailing space or dot appended to one path
+ * component at a time), so only the small, known protected-path fragment
+ * list grows -- arbitrary command text is never rewritten.
+ */
+function withWindowsTrailingNoiseVariants(fragment) {
+  const parts = fragment.split(/([\\/])/); // odd indices are the separator characters themselves
+  const variants = new Set([fragment]);
+  for (let i = 0; i < parts.length; i += 2) {
+    if (parts[i] === '') continue;
+    for (const noise of [' ', '.']) {
+      const withNoise = parts.slice();
+      withNoise[i] = `${withNoise[i]}${noise}`;
+      variants.add(withNoise.join(''));
+    }
+  }
+  return [...variants];
+}
+
 function touchesDataRoot({ toolName, toolInput, cwd, dataRoot }) {
   const variants = [
     dataRoot,
@@ -256,7 +301,7 @@ function touchesClaudeSettings({ toolName, toolInput, cwd }) {
   const pathFragments = HOST_SETTINGS_FILENAMES.flatMap((f) => [
     `.claude/${f}`,
     `.claude\\${f}`,
-  ]).map((v) => v.toLowerCase());
+  ]).map((v) => v.toLowerCase()).flatMap(withWindowsTrailingNoiseVariants);
 
   if (name === 'Bash' || name === 'PowerShell') {
     const command = String(input.command ?? '').toLowerCase();
@@ -282,13 +327,17 @@ function touchesClaudeSettings({ toolName, toolInput, cwd }) {
     // this file, then resolve through `.`/`..`/double-separators before
     // comparing the basename and immediate parent directory name -- the
     // same resolve-then-compare shape `touchesDataRoot()` and
-    // `touchesPluginInstallation()` already use.
+    // `touchesPluginInstallation()` already use. A LATER review round found
+    // this still missed a trailing space/dot Windows silently ignores on a
+    // path component (see stripWindowsPathComponentNoise()) -- applied to
+    // the already-resolved absolute path below.
     const withoutAds = target.replace(/::[^\\/]*$/, '');
     const tildeExpanded = /^~[/\\]/.test(withoutAds)
       ? path.join(os.homedir(), withoutAds.slice(2))
       : withoutAds;
     try {
-      const resolved = path.resolve(cwd || process.cwd(), tildeExpanded);
+      const rawResolved = path.resolve(cwd || process.cwd(), tildeExpanded);
+      const resolved = stripWindowsPathComponentNoise(rawResolved);
       const check = (candidate) => {
         const lower = candidate.toLowerCase();
         const base = path.basename(lower);
@@ -301,7 +350,7 @@ function touchesClaudeSettings({ toolName, toolInput, cwd }) {
       // on the real settings file once the OS resolves it. realpathBestEffort
       // mirrors touchesDataRoot()'s own symlink handling, including its
       // best-effort behavior for a target file that does not exist yet.
-      return check(realpathBestEffort(resolved));
+      return check(stripWindowsPathComponentNoise(realpathBestEffort(rawResolved)));
     } catch {
       return false;
     }
@@ -332,7 +381,7 @@ function touchesCodexProjectHooks({ toolName, toolInput, cwd }) {
     ...CODEX_PROJECT_HOOK_FILES.flatMap((f) => [`.codex/${f}`, `.codex\\${f}`]),
     '.codex/krylo/',
     '.codex\\krylo\\',
-  ].map((v) => v.toLowerCase());
+  ].map((v) => v.toLowerCase()).flatMap(withWindowsTrailingNoiseVariants);
 
   if (name === 'Bash' || name === 'PowerShell') {
     const command = String(input.command ?? '').toLowerCase();
@@ -349,20 +398,19 @@ function touchesCodexProjectHooks({ toolName, toolInput, cwd }) {
         : '';
     if (target === '') return false;
     // Same normalization discipline as touchesClaudeSettings() above: strip
-    // an NTFS alternate-data-stream suffix, strip a trailing space/dot
-    // Windows silently ignores on a path component (confirmed and fixed
-    // for touchesClaudeSettings()'s own sensitive-path matching -- the
-    // identical bypass class applies here since path.resolve()/basename()
-    // treat the trailing character as significant even though the real
-    // filesystem does not), expand a leading `~`, then resolve through
-    // `.`/`..`/double-separators (and a best-effort symlink resolution)
-    // before comparing -- never match the raw string.
-    const withoutAds = target.replace(/::[^\\/]*$/, '').replace(/[ .]+$/, '');
+    // an NTFS alternate-data-stream suffix, expand a leading `~`, then
+    // resolve through `.`/`..`/double-separators (and a best-effort symlink
+    // resolution) before comparing -- never match the raw string. A
+    // trailing space/dot Windows silently ignores on ANY path component
+    // (not just the final one -- see stripWindowsPathComponentNoise()) is
+    // stripped from the already-resolved absolute path below, not here.
+    const withoutAds = target.replace(/::[^\\/]*$/, '');
     const tildeExpanded = /^~[/\\]/.test(withoutAds)
       ? path.join(os.homedir(), withoutAds.slice(2))
       : withoutAds;
     try {
-      const resolved = path.resolve(cwd || process.cwd(), tildeExpanded);
+      const rawResolved = path.resolve(cwd || process.cwd(), tildeExpanded);
+      const resolved = stripWindowsPathComponentNoise(rawResolved);
       const check = (candidate) => {
         const lower = candidate.toLowerCase().replace(/\\/g, '/');
         const base = path.basename(lower);
@@ -375,7 +423,7 @@ function touchesCodexProjectHooks({ toolName, toolInput, cwd }) {
         return codexIdx !== -1 && segments[codexIdx + 1] === 'krylo';
       };
       if (check(resolved)) return true;
-      return check(realpathBestEffort(resolved));
+      return check(stripWindowsPathComponentNoise(realpathBestEffort(rawResolved)));
     } catch {
       return false;
     }

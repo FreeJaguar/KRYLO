@@ -199,6 +199,33 @@ test('launcher: a real crash in the delegated script still propagates a nonzero 
   }
 });
 
+// Regression coverage (Reviewer Finding 3): the crash-propagation test
+// above only covers user-prompt-submit/post-tool-use. Nothing previously
+// asserted that a GENUINE crash (as opposed to a merely missing runtime,
+// already covered by the "missing standalone runtime allows silently"
+// tests below) still exits 0/no-output for stop/session-start/session-end
+// -- exactly the fail-toward-ending property ADR-0033 depends on for Stop.
+test('launcher: a real crash in the delegated script still exits 0 with no stdout for stop/session-start/session-end (the fail-toward-ending property these three events depend on, distinct from the missing-runtime case)', () => {
+  const root = mkStandaloneRoot();
+  try {
+    copyRealRuntimeInto(root);
+    for (const [event, scriptRelPosix] of [
+      ['stop', 'orbit/stop-gate-codex.mjs'],
+      ['session-start', 'security/session-start-codex.mjs'],
+      ['session-end', 'status/session-end-codex.mjs'],
+    ]) {
+      const scriptPath = path.join(root, 'scripts', ...scriptRelPosix.split('/'));
+      fs.rmSync(scriptPath, { force: true });
+      fs.mkdirSync(scriptPath, { recursive: true }); // same "not really a script" fixture used above
+      const res = run(event, { session_id: 's1', cwd: process.cwd(), turn_id: 't1', model: 'gpt-test', permission_mode: 'default', reason: 'other' }, root);
+      assert.equal(res.status, 0, `${event} must still exit 0 on a genuine crash`);
+      assert.equal(res.stdout, '', `${event} must produce no stdout on a genuine crash`);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('launcher: stop event with a missing standalone runtime allows silently (Stop\'s safe fail-direction is letting the session end, never blocking it -- opposite of pre-tool-use)', () => {
   const root = mkStandaloneRoot();
   try {

@@ -694,6 +694,59 @@ test('shared risk policy: settings.json protection resolves the path before comp
   }
 });
 
+// Regression (High, independently found and live-reproduced by BOTH a
+// fresh Reviewer and a fresh Security Reviewer, working independently):
+// an earlier fix stripped a trailing space/dot Windows silently ignores on
+// a path component, but only at the very END of the whole target string --
+// `.claude/settings.json ` denied correctly, but `.claude/settings.json.`
+// (dot on an EARLIER/intermediate component like `.claude.`) still passed,
+// and a real PowerShell Set-Content through that spelling overwrote the
+// genuine settings.json on this platform. The same review round also found
+// that an earlier comment claimed this class was "confirmed and fixed for
+// touchesClaudeSettings()" when it never actually was -- this test is the
+// first coverage of touchesClaudeSettings() for this specific bypass class
+// at all, not merely an intermediate-component extension of it.
+test('shared risk policy: trailing Windows path-component noise (space/dot) is denied on ANY component, not just the final one, for BOTH settings-protection and Codex-project-hooks-protection (regression found independently by a fresh Reviewer and a fresh Security Reviewer, live-reproduced)', () => {
+  const dataRoot = tempDataRoot();
+  const mustDenyWrite = [
+    '.claude./settings.json',
+    '.claude /settings.json',
+    '.claude/settings.json.',
+    '.claude/settings.json ',
+    '.claude/settings.local.json.',
+    '.codex./hooks.json',
+    '.codex /hooks.json',
+    '.codex/hooks.json.',
+    '.codex/krylo./stop-gate-codex.mjs',
+    '.codex/krylo ./session-end-codex.mjs',
+  ];
+  for (const target of mustDenyWrite) {
+    const result = classifyRiskAction({ toolName: 'Write', toolInput: { file_path: target, content: 'x' }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for Write(${target})`);
+  }
+
+  // The same bypass, reached through the PowerShell/Bash text-matching arm
+  // instead of a resolved Write target -- confirmed independently
+  // exploitable via the PowerShell tool specifically.
+  const mustDenyCommand = [
+    "Get-Content '.claude./settings.json'",
+    "Set-Content '.codex./hooks.json' 'x'",
+    "cat .codex/krylo./stop-gate-codex.mjs",
+  ];
+  for (const command of mustDenyCommand) {
+    const result = classifyRiskAction({ toolName: 'PowerShell', toolInput: { command }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for PowerShell(${command})`);
+  }
+
+  // Must not over-widen into denying an unrelated, genuinely different
+  // file that merely shares a prefix.
+  const mustPass = ['.claude/settings.jsonx', '.codexnot/hooks.json', 'src/.codex/hooks.json.bak'];
+  for (const target of mustPass) {
+    const result = classifyRiskAction({ toolName: 'Write', toolInput: { file_path: target, content: 'x' }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'pass', `expected pass for Write(${target})`);
+  }
+});
+
 test('shared risk policy catches a directory symlink/junction whose name is not literally ".claude", for both settings-protection and plugin-installation-protection (regression found by a fresh Security Reviewer: neither function resolved symlinks, unlike touchesDataRoot())', () => {
   // A prior review round's comment inaccurately claimed the same
   // resolve-then-compare "shape" as touchesDataRoot() -- but touchesDataRoot()
@@ -1284,12 +1337,14 @@ test('shared risk policy denies Write/Edit/NotebookEdit/apply_patch targeting th
     '.codex/krylo/codex-project-hook-launcher.mjs',
     '.codex\\krylo\\codex-project-hook-launcher.mjs',
     'subdir/../.codex/hooks.json',
-    // Regression (Medium, found and reproduced by a fresh independent
-    // Security Reviewer): Windows silently ignores a trailing space or dot
-    // on a path component, so `.codex/hooks.json ` / `.codex/hooks.json.`
-    // land on the exact same real file while evading an end-anchored
-    // string match -- the same class of bypass already fixed for
-    // touchesClaudeSettings()'s sensitive-path matching.
+    // Regression (found and reproduced by a fresh independent Security
+    // Reviewer): Windows silently ignores a trailing space or dot on a
+    // path component, so `.codex/hooks.json ` / `.codex/hooks.json.` land
+    // on the exact same real file while evading an end-anchored string
+    // match. A LATER review round found this first fix only handled the
+    // FINAL path component -- see the dedicated intermediate-component
+    // test above for the fuller regression coverage (both this function
+    // and touchesClaudeSettings()).
     '.codex/hooks.json ',
     '.codex/hooks.json.',
     '.codex/krylo/codex-project-hook-launcher.mjs ',
