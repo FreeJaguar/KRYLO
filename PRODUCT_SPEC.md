@@ -32,7 +32,7 @@ On the Codex host, the explicit invocation is:
 $krylo-run <task>
 ```
 
-Implemented per `docs/adr/0029-codex-host-packaging-and-approval-boundary.md` and `docs/process/CODEX_HOST_IMPLEMENTATION_PLAN.md`: a real Codex CLI plugin, explicit-only (implicit invocation disabled), reusing the same Shared Core as the Claude host. `docs/codex-capability-matrix.md` records exactly which capabilities are confirmed live versus statically inspected versus deferred, including the narrower `require-approval` guarantee on Codex (deterministic deny rather than a native approval prompt) and the still-pending full VS Code project-hook enforcement setup.
+Implemented per `docs/adr/0029-codex-host-packaging-and-approval-boundary.md` and `docs/process/CODEX_HOST_IMPLEMENTATION_PLAN.md`: a real Codex CLI plugin, explicit-only (implicit invocation disabled), reusing the same Shared Core as the Claude host. Full VS Code project-scoped hook enforcement (`<repo>/.codex/hooks.json`) is implemented per `docs/adr/0032-codex-project-scoped-hook-enforcement.md`. `docs/codex-capability-matrix.md` records exactly which capabilities are confirmed live versus statically inspected versus deferred, including the narrower `require-approval` guarantee on Codex (deterministic deny rather than a native approval prompt).
 
 ## Product goals
 
@@ -84,7 +84,8 @@ KRYLO v0.1.0 will not:
 - Ship a real Codex CLI plugin (`.codex-plugin/plugin.json`, explicit-only `krylo-run` Skill, Codex Hook transport) reusing Shared Core, per `docs/adr/0029-codex-host-packaging-and-approval-boundary.md`.
 - Preserve every Claude host guarantee unchanged (regression-proven, `docs/codex-capability-matrix.md` and the full test suite).
 - Document every Codex capability gap with an explicit safe fallback rather than overclaim parity with Claude -- most notably, `require-approval` denies deterministically on Codex instead of using a native approval prompt, since current Codex `PreToolUse` output does not support one.
-- Scheduled upstream/ecosystem maintenance workflows, full VS Code project-hook enforcement setup, and the `0.2.0` version bump itself remain explicitly out of scope for this checkpoint and are tracked as separate, later work.
+- Full VS Code project-scoped hook enforcement (`<repo>/.codex/hooks.json`, `install-codex.mjs --target hooks`) is implemented per `docs/adr/0032-codex-project-scoped-hook-enforcement.md`.
+- Scheduled upstream/ecosystem maintenance workflows and the `0.2.0` version bump itself remain explicitly out of scope for this checkpoint and are tracked as separate, later work.
 
 ## Goals for 0.2 (Cross-Harness)
 

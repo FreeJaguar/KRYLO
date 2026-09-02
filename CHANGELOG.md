@@ -6,6 +6,8 @@ The project follows Semantic Versioning.
 
 ## [Unreleased]
 
+- **Codex project-scoped hook enforcement (ADR-0032), closing the VS Code follow-up disclosed in ADR-0029.** `scripts/setup/install-codex.mjs --target hooks` installs `<project>/.codex/hooks.json` with dry-run/backup/ownership-refusal/rollback, via a thin, policy-free project-local launcher (`codex/project-hooks/codex-project-hook-launcher.mjs`). `--target skill` now also bundles a real, functional runtime alongside the Skill so a standalone (non-plugin) Codex session is genuinely self-contained. Re-verified the Codex platform contract against the current stable release (`rust-v0.152.1`, not the 0.120.0 baseline every prior Codex document here was checked against) directly from primary source -- no `require-approval`/hard-deny behavior changed as a result; see `docs/codex-capability-matrix.md`.
+
 ## [0.2.0] - 2026-08-26
 
 KRYLO becomes a genuine multi-host product: Shared Core, the released Claude Code host, and a shipped (not yet published) Codex CLI host, plus two new optional capabilities built on the same Core -- Cross-Harness and Ecosystem Maintenance. See `docs/adr/0023-multi-host-product-and-shared-core.md` onward for the full accepted-ADR trail this release represents.

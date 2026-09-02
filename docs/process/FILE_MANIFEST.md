@@ -57,6 +57,10 @@ docs/adr/0031-ecosystem-maintenance-drift-checker.md  # accepted: read-only, off
 docs/process/ECOSYSTEM_MAINTENANCE_IMPLEMENTATION_PLAN.md  # implemented: design/verification reconciliation
 .github/workflows/ecosystem-maintenance.yml           # implemented: monthly + workflow_dispatch,
                                                        # contents:read only, invokes check-ecosystem.mjs
+docs/adr/0032-codex-project-scoped-hook-enforcement.md  # accepted: closes the VS Code project-hook
+                                                       # enforcement gap disclosed by ADR-0029
+docs/process/CODEX_PROJECT_HOOKS_IMPLEMENTATION_PLAN.md  # implemented: task breakdown + current-stable-
+                                                       # Codex re-verification (rust-v0.152.1)
 ```
 
 ## Plugin root
@@ -80,9 +84,12 @@ plugins/krylo/scripts/lib/host-dispatch.mjs # implemented (host adapter registry
 plugins/krylo/scripts/security/risk-gate-codex.mjs          # implemented (Codex PreToolUse gate)
 plugins/krylo/scripts/security/permission-request-codex.mjs # implemented (Codex PermissionRequest hook)
 plugins/krylo/scripts/runtime/posttool-telemetry-codex.mjs  # implemented (Codex PostToolUse telemetry)
-plugins/krylo/scripts/setup/install-codex.mjs                # implemented (standalone-Skill install +
-                                                               # execpolicy rules generation, dry-run/
-                                                               # backup/uninstall)
+plugins/krylo/scripts/setup/install-codex.mjs                # implemented (standalone-Skill install, now
+                                                               # bundling a real runtime; execpolicy rules
+                                                               # generation; project-scoped hooks install
+                                                               # (docs/adr/0032); dry-run/backup/uninstall)
+plugins/krylo/codex/project-hooks/codex-project-hook-launcher.mjs  # implemented (thin, policy-free
+                                                               # project-hook redirector, docs/adr/0032)
 plugins/krylo/scripts/maintenance/check-ecosystem.mjs        # implemented (Ecosystem Maintenance CLI,
                                                                # docs/adr/0031)
 plugins/krylo/scripts/maintenance/checks/{claude-compat,codex-compat,actions-pins,

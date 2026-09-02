@@ -41,11 +41,13 @@ KRYLO's Codex host reuses the same Shared Core as the Claude plugin (`docs/adr/0
 ```bash
 git clone https://github.com/FreeJaguar/KRYLO
 cd KRYLO
-node plugins/krylo/scripts/setup/install-codex.mjs          # dry run -- shows what would happen, changes nothing
-node plugins/krylo/scripts/setup/install-codex.mjs --apply  # installs the $krylo-run Skill (opt-in, explicit invocation only)
+node plugins/krylo/scripts/setup/install-codex.mjs --target skill          # dry run: standalone Skill + runtime
+node plugins/krylo/scripts/setup/install-codex.mjs --target skill --apply  # installs $krylo-run + its runtime
+node plugins/krylo/scripts/setup/install-codex.mjs --target hooks --project-dir <your-project>          # dry run
+node plugins/krylo/scripts/setup/install-codex.mjs --target hooks --project-dir <your-project> --apply  # project-scoped hook enforcement
 ```
 
-This installs the `krylo-run` Skill so `$krylo-run <task>` is discoverable; it does not on its own add project-scoped Hook enforcement (the Codex IDE extension does not support plugins at all, and full enforcement requires a separate, explicit trusted-rules setup step -- see `docs/codex-capability-matrix.md`). Until that additional step is completed, treat a Codex `$krylo-run` session as read-only/diagnostic rather than a fully enforced autonomous run. Uninstall by removing the installed Skill directory the script reports.
+`--target skill` installs the `krylo-run` Skill and a real, functional runtime so `$krylo-run <task>` is both discoverable and runnable standalone. `--target hooks` (run once per project, `docs/adr/0032-codex-project-scoped-hook-enforcement.md`) additionally installs `<project>/.codex/hooks.json` project-scoped enforcement -- required because the Codex IDE extension does not support plugins at all. Until `--target hooks` is applied AND trusted through Codex's own `/hooks` review flow, treat a standalone Codex `$krylo-run` session as read-only/diagnostic rather than a fully enforced autonomous run. Uninstall either target by re-running with `--remove --apply`.
 
 ### Rollback
 
@@ -110,7 +112,7 @@ The Risk Gate is **defense in depth, not an operating-system sandbox**: it is a 
 ## Known limitations
 
 - **Codex `require-approval` denies deterministically instead of prompting.** Current official Codex `PreToolUse` output does not support a native `ask` decision on the currently tested build, so an action KRYLO classifies as requiring human approval is denied outright on Codex rather than pausing for a real human decision the way it does on Claude. This is a documented, capability-driven asymmetry, not an oversight (`docs/codex-capability-matrix.md`).
-- **Codex plugin installation has no native CLI path yet.** `codex plugin` management subcommands are absent on the currently tested build; installation goes through KRYLO's own setup script (see "Installation (Codex)" above), and full Hook enforcement in VS Code additionally requires a separate, not-yet-automated trusted-rules setup step.
+- **Codex plugin installation has no native CLI path yet.** `codex plugin` management subcommands are absent on the currently tested build; installation goes through KRYLO's own setup script (see "Installation (Codex)" above). Full VS Code Hook enforcement is implemented (`--target hooks`, `docs/adr/0032-codex-project-scoped-hook-enforcement.md`); live firing through a real authenticated Codex session remains unverified in this environment.
 - **Cross-Harness is optional, advisory, and depth-1.** It never gives the opposite-provider worker write access, and its findings can never themselves prove a criterion, resolve an approval, or set run completion. It requires the opposite provider's CLI to be installed and authenticated; when unavailable, KRYLO falls back to native-only verification/review.
 - **Ecosystem Maintenance is detection-only.** It never edits a repository file, updates a dependency/pin automatically, or opens a PR/issue -- a detected drift is evidence for a separate, human-approved change.
 - MCP/external-tool classification (`plugins/krylo/scripts/security/mcp-classifier.mjs`) matches server and operation names against policy patterns; it is not a semantic analysis of what an operation actually does. Unknown MCP servers are always gated for every operation, but a known server's operation whose name does not match any configured write pattern passes through ungated.
@@ -122,7 +124,6 @@ The Risk Gate is **defense in depth, not an operating-system sandbox**: it is a 
 
 ## Roadmap (beyond 0.2, indicative)
 
-- Full VS Code project-scoped Hook enforcement setup for Codex (dry-run/backup/rollback), completing the standalone-Skill install already shipped.
 - Plugin `settings.json` with `subagentStatusLine` once the minimum supported Claude Code CLI reaches 2.1.207+.
 - User-configurable risk-approval TTL.
 - Broaden MCP operation classification beyond name/pattern matching where the platform exposes richer tool metadata.
