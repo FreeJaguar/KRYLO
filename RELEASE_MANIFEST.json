@@ -661,8 +661,8 @@
     },
     {
       "path": "docs/adr/0032-codex-project-scoped-hook-enforcement.md",
-      "bytes": 14879,
-      "sha256": "f625fc9d72072650307e8ea37cdfb255da4ecf5e96cfc0c09f5dcd401f07424f"
+      "bytes": 14921,
+      "sha256": "14929d2d3667a1dd05a88534a2cb4e893d3affc7b618b925ab2855e321de0463"
     },
     {
       "path": "docs/adr/README.md",
@@ -691,8 +691,8 @@
     },
     {
       "path": "docs/process/CODEX_PROJECT_HOOKS_IMPLEMENTATION_PLAN.md",
-      "bytes": 8150,
-      "sha256": "8b04017a04ccf09d209bb2beef00ecddfbdeff6554ffbfaacfbbf61e327475e0"
+      "bytes": 8192,
+      "sha256": "473dc435427adf3fabc2d10448f56cc81b30196ddeb92724b97fc94602bf383e"
     },
     {
       "path": "docs/process/CROSS_HARNESS_IMPLEMENTATION_PLAN.md",
@@ -951,8 +951,8 @@
     },
     {
       "path": "plugins/krylo/codex/project-hooks/codex-project-hook-launcher.mjs",
-      "bytes": 4276,
-      "sha256": "9ec22c66a1bf5fdd443ee93deb68b3b8a166621fed4b084f0d4509f2df447a3e"
+      "bytes": 6026,
+      "sha256": "6492283a5b7abaeb33234139b4e63c52c66b5f4e8cc457235bf624038d8274b1"
     },
     {
       "path": "plugins/krylo/codex/skills/krylo-run/SKILL.md",
@@ -1331,8 +1331,8 @@
     },
     {
       "path": "plugins/krylo/scripts/security/risk-policy.mjs",
-      "bytes": 76561,
-      "sha256": "0db523ea0bb31481509ba0545d7efc2e976f72eb25c4f8afbe419f814ada0d12"
+      "bytes": 80260,
+      "sha256": "8d06a79beb40b14197b3170dfbbcd84cc1eb37766bbc46e866d9cfbb1e86eabf"
     },
     {
       "path": "plugins/krylo/scripts/security/user-prompt-submit-codex.mjs",
@@ -1351,8 +1351,8 @@
     },
     {
       "path": "plugins/krylo/scripts/setup/install-codex.mjs",
-      "bytes": 24639,
-      "sha256": "9b05b17908b59665c905b0d55102f171b26c8581f3be990fb5379f8e55d306fb"
+      "bytes": 26655,
+      "sha256": "6481c3bebda7f909e8d19bbf50bafe00c8961fc182dde838bb20c9aeb14b8f79"
     },
     {
       "path": "plugins/krylo/scripts/setup/remove-alias.mjs",
@@ -1476,8 +1476,8 @@
     },
     {
       "path": "plugins/krylo/tests/hooks/codex-project-hook-launcher.test.mjs",
-      "bytes": 9677,
-      "sha256": "017afcba2e96565fb81f79f97cc18f8514921c02814c4d67ff67643fa2d0e726"
+      "bytes": 10824,
+      "sha256": "23439bad77485bfc25c2b5666e5fca5627b6f0ea83b19d5b47f23d0909de3e27"
     },
     {
       "path": "plugins/krylo/tests/hooks/concurrent-mutation.test.mjs",
@@ -1636,8 +1636,8 @@
     },
     {
       "path": "plugins/krylo/tests/setup/install-codex-hooks.test.mjs",
-      "bytes": 14066,
-      "sha256": "7b28e29f66c0071bc57b743c55bcd4c1e237bff4721dee055bc29416bcdef44f"
+      "bytes": 17174,
+      "sha256": "61ff47d50c74a3aed73660f2acd418b47bbea11a47f8d42777cdc12d21791785"
     },
     {
       "path": "plugins/krylo/tests/setup/install-codex.test.mjs",
@@ -1711,8 +1711,8 @@
     },
     {
       "path": "plugins/krylo/tests/unit/risk-policy.test.mjs",
-      "bytes": 66595,
-      "sha256": "64faebf426a5906bdc34aa355edb085ae5bde969b908285dbdd66800faaabd5f"
+      "bytes": 69641,
+      "sha256": "70bc9741d400141b049ee98e26699d9c274e589d234c66c047a46df8c11606ab"
     },
     {
       "path": "plugins/krylo/tests/unit/sensitive-path-glob.test.mjs",
