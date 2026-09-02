@@ -398,7 +398,7 @@ test('user-prompt-submit-codex: an UNVERIFIED Codex runtime never bootstraps an 
   const projectDir = mkTempDataDir('krylo-ups-project-');
   try {
     const res = runHookCodexOnly(HOOK, payload({ prompt: '$krylo-run fix the failing tests', sessionId: 'codex-session-A', cwd: projectDir }), dataDir, {
-      env: { KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 99.0.0' },
+      env: { KRYLO_CODEX_COMPAT_TEST_MODE: '1', KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 99.0.0' },
     });
     assert.equal(res.status, 0);
     const runId = /run-[0-9a-f]+/.exec(additionalContext(res))?.[0];
@@ -431,7 +431,7 @@ test('user-prompt-submit-codex: a BLOCKED Codex runtime (explicit contract entry
   }), 'utf8');
   try {
     const res = runHookCodexOnly(HOOK, payload({ prompt: '$krylo-run fix the failing tests', sessionId: 'codex-session-A', cwd: projectDir }), dataDir, {
-      env: { KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 0.50.0', KRYLO_CODEX_COMPAT_CONTRACT_PATH: contractPath },
+      env: { KRYLO_CODEX_COMPAT_TEST_MODE: '1', KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 0.50.0', KRYLO_CODEX_COMPAT_CONTRACT_PATH: contractPath },
     });
     assert.equal(res.status, 0);
     const runId = /run-[0-9a-f]+/.exec(additionalContext(res))?.[0];
@@ -450,7 +450,7 @@ test('user-prompt-submit-codex: a missing/unresolvable Codex executable (probe-f
   const projectDir = mkTempDataDir('krylo-ups-project-');
   try {
     const res = runHookCodexOnly(HOOK, payload({ prompt: '$krylo-run fix the failing tests', sessionId: 'codex-session-A', cwd: projectDir }), dataDir, {
-      env: { KRYLO_CODEX_CLI_PATH: 'krylo-this-command-does-not-exist-anywhere-xyz' },
+      env: { KRYLO_CODEX_COMPAT_TEST_MODE: '1', KRYLO_CODEX_CLI_PATH: 'krylo-this-command-does-not-exist-anywhere-xyz' },
     });
     assert.equal(res.status, 0);
     const runId = /run-[0-9a-f]+/.exec(additionalContext(res))?.[0];
@@ -468,7 +468,7 @@ test('user-prompt-submit-codex: a SUPPORTED Codex runtime bootstraps a normal ac
   const projectDir = mkTempDataDir('krylo-ups-project-');
   try {
     const res = runHookCodexOnly(HOOK, payload({ prompt: '$krylo-run fix the failing tests', sessionId: 'codex-session-A', cwd: projectDir }), dataDir, {
-      env: { KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 0.120.0' },
+      env: { KRYLO_CODEX_COMPAT_TEST_MODE: '1', KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 0.120.0' },
     });
     assert.equal(res.status, 0);
     assert.match(additionalContext(res), /now active/);
@@ -488,7 +488,7 @@ test('user-prompt-submit-codex: resuming an ALREADY-ACTIVE run reuses it without
   const projectDir = mkTempDataDir('krylo-ups-project-');
   try {
     const first = runHookCodexOnly(HOOK, payload({ prompt: '$krylo-run task one', sessionId: 'codex-session-A', cwd: projectDir }), dataDir, {
-      env: { KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 0.120.0' },
+      env: { KRYLO_CODEX_COMPAT_TEST_MODE: '1', KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 0.120.0' },
     });
     const runIdFirst = /run-[0-9a-f]+/.exec(additionalContext(first))?.[0];
 
@@ -497,7 +497,7 @@ test('user-prompt-submit-codex: resuming an ALREADY-ACTIVE run reuses it without
     // an already-active run. It must not be: the existing-run reuse check
     // happens before the gate ever runs.
     const second = runHookCodexOnly(HOOK, payload({ prompt: '$krylo-run task one, continued', sessionId: 'codex-session-A', cwd: projectDir }), dataDir, {
-      env: { KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 99.0.0' },
+      env: { KRYLO_CODEX_COMPAT_TEST_MODE: '1', KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 99.0.0' },
     });
     assert.equal(second.status, 0);
     assert.match(additionalContext(second), /already active/);
@@ -521,12 +521,42 @@ test('user-prompt-submit-codex: the model cannot influence the compatibility ver
       sessionId: 'codex-session-A',
       cwd: projectDir,
     }), dataDir, {
-      env: { KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 99.0.0' },
+      env: { KRYLO_CODEX_COMPAT_TEST_MODE: '1', KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 99.0.0' },
     });
     assert.equal(res.status, 0);
     const runId = /run-[0-9a-f]+/.exec(additionalContext(res))?.[0];
     const state = readState(dataDir, runId);
     assert.equal(state.terminalState, 'SAFE_BLOCKED', 'prompt text claiming compatibility must have zero effect on the real verdict');
+  } finally {
+    cleanup(dataDir);
+    cleanup(projectDir);
+  }
+});
+
+// Regression (High, found by a fresh independent Reviewer, mirroring an
+// identical earlier finding on cross-harness-run.mjs's own
+// KRYLO_CROSS_HARNESS_CODEX_CLI override): KRYLO_CODEX_CLI_PATH/
+// KRYLO_CODEX_COMPAT_CONTRACT_PATH must be inert UNLESS
+// KRYLO_CODEX_COMPAT_TEST_MODE=1 is ALSO set -- otherwise anything able to
+// inject an env-var assignment into the hook's own environment could
+// substitute an arbitrary fake CLI or a self-authored contract, routing
+// entirely around the reviewed one. PATH is emptied here (rather than
+// merely omitting the test-mode sentinel) so this proves the override is
+// genuinely IGNORED -- not merely coincidentally irrelevant -- by forcing
+// the fallback bare `codex` resolution to fail closed exactly as it would
+// for a real "Codex not installed" case, even though the ignored override
+// itself points at a fixture reporting a SUPPORTED version.
+test('user-prompt-submit-codex: KRYLO_CODEX_CLI_PATH/KRYLO_CODEX_COMPAT_CONTRACT_PATH are inert without KRYLO_CODEX_COMPAT_TEST_MODE=1', () => {
+  const dataDir = mkTempDataDir('krylo-ups-');
+  const projectDir = mkTempDataDir('krylo-ups-project-');
+  try {
+    const res = runHookCodexOnly(HOOK, payload({ prompt: '$krylo-run fix the failing tests', sessionId: 'codex-session-A', cwd: projectDir }), dataDir, {
+      env: { PATH: '', Path: '', KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 0.120.0' },
+    });
+    assert.equal(res.status, 0);
+    const runId = /run-[0-9a-f]+/.exec(additionalContext(res))?.[0];
+    const state = readState(dataDir, runId);
+    assert.equal(state.terminalState, 'SAFE_BLOCKED', 'the override must be ignored without the test-mode sentinel, falling back to the real (here, unresolvable) codex lookup rather than the fixture claiming supported');
   } finally {
     cleanup(dataDir);
     cleanup(projectDir);

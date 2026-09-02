@@ -182,16 +182,28 @@ async function main() {
   // admission control for a FULL AUTONOMOUS run, evaluated once per fresh
   // bootstrap attempt (never for the idempotent reuse above, and never for
   // an ordinary, non-$krylo-run prompt, which returns long before this
-  // point). cliPath/contractPath are operator/test-only overrides read
-  // directly from process.env here -- never from payload/prompt content, so
-  // the model has no channel to influence the verdict. An untrusted result
-  // still creates a real, inspectable state.json (never silently doing
-  // nothing) but saves it ALREADY terminal -- no active-run pointer is ever
-  // written for it, so every other Codex hook's own existing
-  // `terminalState !== null` check already treats it as inert with zero
-  // change to any of them.
-  const cliPathOverride = process.env.KRYLO_CODEX_CLI_PATH;
-  const contractPathOverride = process.env.KRYLO_CODEX_COMPAT_CONTRACT_PATH;
+  // point). Overridable ONLY when KRYLO_CODEX_COMPAT_TEST_MODE=1 is ALSO
+  // set -- a fresh independent Reviewer found the earlier, unconditional
+  // version of cliPath/contractPath genuinely reachable in a production
+  // invocation, meaning anything that could smuggle an env-var assignment
+  // ahead of this hook process (e.g. a malicious project config injecting
+  // KRYLO_CODEX_COMPAT_CONTRACT_PATH into the Codex-spawned hook
+  // environment) could point the gate at an attacker-authored contract
+  // claiming any version "supported", routing entirely around the real,
+  // reviewed one -- exactly the write-protection risk-policy.test.mjs's
+  // own regression case for that file exists to prevent, just reached a
+  // different way. Requiring a SECOND, distinctly-named sentinel mirrors
+  // cross-harness-run.mjs's own identical fix for the identical class of
+  // finding (KRYLO_CROSS_HARNESS_TEST_MODE) -- disclosed honestly as
+  // defense-in-depth, not a strong guarantee on its own: neither override
+  // is ever read from `payload`/prompt content, so the model still has no
+  // direct channel to influence the verdict; this hardens the separate,
+  // narrower question of what a compromised/malicious hook ENVIRONMENT
+  // could do. tests/hooks/user-prompt-submit-codex.test.mjs sets
+  // KRYLO_CODEX_COMPAT_TEST_MODE=1 explicitly for every fixture-driven test.
+  const compatTestModeEnabled = process.env.KRYLO_CODEX_COMPAT_TEST_MODE === '1';
+  const cliPathOverride = compatTestModeEnabled ? process.env.KRYLO_CODEX_CLI_PATH : undefined;
+  const contractPathOverride = compatTestModeEnabled ? process.env.KRYLO_CODEX_COMPAT_CONTRACT_PATH : undefined;
   const compatibility = evaluateCodexRuntimeCompatibility({
     cliPath: typeof cliPathOverride === 'string' && cliPathOverride.trim() !== '' ? cliPathOverride.trim() : 'codex',
     env: process.env,
