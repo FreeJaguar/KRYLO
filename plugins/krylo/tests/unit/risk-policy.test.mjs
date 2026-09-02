@@ -1284,6 +1284,15 @@ test('shared risk policy denies Write/Edit/NotebookEdit/apply_patch targeting th
     '.codex/krylo/codex-project-hook-launcher.mjs',
     '.codex\\krylo\\codex-project-hook-launcher.mjs',
     'subdir/../.codex/hooks.json',
+    // Regression (Medium, found and reproduced by a fresh independent
+    // Security Reviewer): Windows silently ignores a trailing space or dot
+    // on a path component, so `.codex/hooks.json ` / `.codex/hooks.json.`
+    // land on the exact same real file while evading an end-anchored
+    // string match -- the same class of bypass already fixed for
+    // touchesClaudeSettings()'s sensitive-path matching.
+    '.codex/hooks.json ',
+    '.codex/hooks.json.',
+    '.codex/krylo/codex-project-hook-launcher.mjs ',
   ];
   for (const target of targets) {
     for (const toolName of ['Write', 'Edit', 'NotebookEdit']) {

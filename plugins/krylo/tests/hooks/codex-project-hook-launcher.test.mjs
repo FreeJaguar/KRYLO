@@ -183,6 +183,22 @@ test('launcher: require-approval (git push) fails closed through the launcher un
   }
 });
 
+test('launcher: a real crash in the delegated script still propagates a nonzero exit code for user-prompt-submit/post-tool-use (regression found by a fresh independent Reviewer: an earlier version silently swallowed this to exit 0 for every non-pre-tool-use event, including these two pre-existing ones outside this checkpoint\'s own scope, hiding a corrupted install with no signal at all)', () => {
+  const root = mkStandaloneRoot();
+  try {
+    copyRealRuntimeInto(root);
+    for (const [event, scriptRelPosix] of [['user-prompt-submit', 'security/user-prompt-submit-codex.mjs'], ['post-tool-use', 'runtime/posttool-telemetry-codex.mjs']]) {
+      const scriptPath = path.join(root, 'scripts', ...scriptRelPosix.split('/'));
+      fs.rmSync(scriptPath, { force: true });
+      fs.mkdirSync(scriptPath, { recursive: true }); // same "not really a script" fixture used for pre-tool-use's own crash test
+      const res = run(event, { session_id: 's1', cwd: process.cwd() }, root);
+      assert.notEqual(res.status, 0, `${event} must still surface a real crash, not silently exit 0`);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('launcher: stop event with a missing standalone runtime allows silently (Stop\'s safe fail-direction is letting the session end, never blocking it -- opposite of pre-tool-use)', () => {
   const root = mkStandaloneRoot();
   try {

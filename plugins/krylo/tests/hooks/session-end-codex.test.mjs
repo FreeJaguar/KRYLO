@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import path from 'node:path';
 
 import { mkTempDataDir, patchState, readState, cleanup, createActiveRunCodexOnly, runCliCodexOnly, runHookCodexOnly } from './helpers.mjs';
 
@@ -75,12 +76,14 @@ test('session-end-codex: an active, NON-terminal run records a telemetry marker 
     assert.deepEqual(after.acceptanceCriteria, before.acceptanceCriteria, 'evidence/criteria history must be preserved exactly');
     assert.deepEqual(after.findings, before.findings);
 
-    // A telemetry marker was recorded (best-effort, never a security boundary).
+    // A telemetry marker was recorded (best-effort, never a security
+    // boundary -- but recordEvent() is a synchronous, unconditional
+    // fs.appendFileSync call on this code path, so this must always be
+    // present, not merely checked when present (Reviewer Finding 3).
     const telemetryPath = `${dataDir}/telemetry/${runId}.jsonl`;
-    if (fs.existsSync(telemetryPath)) {
-      const lines = fs.readFileSync(telemetryPath, 'utf8').trim().split('\n').filter(Boolean);
-      assert.ok(lines.some((l) => l.includes('session-end')), 'a session-end telemetry event should be recorded for an active non-terminal run');
-    }
+    assert.ok(fs.existsSync(telemetryPath), 'a session-end telemetry event should be recorded for an active non-terminal run');
+    const lines = fs.readFileSync(telemetryPath, 'utf8').trim().split('\n').filter(Boolean);
+    assert.ok(lines.some((l) => l.includes('session-end')), 'a session-end telemetry event should be recorded for an active non-terminal run');
   } finally {
     cleanup(dataDir);
   }
@@ -98,23 +101,69 @@ test('session-end-codex: malformed/unreadable stdin fails safe -- no-op, never c
   }
 });
 
-test('session-end-codex: concurrent KRYLO sessions in the same project -- SessionEnd for session A never touches session B\'s run', () => {
-  const dataDirA = mkTempDataDir('krylo-codex-hook-a-');
-  const dataDirB = mkTempDataDir('krylo-codex-hook-b-');
+// Regression (Medium, independently found and reproduced by both a fresh
+// Reviewer and a fresh Security Reviewer): SessionEnd previously acquired
+// the run's exclusive state lock even though it never mutates state.json
+// (only a read, plus an already-atomic-append recordEvent() call). Given
+// the confirmed ~1-3 second SessionEnd platform teardown budget and the
+// lock's own up-to-6-second retry window, SessionEnd could be killed by
+// the platform WHILE holding (or waiting on) that lock -- and since
+// lock.mjs has no staleness recovery, the orphaned lock file then makes
+// every later locked operation on that SAME run (Stop, update-state.mjs)
+// wait the full retry budget and fail with lock-timeout, permanently
+// degrading a run that should have kept working. SessionEnd needs no lock
+// at all, so it no longer takes one -- proven here by holding the real
+// lock externally for the whole hook invocation and confirming SessionEnd
+// still completes immediately rather than blocking on it.
+test('session-end-codex: never blocks on the run lock, since it performs no state mutation (regression: previously could orphan the lock and degrade the run for its own teardown deadline)', () => {
+  const dataDir = mkTempDataDir('krylo-codex-hook-');
   try {
-    // Two independent data roots simulate two isolated sessions/projects
-    // (matching this codebase's established session-isolation test
-    // convention elsewhere -- state is keyed by {host, hostSessionId,
-    // projectRootHash}, and each temp data dir here is its own project root).
-    const runA = createActiveRunCodexOnly(dataDirA);
-    const runB = createActiveRunCodexOnly(dataDirB);
-    const beforeB = readState(runB.statePath);
-
-    runHookCodexOnly(HOOK, sessionEndPayload(dataDirA), dataDirA);
-
-    assert.deepEqual(readState(runB.statePath), beforeB, "session A's SessionEnd must never touch session B's run");
+    const { runId } = createActiveRunCodexOnly(dataDir);
+    const lockPath = path.join(dataDir, 'runs', runId, '.state.lock');
+    fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+    const fd = fs.openSync(lockPath, 'wx'); // hold the real lock for the whole test
+    try {
+      const start = Date.now();
+      const res = runHookCodexOnly(HOOK, sessionEndPayload(dataDir), dataDir);
+      const elapsedMs = Date.now() - start;
+      assert.equal(res.status, 0);
+      assert.ok(elapsedMs < 1000, `SessionEnd must not wait on the run lock at all (took ${elapsedMs}ms)`);
+    } finally {
+      fs.closeSync(fd);
+      fs.rmSync(lockPath, { force: true });
+    }
   } finally {
-    cleanup(dataDirA);
-    cleanup(dataDirB);
+    cleanup(dataDir);
+  }
+});
+
+// Regression (Reviewer Finding 4): the earlier version of this test used two
+// SEPARATE temp data dirs, which only proves data-root isolation (already
+// covered by the "DIFFERENT session" test above) -- not that two genuinely
+// CONCURRENT sessions in the SAME project (same data root, same
+// projectRootHash, two different hostSessionIds, two distinct active-run
+// pointers) stay isolated from each other. This version creates both runs
+// directly against one shared dataDir.
+test('session-end-codex: two concurrent KRYLO sessions in the SAME project -- SessionEnd for session A never touches session B\'s run', () => {
+  const dataDir = mkTempDataDir('krylo-codex-hook-');
+  try {
+    const initA = runCliCodexOnly('runtime/init-run.mjs', [
+      '--goal', 'session A run', '--session', 'codex-session-a', '--project-dir', dataDir, '--lane', 'PATCH', '--risk', 'low',
+    ], dataDir);
+    if (initA.status !== 0 || !initA.json?.ok) throw new Error(`fixture init-run (session A) failed: ${initA.stdout} ${initA.stderr}`);
+
+    const initB = runCliCodexOnly('runtime/init-run.mjs', [
+      '--goal', 'session B run', '--session', 'codex-session-b', '--project-dir', dataDir, '--lane', 'PATCH', '--risk', 'low',
+    ], dataDir);
+    if (initB.status !== 0 || !initB.json?.ok) throw new Error(`fixture init-run (session B) failed: ${initB.stdout} ${initB.stderr}`);
+    const runBStatePath = path.join(dataDir, 'runs', initB.json.runId, 'state.json');
+    const beforeB = readState(runBStatePath);
+
+    const res = runHookCodexOnly(HOOK, sessionEndPayload(dataDir, { session_id: 'codex-session-a' }), dataDir);
+    assert.equal(res.status, 0);
+
+    assert.deepEqual(readState(runBStatePath), beforeB, "session A's SessionEnd must never touch session B's run in the same project");
+  } finally {
+    cleanup(dataDir);
   }
 });

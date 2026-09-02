@@ -349,10 +349,15 @@ function touchesCodexProjectHooks({ toolName, toolInput, cwd }) {
         : '';
     if (target === '') return false;
     // Same normalization discipline as touchesClaudeSettings() above: strip
-    // an NTFS alternate-data-stream suffix, expand a leading `~`, then
-    // resolve through `.`/`..`/double-separators (and a best-effort
-    // symlink resolution) before comparing -- never match the raw string.
-    const withoutAds = target.replace(/::[^\\/]*$/, '');
+    // an NTFS alternate-data-stream suffix, strip a trailing space/dot
+    // Windows silently ignores on a path component (confirmed and fixed
+    // for touchesClaudeSettings()'s own sensitive-path matching -- the
+    // identical bypass class applies here since path.resolve()/basename()
+    // treat the trailing character as significant even though the real
+    // filesystem does not), expand a leading `~`, then resolve through
+    // `.`/`..`/double-separators (and a best-effort symlink resolution)
+    // before comparing -- never match the raw string.
+    const withoutAds = target.replace(/::[^\\/]*$/, '').replace(/[ .]+$/, '');
     const tildeExpanded = /^~[/\\]/.test(withoutAds)
       ? path.join(os.homedir(), withoutAds.slice(2))
       : withoutAds;

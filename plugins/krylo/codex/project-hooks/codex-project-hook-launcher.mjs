@@ -16,8 +16,13 @@
 // copies scripts/references/schemas/policies into) using the identical
 // portable algorithm scripts/host/codex/context.mjs already uses, then
 // re-executes the exact real hook script for the given event with
-// inherited stdin/stdout/stderr and exit code -- a redirector, never a
-// second copy of Core policy source.
+// inherited stdin/stdout/stderr -- a redirector, never a second copy of
+// Core policy source. Exit code is inherited for user-prompt-submit/
+// post-tool-use (a crash there is real, visible diagnostic signal); for
+// pre-tool-use/stop/session-start/session-end the exit code is instead
+// normalized to each event's own confirmed-safe outcome on failure (deny
+// for pre-tool-use, silent allow for the other three) -- see the
+// SILENT_ON_FAILURE_EVENTS comment below for why.
 //
 // krylo-hook-launcher-version: 0.2.0
 
@@ -61,16 +66,34 @@ function denyPreToolUse(reason) {
 // rust-v0.152.1's own pre_tool_use.rs unit tests: a PreToolUse hook that
 // fails to emit valid output FAILS OPEN (the tool call proceeds), so this
 // launcher must never let a crash/missing-runtime/spawn-failure silently
-// allow a tool call through. Every OTHER event's safe direction is the
-// opposite: stop-gate-codex.mjs's own confirmed-safe fail-toward-ending
-// property (docs/adr/0033-codex-lifecycle-enforcement.md) means "stop"
-// must exit 0/no-output on any failure here too, never emit a block
-// decision it cannot back with a real classification -- and
-// session-start/session-end are non-security-boundary lifecycle events
-// where a missing runtime simply means no run could exist to act on.
+// allow a tool call through.
+//
+// "stop" is the one event where a crash must ALSO resolve to a specific,
+// deliberate outcome rather than surfacing the real failure: stop-gate-codex.mjs's
+// own confirmed-safe fail-toward-ending property
+// (docs/adr/0033-codex-lifecycle-enforcement.md) means this launcher must
+// exit 0/no-output on any "stop" failure too, never emit a block decision
+// it cannot back with a real classification, and never risk Codex's own
+// hook-failure handling doing something other than "let the session end"
+// (unverified, so the launcher does not rely on it either way).
+//
+// Every OTHER event (user-prompt-submit, post-tool-use, session-start,
+// session-end) is a non-security-boundary lifecycle/telemetry event with
+// nothing to block -- for these, a genuine crash (as opposed to a merely
+// missing runtime, handled separately below) is real, useful diagnostic
+// signal that should surface, not be silently discarded: propagate the
+// real exit code, matching this launcher's own original, pre-Stop-checkpoint
+// behavior for user-prompt-submit/post-tool-use (a fresh independent
+// Reviewer found and reproduced that an earlier version of this file
+// accidentally widened the "always exit 0" override to these two
+// pre-existing events as well, hiding a corrupted bootstrap-hook install
+// with no signal at all -- out of scope for this checkpoint to change).
+const SILENT_ON_FAILURE_EVENTS = new Set(['stop', 'session-start', 'session-end']);
+
 function main() {
   const event = process.argv[2];
   const isPreToolUse = event === 'pre-tool-use';
+  const silentOnFailure = SILENT_ON_FAILURE_EVENTS.has(event);
   try {
     const scriptRel = EVENT_SCRIPTS[event];
     if (!scriptRel) {
@@ -99,10 +122,14 @@ function main() {
         return;
       }
       // Every other event (stop, session-start, session-end,
-      // user-prompt-submit, post-tool-use): a missing runtime here means
-      // no run can ever have been created or need continuing, so a silent
-      // no-op matches the same inactive-run/safe-ending contract the real
-      // hooks already implement, without pure UX noise.
+      // user-prompt-submit, post-tool-use): a missing runtime here means no
+      // run can ever have been created or need continuing (matching this
+      // launcher's original, pre-Stop-checkpoint behavior for
+      // user-prompt-submit/post-tool-use unchanged), so a silent no-op
+      // matches the same inactive-run/safe-ending contract the real hooks
+      // already implement, without pure UX noise. This is distinct from a
+      // genuine crash further below, which DOES stay visible for
+      // user-prompt-submit/post-tool-use.
       process.exit(0);
       return;
     }
@@ -123,21 +150,31 @@ function main() {
       denyPreToolUse("KRYLO project hook launcher's real enforcement script did not complete normally and denied as a fail-safe.");
       return;
     }
-    // Deliberately always exit 0 here, never propagate a raw crash exit
-    // code: for "stop" specifically, this launcher has no independent
-    // basis to know how Codex's own hook-run-failure handling would
-    // interpret a nonzero/null status, so the only verified-safe choice is
-    // the same clean "no decision" exit the real script's own worst-case
-    // fail path already produces. The same exit is harmless for
-    // session-start/session-end, which have no decision to communicate at
-    // all.
-    process.exit(0);
+    // For stop/session-start/session-end: never propagate a raw crash exit
+    // code. This launcher has no independent basis to know how Codex's own
+    // hook-run-failure handling would interpret a nonzero/null status, so
+    // the only verified-safe choice is the same clean "no decision" exit
+    // the real script's own worst-case fail path already produces -- these
+    // three events have no decision to communicate and nothing to block.
+    // For user-prompt-submit/post-tool-use, propagate the real exit code:
+    // these are pre-existing events outside this checkpoint's scope, and a
+    // crash here is genuine diagnostic signal (a corrupted install) that
+    // must stay visible, not be silently discarded.
+    if (silentOnFailure) {
+      process.exit(0);
+      return;
+    }
+    process.exit(typeof result.status === 'number' ? result.status : 1);
   } catch {
     if (isPreToolUse) {
       denyPreToolUse('KRYLO project hook launcher hit an unexpected error and denied as a fail-safe.');
       return;
     }
-    process.exit(0);
+    if (silentOnFailure) {
+      process.exit(0);
+      return;
+    }
+    process.exit(1);
   }
 }
 
