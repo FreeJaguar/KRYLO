@@ -70,6 +70,23 @@ test('launcher: user-prompt-submit and post-tool-use no-op silently (exit 0, no 
   }
 });
 
+test('launcher: pre-tool-use denies as a fail-safe if the real script cannot even be launched (regression found by fresh independent Reviewer + Security Reviewer: an unhandled spawn failure previously exited silently with no deny, and Codex confirms a PreToolUse hook that fails to emit valid output fails OPEN)', () => {
+  const root = mkStandaloneRoot();
+  try {
+    copyRealRuntimeInto(root);
+    // Replace the real script with a directory of the same name: fs.existsSync()
+    // still reports true, but spawnSync launching `node <that path>` fails.
+    const scriptPath = path.join(root, 'scripts', 'security', 'risk-gate-codex.mjs');
+    fs.rmSync(scriptPath, { force: true });
+    fs.mkdirSync(scriptPath, { recursive: true });
+    const res = run('pre-tool-use', { session_id: 's1', cwd: process.cwd(), tool_name: 'Bash', tool_input: { command: 'echo hi' }, permission_mode: 'default' }, root);
+    assert.equal(res.status, 0);
+    assert.equal(res.json?.hookSpecificOutput?.permissionDecision, 'deny', 'a spawn failure must still deny, never exit silently');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('launcher: pre-tool-use delegates to the real risk-gate-codex.mjs once the standalone runtime is present, with no active run (allow silently)', () => {
   const root = mkStandaloneRoot();
   try {

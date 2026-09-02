@@ -169,6 +169,67 @@ test('install-codex hooks: idempotent -- applying twice in a row never errors an
   }
 });
 
+test('install-codex hooks: a lost/deleted sidecar recovers by adopting the existing launcher-referencing entry instead of duplicating it (regression found by a fresh independent Reviewer)', () => {
+  const home = mkHome();
+  const project = mkProject();
+  try {
+    const first = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
+    assert.equal(first.json.hooks.applied, true);
+
+    fs.rmSync(sidecarFileOf(project), { force: true });
+
+    const second = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
+    assert.equal(second.status, 0, JSON.stringify(second.json));
+    assert.equal(second.json.hooks.perEvent.PreToolUse, 'krylo-owned', 'a live launcher-referencing entry must be adopted, not treated as absent');
+    const hooks = readJson(hooksFileOf(project));
+    for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse']) {
+      assert.equal(hooks[event].length, 1, `${event} must still have exactly one entry, never duplicated`);
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('install-codex hooks: hooks.json deleted while the sidecar survives recovers as a fresh install rather than becoming permanently ambiguous', () => {
+  const home = mkHome();
+  const project = mkProject();
+  try {
+    const first = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
+    assert.equal(first.json.hooks.applied, true);
+
+    fs.rmSync(hooksFileOf(project), { force: true });
+
+    const second = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
+    assert.equal(second.status, 0, JSON.stringify(second.json));
+    const hooks = readJson(hooksFileOf(project));
+    for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse']) {
+      assert.equal(hooks[event].length, 1, `${event} must be freshly (re)installed, not stuck ambiguous`);
+    }
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('install-codex hooks: a genuinely foreign file at the launcher path is never overwritten', () => {
+  const home = mkHome();
+  const project = mkProject();
+  try {
+    fs.mkdirSync(path.dirname(launcherFileOf(project)), { recursive: true });
+    fs.writeFileSync(launcherFileOf(project), '#!/usr/bin/env node\nconsole.log("not KRYLO");\n', 'utf8');
+
+    const res = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
+    assert.equal(res.json.hooks.ok, false);
+    assert.equal(res.json.hooks.error, 'foreign-launcher-file');
+    assert.equal(fs.readFileSync(launcherFileOf(project), 'utf8'), '#!/usr/bin/env node\nconsole.log("not KRYLO");\n', 'foreign content must be byte-for-byte untouched');
+    assert.ok(!fs.existsSync(hooksFileOf(project)), 'hooks.json must not be written when the launcher target is foreign');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test('install-codex hooks: ambiguous ownership (sidecar says KRYLO installed something, but it was hand-edited away) refuses to touch that event automatically', () => {
   const home = mkHome();
   const project = mkProject();

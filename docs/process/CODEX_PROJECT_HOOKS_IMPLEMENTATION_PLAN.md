@@ -23,7 +23,7 @@ Done before any code change; recorded in ADR-0032. Current stable Codex is `rust
 
 ## 4. Task 3: Project-scoped hook launcher
 
-New file, generated verbatim by `install-codex.mjs` at apply time: `<project>/.codex/krylo/launch.mjs`. Argv-selected target (`user-prompt-submit` | `pre-tool-use` | `post-tool-use`). Resolves the real runtime root via `KRYLO_STANDALONE_ROOT` override, then `path.join(os.homedir(), '.agents', 'skills', 'krylo-run')` (mirrors `context.mjs`'s own algorithm). Re-executes the corresponding real script from there with `spawnSync`, argv array, `shell:false`, inheriting stdin/stdout/stderr and exit code exactly. If the runtime cannot be located: `pre-tool-use` denies (fail-closed, matches `emitCodexPreToolDeny` output shape directly, since it cannot even determine whether a run is active without the real script); `user-prompt-submit`/`post-tool-use` exit 0 silently (non-security-boundary, matches the established inactive-run no-op contract).
+New file, generated verbatim by `install-codex.mjs` at apply time: `<project>/.codex/krylo/codex-project-hook-launcher.mjs`. Argv-selected target (`user-prompt-submit` | `pre-tool-use` | `post-tool-use`). Resolves the real runtime root via `KRYLO_STANDALONE_ROOT` override, then `path.join(os.homedir(), '.agents', 'skills', 'krylo-run')` (mirrors `context.mjs`'s own algorithm). Re-executes the corresponding real script from there with `spawnSync`, argv array, `shell:false`, inheriting stdin/stdout/stderr and exit code exactly. If the runtime cannot be located: `pre-tool-use` denies (fail-closed, matches `emitCodexPreToolDeny` output shape directly, since it cannot even determine whether a run is active without the real script); `user-prompt-submit`/`post-tool-use` exit 0 silently (non-security-boundary, matches the established inactive-run no-op contract).
 
 ## 5. Task 4: `--target hooks` in `install-codex.mjs`
 
@@ -31,7 +31,7 @@ New file, generated verbatim by `install-codex.mjs` at apply time: `<project>/.c
 
 - Read `<project>/.codex/hooks.json` (default `{}`) and sidecar `<project>/.codex/krylo-hooks-meta.json`.
 - Classify each of the three KRYLO-managed events (`UserPromptSubmit`, `PreToolUse`, `PostToolUse`) independently: `absent` (no sidecar record, safe to append), `krylo-owned` (sidecar record deep-equals the live array entry, safe to replace with a backup), `ambiguous` (sidecar record exists but no longer matches live content -- refuse that event's slot).
-- Dry-run by default; `--apply` writes `hooks.json`, the sidecar, and `.codex/krylo/launch.mjs`.
+- Dry-run by default; `--apply` writes `hooks.json`, the sidecar, and `.codex/krylo/codex-project-hook-launcher.mjs`.
 - Backup (`hooks.json.backup-<timestamp>`) only on the replace path.
 - Report git-tracked/untracked state of `hooks.json` via `git ls-files --error-unmatch <path>` (argv array, `shell:false`). Never touches `.gitignore`.
 - `--remove`: deletes only the sidecar-recorded KRYLO entries (refusing per the same ambiguous-ownership rule), reports the backup path if one exists for manual restore.

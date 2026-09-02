@@ -53,44 +53,78 @@ function denyPreToolUse(reason) {
   process.exit(0);
 }
 
+// A PreToolUse hook that fails to emit valid, well-formed output is
+// confirmed to FAIL OPEN on the current stable Codex release (the tool
+// call proceeds) -- re-verified directly against rust-v0.152.1's own
+// pre_tool_use.rs unit tests (docs/codex-capability-matrix.md,
+// docs/adr/0032-codex-project-scoped-hook-enforcement.md). Every exit path
+// for the pre-tool-use event below therefore goes through denyPreToolUse(),
+// including an unexpected exception or a spawnSync that could not even
+// launch the real script -- never a silent/empty exit for that one event.
 function main() {
   const event = process.argv[2];
-  const scriptRel = EVENT_SCRIPTS[event];
-  if (!scriptRel) {
-    // Unrecognized/malformed launcher invocation. This launcher's argv
-    // cannot itself tell whether the caller expected a PreToolUse-shaped
-    // response, so fail-safe means the conservative (deny-shaped) output --
-    // a non-PreToolUse caller simply receives an output it never reads.
-    denyPreToolUse('KRYLO project hook launcher received an unrecognized event and denied as a fail-safe.');
-    return;
-  }
-
-  const root = resolveStandaloneRoot();
-  const scriptPath = path.join(root, 'scripts', ...scriptRel);
-  if (!fs.existsSync(scriptPath)) {
-    if (event === 'pre-tool-use') {
-      // PreToolUse is the security boundary: with no real script to
-      // delegate to, this launcher cannot determine whether a KRYLO run is
-      // even active, so it cannot safely no-op. Deny, matching this
-      // codebase's established fail-closed philosophy elsewhere.
-      denyPreToolUse(
-        `KRYLO standalone runtime is not installed or was removed (expected under ${root}). `
-        + 'Run install-codex.mjs --target skill --apply to (re)install it, or remove these '
-        + 'project hooks with install-codex.mjs --target hooks --remove --apply if KRYLO is no longer in use here.',
-      );
+  try {
+    const scriptRel = EVENT_SCRIPTS[event];
+    if (!scriptRel) {
+      // Unrecognized/malformed launcher invocation. This launcher's argv
+      // cannot itself tell whether the caller expected a PreToolUse-shaped
+      // response, so fail-safe means the conservative (deny-shaped)
+      // output -- a non-PreToolUse caller simply receives an output it
+      // never reads.
+      denyPreToolUse('KRYLO project hook launcher received an unrecognized event and denied as a fail-safe.');
       return;
     }
-    // UserPromptSubmit/PostToolUse are not the security boundary (lifecycle
-    // bootstrap and post-execution telemetry respectively) -- a missing
-    // runtime here means no run can ever have been created, so a silent
-    // no-op matches the same inactive-run contract the real hooks already
-    // implement, without pure UX noise.
-    process.exit(0);
-    return;
-  }
 
-  const result = spawnSync(process.execPath, [scriptPath], { stdio: 'inherit', shell: false });
-  process.exit(typeof result.status === 'number' ? result.status : 1);
+    const root = resolveStandaloneRoot();
+    const scriptPath = path.join(root, 'scripts', ...scriptRel);
+    if (!fs.existsSync(scriptPath)) {
+      if (event === 'pre-tool-use') {
+        // PreToolUse is the security boundary: with no real script to
+        // delegate to, this launcher cannot determine whether a KRYLO run
+        // is even active, so it cannot safely no-op. Deny, matching this
+        // codebase's established fail-closed philosophy elsewhere.
+        denyPreToolUse(
+          `KRYLO standalone runtime is not installed or was removed (expected under ${root}). `
+          + 'Run install-codex.mjs --target skill --apply to (re)install it, or remove these '
+          + 'project hooks with install-codex.mjs --target hooks --remove --apply if KRYLO is no longer in use here.',
+        );
+        return;
+      }
+      // UserPromptSubmit/PostToolUse are not the security boundary
+      // (lifecycle bootstrap and post-execution telemetry respectively) --
+      // a missing runtime here means no run can ever have been created, so
+      // a silent no-op matches the same inactive-run contract the real
+      // hooks already implement, without pure UX noise.
+      process.exit(0);
+      return;
+    }
+
+    const result = spawnSync(process.execPath, [scriptPath], { stdio: 'inherit', shell: false });
+    if (result.status === 0) {
+      process.exit(0);
+      return;
+    }
+    // Nonzero exit, or a null status (spawnSync could not even launch the
+    // real script -- a permission error, or the path exists but is not
+    // executable content): the real script's own contract guarantees exit
+    // 0 always means either a valid PreToolUse decision was already
+    // written to inherited stdout, or an intentional silent-allow for a
+    // legitimate no-active-run case -- anything else means it crashed
+    // before reaching that point (corrupted install, syntax error, etc.).
+    // Same "cannot determine whether a run is active" fail-closed reasoning
+    // as the missing-runtime branch above.
+    if (event === 'pre-tool-use') {
+      denyPreToolUse("KRYLO project hook launcher's real enforcement script did not complete normally and denied as a fail-safe.");
+      return;
+    }
+    process.exit(typeof result.status === 'number' ? result.status : 1);
+  } catch {
+    if (event === 'pre-tool-use') {
+      denyPreToolUse('KRYLO project hook launcher hit an unexpected error and denied as a fail-safe.');
+      return;
+    }
+    process.exit(1);
+  }
 }
 
 main();

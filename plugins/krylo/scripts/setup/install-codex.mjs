@@ -317,13 +317,44 @@ function sameJson(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+// A live entry whose command references this file's own launcher, for this
+// exact event, is an unambiguous KRYLO fingerprint -- nothing else would
+// ever write that specific project-relative command string. Used below to
+// recover from a lost/corrupted sidecar (adopt instead of duplicate) and
+// is safe: it can only ever narrow a would-be "absent" append into a
+// "krylo-owned" replace, never override a genuine "ambiguous" refusal.
+function findSelfReferencingEntry(liveArray, event) {
+  const arg = EVENT_LAUNCHER_ARG[event];
+  const marker = LAUNCHER_REL_PATH.split(path.sep).join('/');
+  return liveArray.findIndex((entry) => {
+    const cmd = entry?.hooks?.[0]?.command;
+    return typeof cmd === 'string' && cmd.includes(marker) && cmd.trim().endsWith(arg);
+  });
+}
+
 function classifyEventOwnership({ liveHooksJson, sidecar, event }) {
   const sidecarEntry = sidecar?.ownedEntries?.[event];
   const liveArray = Array.isArray(liveHooksJson?.[event]) ? liveHooksJson[event] : [];
-  if (!sidecarEntry) return { state: 'absent' };
-  const foundIndex = liveArray.findIndex((entry) => sameJson(entry, sidecarEntry));
-  if (foundIndex === -1) return { state: 'ambiguous' };
-  return { state: 'krylo-owned', index: foundIndex };
+
+  if (sidecarEntry) {
+    const foundIndex = liveArray.findIndex((entry) => sameJson(entry, sidecarEntry));
+    if (foundIndex !== -1) return { state: 'krylo-owned', index: foundIndex };
+    if (liveArray.length === 0) return { state: 'absent' }; // hooks.json itself was deleted/recreated -- nothing left to conflict with, safe to reinstall
+    return { state: 'ambiguous' }; // something is there, but it isn't what the sidecar recorded -- refuse rather than guess
+  }
+
+  // No sidecar record at all for this event (fresh install, or the sidecar
+  // itself was lost/corrupted). Recover by adopting an already-present
+  // self-referencing entry instead of blindly appending a duplicate.
+  const selfIndex = findSelfReferencingEntry(liveArray, event);
+  if (selfIndex !== -1) return { state: 'krylo-owned', index: selfIndex };
+  return { state: 'absent' };
+}
+
+function classifyLauncherOwnership(launcherFile) {
+  if (!fs.existsSync(launcherFile)) return 'absent';
+  const content = fs.readFileSync(launcherFile, 'utf8');
+  return /krylo-hook-launcher-version:/.test(content) ? 'krylo-owned' : 'foreign';
 }
 
 function gitTrackedState(projectDir, relFile) {
@@ -341,6 +372,16 @@ function planHooksInstall(apply, projectDir) {
   const sidecarFile = path.join(codexDir, 'krylo-hooks-meta.json');
   const launcherDestFile = path.join(projectDir, LAUNCHER_REL_PATH);
   const launcherSrcFile = path.join(pluginRoot(), 'codex', 'project-hooks', 'codex-project-hook-launcher.mjs');
+
+  const launcherOwnership = classifyLauncherOwnership(launcherDestFile);
+  if (launcherOwnership === 'foreign') {
+    return {
+      ok: false,
+      target: 'hooks',
+      error: 'foreign-launcher-file',
+      message: `A file already exists at ${launcherDestFile} and is not owned by KRYLO. It will NOT be overwritten. Remove or rename it manually first.`,
+    };
+  }
 
   const liveRead = readJsonFileSafe(hooksFile);
   if (!liveRead.ok) {
