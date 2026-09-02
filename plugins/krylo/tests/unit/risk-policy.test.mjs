@@ -523,6 +523,44 @@ test('shared risk policy denies direct writes into the KRYLO data root', () => {
   assert.equal(result.category, 'data-root-protection');
 });
 
+// Regression (High, found and live-reproduced -- including a genuine
+// PowerShell overwrite of a real state.json -- by a fresh independent
+// Security Reviewer re-checking the fix already applied to
+// touchesClaudeSettings()/touchesCodexProjectHooks(): this sibling
+// function does the identical path.resolve()+startsWith comparison but
+// had never received the trailing-Windows-path-component-noise fix at
+// all, on EITHER its Write/apply_patch arm or its Bash/PowerShell
+// text-matching arm.
+test('shared risk policy: trailing Windows path-component noise on an INTERMEDIATE data-root component is still denied, on both the resolved-path Write/apply_patch arm and the Bash/PowerShell text-matching arm', () => {
+  const dataRoot = path.join(os.tmpdir(), 'krylo-noise-test-root', 'data');
+  // A relative target resolved against a noisy cwd -- the raw target string
+  // itself never contains a literal dataRoot fragment, so this isolates the
+  // resolved-path (path.resolve()+stripWindowsPathComponentNoise) arm from
+  // the separate substring pre-check exercised by the PowerShell case below.
+  const noisyCwd = path.join(os.tmpdir(), 'krylo-noise-test-root.', 'data');
+  const relativeTarget = path.join('runs', 'x', 'state.json');
+
+  const writeResult = classifyRiskAction({ toolName: 'Write', toolInput: { file_path: relativeTarget }, cwd: noisyCwd, dataRoot });
+  assert.equal(writeResult.action, 'deny');
+  assert.equal(writeResult.category, 'data-root-protection');
+
+  const patch = `*** Begin Patch\n*** Update File: ${relativeTarget}\n@@\n-old\n+new\n*** End Patch\n`;
+  const patchResult = classifyRiskAction({ toolName: 'apply_patch', toolInput: { patch }, cwd: noisyCwd, dataRoot });
+  assert.equal(patchResult.action, 'deny');
+
+  // Separately, the Bash/PowerShell text-matching arm: a noisy variant of
+  // the fixed dataRoot fragment appearing literally in the command text.
+  const noisyCommandTarget = path.join(os.tmpdir(), 'krylo-noise-test-root', 'data.', 'runs', 'x', 'state.json');
+  const commandResult = classifyRiskAction({
+    toolName: 'PowerShell',
+    toolInput: { command: `Set-Content -Path '${noisyCommandTarget}' -Value 'x'` },
+    cwd: dataRoot,
+    dataRoot,
+  });
+  assert.equal(commandResult.action, 'deny');
+  assert.equal(commandResult.category, 'data-root-protection');
+});
+
 test('shared risk policy denies a Bash command referencing the data root via ~/.krylo/data (tilde shorthand)', () => {
   // ADDITIONAL HARDENING (security-hardening checkpoint): the new
   // multi-host design introduces ~/.krylo/data as the future shared data
@@ -891,6 +929,29 @@ test('shared risk policy denies the model writing/editing the KRYLO plugin\'s ow
     toolName: 'Edit', toolInput: { file_path: targets[0], old_string: 'a', new_string: 'b' }, cwd: process.cwd(), dataRoot,
   });
   assert.notEqual(noPluginRoot.action, 'deny', 'without a known pluginRoot, this check must not fire');
+});
+
+// Regression (Medium, found and live-reproduced -- including a genuine
+// file write landing inside the real installed plugin root -- by the same
+// review round as the data-root sibling test above): touchesPluginInstallation()
+// does the identical path.resolve()+startsWith comparison as
+// touchesDataRoot()/touchesClaudeSettings()/touchesCodexProjectHooks() but
+// had never received the trailing-Windows-path-component-noise fix either.
+test('shared risk policy: trailing Windows path-component noise on an INTERMEDIATE pluginRoot component is still denied', () => {
+  const dataRoot = tempDataRoot();
+  const fakePluginRoot = path.join(os.tmpdir(), 'krylo-noise-test-plugin-root', 'installed');
+  const noisyCwd = path.join(os.tmpdir(), 'krylo-noise-test-plugin-root.', 'installed');
+  const relativeTarget = path.join('policies', 'production-policy.json');
+
+  const result = classifyRiskAction({
+    toolName: 'Edit',
+    toolInput: { file_path: relativeTarget, old_string: 'a', new_string: 'b' },
+    cwd: noisyCwd,
+    dataRoot,
+    pluginRoot: fakePluginRoot,
+  });
+  assert.equal(result.action, 'deny');
+  assert.equal(result.category, 'plugin-installation-protection');
 });
 
 test('shared risk policy still allows the legitimate runtime CLIs the model is meant to call directly', () => {

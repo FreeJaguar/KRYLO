@@ -211,7 +211,13 @@ function touchesDataRoot({ toolName, toolInput, cwd, dataRoot }) {
     '.krylo\\data',
     'current-run.json',
     'wrapper-config.json',
-  ].map((v) => v.toLowerCase());
+    // A fresh independent Security Reviewer, re-checking the fix already
+    // applied to touchesClaudeSettings()/touchesCodexProjectHooks() for a
+    // trailing Windows path-component space/dot, found and live-reproduced
+    // (a real PowerShell write landing on the real, control-plane
+    // state.json) that this sibling function had never received the same
+    // fix at all. withWindowsTrailingNoiseVariants() closes it here too.
+  ].map((v) => v.toLowerCase()).flatMap(withWindowsTrailingNoiseVariants);
 
   const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
   const name = String(toolName ?? '');
@@ -236,8 +242,9 @@ function touchesDataRoot({ toolName, toolInput, cwd, dataRoot }) {
   const lower = target.toLowerCase();
   if (variants.some((v) => lower.includes(v))) return true;
   try {
-    const resolved = path.resolve(cwd || process.cwd(), target).toLowerCase();
-    const rootLower = path.resolve(dataRoot).toLowerCase();
+    const rawResolved = path.resolve(cwd || process.cwd(), target);
+    const resolved = stripWindowsPathComponentNoise(rawResolved).toLowerCase();
+    const rootLower = stripWindowsPathComponentNoise(path.resolve(dataRoot)).toLowerCase();
     if (resolved === rootLower || resolved.startsWith(rootLower + path.sep.toLowerCase())) return true;
     // path.resolve() alone never follows symlinks: a symlink outside the
     // data root that points into it would otherwise escape this check, even
@@ -245,8 +252,8 @@ function touchesDataRoot({ toolName, toolInput, cwd, dataRoot }) {
     // both sides through any symlinks (best-effort for a target that does
     // not exist yet, e.g. a new file about to be created) before the final
     // comparison.
-    const realResolved = realpathBestEffort(path.resolve(cwd || process.cwd(), target)).toLowerCase();
-    const realRoot = realpathBestEffort(path.resolve(dataRoot)).toLowerCase();
+    const realResolved = stripWindowsPathComponentNoise(realpathBestEffort(rawResolved)).toLowerCase();
+    const realRoot = stripWindowsPathComponentNoise(realpathBestEffort(path.resolve(dataRoot))).toLowerCase();
     return realResolved === realRoot || realResolved.startsWith(realRoot + path.sep.toLowerCase());
   } catch {
     return false;
@@ -472,7 +479,6 @@ function touchesPluginInstallation({ toolName, toolInput, cwd, pluginRoot }) {
   if (typeof pluginRoot !== 'string' || pluginRoot.trim() === '') return false;
   const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
   const name = String(toolName ?? '');
-  const rootLower = path.resolve(pluginRoot).toLowerCase();
 
   // Independent review found a Critical self-inflicted regression: an
   // earlier version of this function also scanned Bash/PowerShell command
@@ -535,14 +541,18 @@ function touchesPluginInstallation({ toolName, toolInput, cwd, pluginRoot }) {
   if (target === '') return false;
   try {
     const resolvedRaw = path.resolve(cwd || process.cwd(), target);
-    const resolved = resolvedRaw.toLowerCase();
+    // Same trailing-Windows-path-component-noise fix as touchesDataRoot()
+    // above (also found and live-reproduced against this function by the
+    // same review round): apply to both sides of the comparison.
+    const resolved = stripWindowsPathComponentNoise(resolvedRaw).toLowerCase();
+    const rootLower = stripWindowsPathComponentNoise(path.resolve(pluginRoot)).toLowerCase();
     if (resolved === rootLower || resolved.startsWith(rootLower + path.sep.toLowerCase())) return true;
     // Same symlink/junction handling as touchesDataRoot() and (as of this
     // review round) touchesClaudeSettings(): a directory symlink pointing
     // into the installed plugin root would otherwise let a write escape
     // this check while still landing inside it once the OS resolves it.
-    const realResolved = realpathBestEffort(resolvedRaw).toLowerCase();
-    const realRoot = realpathBestEffort(path.resolve(pluginRoot)).toLowerCase();
+    const realResolved = stripWindowsPathComponentNoise(realpathBestEffort(resolvedRaw)).toLowerCase();
+    const realRoot = stripWindowsPathComponentNoise(realpathBestEffort(path.resolve(pluginRoot))).toLowerCase();
     return realResolved === realRoot || realResolved.startsWith(realRoot + path.sep.toLowerCase());
   } catch {
     return false;
