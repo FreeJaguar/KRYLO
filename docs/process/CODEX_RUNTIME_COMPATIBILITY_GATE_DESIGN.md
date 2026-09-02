@@ -47,19 +47,24 @@ Every `trusted:false` row carries a `reason` string suitable for both the `addit
 
 ## Bootstrap integration (`user-prompt-submit-codex.mjs`)
 
-Inserted immediately after `parseInvocation()` confirms an explicit `$krylo-run` and immediately before the existing idempotency/existing-run lookup (so an already-active, non-terminal run for this exact session is still reused first without re-probing -- the gate only matters for a genuinely NEW bootstrap attempt):
+Inserted immediately AFTER the existing idempotency/existing-run lookup (so an already-active, non-terminal run for this exact session is reused first, returning before the gate is ever consulted -- the gate only matters for a genuinely NEW bootstrap attempt) and after the in-memory `createInitialState()` call (pure -- nothing is persisted yet), but before the resulting state is ever saved:
 
 ```
 if not an explicit $krylo-run invocation -> allowSilently()   (unchanged)
 if an active, non-terminal run already exists for this session -> reuse it (unchanged)
-result = evaluateCodexRuntimeCompatibility({ cliPath: env.KRYLO_CODEX_CLI_PATH ?? 'codex', env })
+state = createInitialState(...)   -- same as before this ADR; pure, nothing persisted yet
+result = evaluateCodexRuntimeCompatibility({
+  cliPath: (TEST_MODE and env.KRYLO_CODEX_CLI_PATH) or 'codex',
+  contractPath: (TEST_MODE and env.KRYLO_CODEX_COMPAT_CONTRACT_PATH) or undefined,
+  env,
+})
 if result.trusted:
-    proceed with the existing bootstrap exactly as before this ADR
+    saveState(state); writeActiveRunPointer(...)   -- exactly as before this ADR
+    emitAdditionalContext(`KRYLO Codex run <runId> is now active ...`)
 else:
-    build initial state via createInitialState (same as before)
-    push one finding: { severity: 'high', source: 'codex-runtime-compat', summary: result.reason }
+    push one finding onto state: { severity: 'high', source: 'codex-runtime-compat', summary: result.reason (+ resolved executablePath when known) }
     state.terminalState = 'SAFE_BLOCKED'; state.phase = 'BLOCKED'
-    saveState(state)   -- no writeActiveRunPointer call at all
+    saveState(state)   -- no writeActiveRunPointer call at all, regardless of whether this save itself succeeds
     emitAdditionalContext(`KRYLO Codex run <runId> could not start autonomously: <result.reason> ...`)
 ```
 

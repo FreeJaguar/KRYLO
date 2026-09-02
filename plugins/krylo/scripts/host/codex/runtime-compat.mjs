@@ -17,7 +17,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { platformSpawnTarget } from '../../lib/spawn-platform.mjs';
+import { platformSpawnTarget, killProcessTree } from '../../lib/spawn-platform.mjs';
 import { parseCodexVersion } from '../../lib/version-compare.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -95,21 +95,50 @@ export function probeCodexVersion({ cliPath = 'codex', env = process.env, timeou
       env,
     });
 
-    if (res.error) {
-      const isTimeout = res.error.code === 'ETIMEDOUT' || Boolean(res.signal);
-      return { ok: false, reason: isTimeout ? 'probe-timeout' : 'probe-process-error' };
+    // Ordering and killProcessTree() usage mirror the already-established,
+    // reviewed pattern in scripts/host/cross-harness/codex-worker.mjs's own
+    // spawnSync result handling exactly (same Node.js spawnSync result
+    // shapes, same platform quirks) -- an independent Reviewer found this
+    // module's original version checked `res.signal` before `res.error.code
+    // === 'ENOBUFS'`, so an oversized-output probe (which also sets
+    // `signal:'SIGTERM'` on this platform) was misreported as a timeout.
+    // Checking output size and ENOBUFS FIRST disambiguates them correctly.
+    // killProcessTree() ensures a probe that spawned its own subprocesses
+    // internally never survives past the reported failure regardless of
+    // platform (spawnSync's own timeout kill only reliably reaches the
+    // DIRECT child on Windows).
+    if (typeof res.stdout === 'string' && res.stdout.length >= PROBE_MAX_BUFFER_BYTES) {
+      killProcessTree(res.pid);
+      return { ok: false, reason: 'probe-output-too-large' };
     }
-    if (res.signal) return { ok: false, reason: 'probe-timeout' };
+    if (res.error?.code === 'ENOBUFS') {
+      killProcessTree(res.pid);
+      return { ok: false, reason: 'probe-output-too-large' };
+    }
+    if (res.error?.code === 'ETIMEDOUT' || res.signal === 'SIGTERM') {
+      killProcessTree(res.pid);
+      return { ok: false, reason: 'probe-timeout' };
+    }
+    if (res.error) return { ok: false, reason: 'probe-process-error' };
     if (res.status !== 0 || typeof res.stdout !== 'string') return { ok: false, reason: 'probe-nonzero-exit' };
 
     const firstLine = res.stdout.trim().split('\n')[0] ?? '';
     const parsedVersion = parseCodexVersion(firstLine);
     if (!parsedVersion.ok) return { ok: false, reason: 'probe-malformed-version', observed: firstLine.slice(0, 80) };
 
+    // The Windows-shim case (platformSpawnTarget() resolving a `.cmd` to
+    // `node.exe <real-script.js>`) means target.command alone is just the
+    // interpreter, not a meaningful identity -- include the first resolved
+    // argument (the real script/binary path) when present, so this is
+    // genuinely useful audit evidence, not the wrong binary's own path.
+    const executablePath = target.args.length > 0 && target.args[0] !== '--version'
+      ? `${target.command} ${target.args[0]}`
+      : target.command;
+
     return {
       ok: true,
       version: `${parsedVersion.major}.${parsedVersion.minor}.${parsedVersion.patch}`,
-      executablePath: target.command,
+      executablePath,
       raw: firstLine,
     };
   } catch {

@@ -104,6 +104,12 @@ test('probeCodexVersion: a well-formed "codex-cli X.Y.Z" response parses success
   assert.equal(result.ok, true);
   assert.equal(result.version, '0.120.0');
   assert.ok(typeof result.executablePath === 'string' && result.executablePath !== '');
+  // Regression (found by a fresh independent Reviewer): on the Windows-shim
+  // resolution path, the bare resolved `command` alone is just the
+  // interpreter (node.exe), not a meaningful identity -- the real fixture
+  // script path must be included too, so this is genuinely useful audit
+  // evidence rather than the wrong binary's own path.
+  assert.match(result.executablePath, /fake-codex-cli/, 'executablePath must name the real resolved script/binary, not merely an interpreter (e.g. bare node.exe on the Windows-shim path)');
 });
 
 test('probeCodexVersion: a missing/unresolvable executable fails safe, never guesses a version', () => {
@@ -162,6 +168,27 @@ test('evaluateCodexRuntimeCompatibility: an exact-match blocked version is never
   assert.equal(result.trusted, false);
   assert.equal(result.status, 'blocked');
   assert.match(result.reason, /known incompatible for testing/);
+});
+
+// Regression coverage (found by a fresh independent Reviewer: "blocked-wins"
+// is the decision table's own key safety property and was asserted nowhere)
+// -- a version listed in BOTH supported and blocked must still be denied.
+// A well-reviewed contract should never actually do this, but the ordering
+// itself (blocked checked strictly before supported) must hold regardless.
+test('evaluateCodexRuntimeCompatibility: a version listed in BOTH supported and blocked is still denied -- blocked always wins', () => {
+  const contractPath = writeContract({
+    contractSchemaVersion: 1,
+    supported: [{ version: '0.120.0', evidence: 'test fixture' }],
+    blocked: [{ version: '0.120.0', reason: 'this exact version was later found to be broken' }],
+  });
+  const result = evaluateCodexRuntimeCompatibility({
+    cliPath: FAKE_CLI,
+    env: { ...process.env, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 0.120.0' },
+    contractPath,
+  });
+  assert.equal(result.trusted, false);
+  assert.equal(result.status, 'blocked');
+  assert.match(result.reason, /this exact version was later found to be broken/);
 });
 
 test('evaluateCodexRuntimeCompatibility: an unknown NEWER version is unverified, never automatically trusted for being newer', () => {
@@ -267,8 +294,22 @@ test('evaluateCodexRuntimeCompatibility: every trusted:false result carries a no
   }
 });
 
+// Regression (found by a fresh independent Reviewer): the second assertion
+// here originally passed `contractPath: undefined`, which falls back to the
+// REAL shipped contract, combined with `cliPath: undefined`, which falls
+// back to the real bare `codex` command -- genuinely spawning whatever
+// Codex binary happens to be installed on the machine running this test,
+// contradicting this suite's own hermetic-test requirement (design doc:
+// "this repository's test suite must remain fully hermetic"). Both cases
+// below now use an explicit fixture contractPath and a definitely-absent
+// cliPath, so this test proves "never throws on malformed input" without
+// depending on, or actually invoking, any real installed Codex binary.
 test('evaluateCodexRuntimeCompatibility: never throws for any combination of malformed inputs', () => {
   const contractPath = writeContract(VALID_CONTRACT);
   assert.doesNotThrow(() => evaluateCodexRuntimeCompatibility({ cliPath: '', env: {}, contractPath: '' }));
-  assert.doesNotThrow(() => evaluateCodexRuntimeCompatibility({ cliPath: undefined, env: undefined, contractPath: undefined }));
+  assert.doesNotThrow(() => evaluateCodexRuntimeCompatibility({
+    cliPath: 'krylo-this-command-definitely-does-not-exist-anywhere-xyz',
+    env: {},
+    contractPath,
+  }));
 });

@@ -211,22 +211,38 @@ async function main() {
   });
 
   if (!compatibility.trusted) {
+    // Include the resolved executable identity as audit evidence when the
+    // probe reached that far (a contract-malformed/probe-failed result may
+    // have none) -- summary stays within the schema's 300-char cap.
+    const findingSummary = compatibility.executablePath
+      ? `${compatibility.reason} (resolved executable: ${compatibility.executablePath})`.slice(0, 300)
+      : compatibility.reason.slice(0, 300);
     state.findings.push({
       id: 'finding-1',
       severity: 'high',
       status: 'open',
-      summary: compatibility.reason.slice(0, 300),
+      summary: findingSummary,
       source: 'codex-runtime-compat',
     });
     state.terminalState = 'SAFE_BLOCKED';
     state.phase = 'BLOCKED';
 
+    // Independent review found the original version of this block called
+    // allowSilently() here when the audit record itself failed to persist
+    // -- inverting the fail-safe direction: a hard compatibility block was
+    // silently downgraded to total silence (no additionalContext at all),
+    // which the model could easily read as "no run exists, proceed as
+    // normal" rather than "a full autonomous run was refused." Emitting the
+    // warning costs nothing and is strictly safer regardless of whether the
+    // audit record itself could be written -- additionalContext is
+    // coordination text, never an authorization gate, so persistence
+    // failure here must never change what the model is told.
     const blockedSaveResult = saveState(state);
-    if (!blockedSaveResult.ok) allowSilently(); // not even the blocked audit record could be persisted
-
     emitAdditionalContext(
       `KRYLO Codex run ${runId} could not start autonomously: ${compatibility.reason} `
-      + 'This run has been recorded as SAFE_BLOCKED for audit purposes only -- do not attempt the task autonomously; report this limitation to the user.',
+      + (blockedSaveResult.ok
+        ? 'This run has been recorded as SAFE_BLOCKED for audit purposes only -- do not attempt the task autonomously; report this limitation to the user.'
+        : 'The block record itself could not be persisted -- do not attempt the task autonomously regardless; report this limitation to the user.'),
     );
     return;
   }
