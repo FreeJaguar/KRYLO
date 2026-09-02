@@ -1270,6 +1270,10 @@ test('shared risk policy denies a Bash command directly invoking any Codex Hook 
     'scripts/security/risk-gate-codex.mjs',
     'scripts/security/permission-request-codex.mjs',
     'scripts/runtime/posttool-telemetry-codex.mjs',
+    // Project-scoped hook launcher (docs/adr/0032): a model could otherwise
+    // route around every filename above by invoking it through this
+    // redirector instead of the real script directly.
+    '.codex/krylo/codex-project-hook-launcher.mjs',
   ];
   for (const entrypoint of codexEntrypoints) {
     const result = classifyRiskAction({

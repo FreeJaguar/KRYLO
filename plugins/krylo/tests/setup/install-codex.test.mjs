@@ -61,6 +61,27 @@ test('install-codex: fresh --apply installs the skill verbatim from the reposito
   }
 });
 
+test('install-codex: skill install also bundles a real, functional runtime (scripts/references/schemas/policies), required for a standalone VS Code session to actually work (docs/adr/0032)', () => {
+  const home = mkHome();
+  const project = mkProject();
+  try {
+    const res = run(['--target', 'skill', '--apply'], home, project);
+    assert.equal(res.status, 0);
+    assert.equal(res.json.skill.applied, true);
+    const installDir = path.join(home, '.agents', 'skills', 'krylo-run');
+    assert.ok(fs.existsSync(path.join(installDir, 'scripts', 'security', 'risk-gate-codex.mjs')), 'the real risk-gate-codex.mjs must be copied verbatim');
+    assert.ok(fs.existsSync(path.join(installDir, 'scripts', 'security', 'user-prompt-submit-codex.mjs')));
+    assert.ok(fs.existsSync(path.join(installDir, 'scripts', 'runtime', 'posttool-telemetry-codex.mjs')));
+    assert.ok(fs.existsSync(path.join(installDir, 'scripts', 'host', 'codex', 'context.mjs')));
+    assert.ok(fs.existsSync(path.join(installDir, 'references', 'operating-principles.md')), 'references must be copied so the Skill\'s own instructions resolve');
+    assert.ok(fs.existsSync(path.join(installDir, 'schemas')));
+    assert.ok(fs.existsSync(path.join(installDir, 'policies')));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test('install-codex: a foreign (non-KRYLO) skill named krylo-run is never overwritten', () => {
   const home = mkHome();
   const project = mkProject();

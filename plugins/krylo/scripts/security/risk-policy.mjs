@@ -88,6 +88,11 @@ const HOOK_ENTRYPOINT_FILENAMES = [
   'risk-gate-codex.mjs',
   'permission-request-codex.mjs',
   'posttool-telemetry-codex.mjs',
+  // Project-scoped hook launcher (docs/adr/0032-codex-project-scoped-hook-enforcement.md):
+  // a redirector that re-executes the real scripts above -- without its own
+  // entry here, a model could route around every filename check above by
+  // invoking the launcher instead of the real script directly.
+  'codex-project-hook-launcher.mjs',
 ];
 
 /**
