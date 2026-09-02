@@ -102,6 +102,79 @@ test('on Windows, a decoy file planted in the CURRENT DIRECTORY never shadows th
   }
 });
 
+// Regression (High, found and reproduced by a SECOND fresh independent
+// Security Reviewer, re-checking the CWD-shadow fix above): pinning
+// `where`'s own cwd to `os.tmpdir()` only RELOCATED the vulnerability, it
+// did not close it -- (a) os.tmpdir()'s own root is itself an equally
+// Write-reachable location for a decoy, and (b) os.tmpdir() is computed
+// from the TEMP/TMP environment variables, so redirecting either back to
+// the original project-shaped decoy directory fully revives the original
+// exploit. Both are now closed by validating that a `where` candidate's
+// own containing directory is an EXACT member of the literal directories
+// PATH lists -- a decoy anywhere else, regardless of cwd, is rejected.
+test('on Windows, a decoy planted directly in os.tmpdir() itself never shadows the real PATH-installed target (regression: an earlier cwd-pinning fix only relocated the vulnerability)', { skip: os.platform() !== 'win32' }, () => {
+  const pathFixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-tmpdir-shadow-real-'));
+  const decoyMarkerPath = path.join(os.tmpdir(), 'TMPDIR_DECOY_EXECUTED.txt');
+  const decoyShimPath = path.join(os.tmpdir(), 'krylo-tmpdir-shadow-fixture.cmd');
+  const originalPath = process.env.PATH;
+  try {
+    const realShimPath = path.join(pathFixtureDir, 'krylo-tmpdir-shadow-fixture.cmd');
+    fs.writeFileSync(realShimPath, `@ECHO off\r\n"${process.execPath}" %*\r\n`);
+    process.env.PATH = `${pathFixtureDir}${path.delimiter}${originalPath}`;
+
+    // A decoy with the exact same command name, planted directly in
+    // os.tmpdir()'s own root -- itself a Write-reachable location.
+    fs.writeFileSync(decoyShimPath, `@ECHO off\r\necho decoy-version 0.0.0\r\necho executed > "${decoyMarkerPath}"\r\n`);
+
+    const target = platformSpawnTarget('krylo-tmpdir-shadow-fixture', ['--version']);
+    assert.ok(target, 'the real PATH-installed target must still resolve');
+    assert.doesNotMatch(target.command.toLowerCase(), new RegExp(os.tmpdir().toLowerCase().replace(/[\\]/g, '\\\\')), 'must never resolve to a decoy planted in os.tmpdir() itself');
+
+    const res = spawnSync(target.command, target.args, { encoding: 'utf8', shell: false, timeout: 10_000 });
+    assert.equal(res.status, 0);
+    assert.match(res.stdout, /^v?\d+\.\d+\.\d+/);
+    assert.ok(!fs.existsSync(decoyMarkerPath), 'the tmpdir-planted decoy must never have been executed');
+  } finally {
+    process.env.PATH = originalPath;
+    fs.rmSync(pathFixtureDir, { recursive: true, force: true });
+    fs.rmSync(decoyShimPath, { force: true });
+    fs.rmSync(decoyMarkerPath, { force: true });
+  }
+});
+
+test('on Windows, redirecting TEMP/TMP back to a decoy directory does not revive the CWD-shadow exploit', { skip: os.platform() !== 'win32' }, () => {
+  const pathFixtureDir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-temp-redirect-real-'));
+  const decoyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-temp-redirect-decoy-'));
+  const originalPath = process.env.PATH;
+  const originalTemp = process.env.TEMP;
+  const originalTmp = process.env.TMP;
+  try {
+    const realShimPath = path.join(pathFixtureDir, 'krylo-temp-redirect-fixture.cmd');
+    fs.writeFileSync(realShimPath, `@ECHO off\r\n"${process.execPath}" %*\r\n`);
+    process.env.PATH = `${pathFixtureDir}${path.delimiter}${originalPath}`;
+
+    const decoyMarkerPath = path.join(decoyDir, 'TEMP_REDIRECT_DECOY_EXECUTED.txt');
+    fs.writeFileSync(path.join(decoyDir, 'krylo-temp-redirect-fixture.cmd'), `@ECHO off\r\necho decoy-version 0.0.0\r\necho executed > "${decoyMarkerPath}"\r\n`);
+
+    // TEMP/TMP redirected to the decoy directory -- this is what os.tmpdir()
+    // itself is computed from, and is NOT a KRYLO-named variable any
+    // sentinel-gating convention covers.
+    process.env.TEMP = decoyDir;
+    process.env.TMP = decoyDir;
+
+    const target = platformSpawnTarget('krylo-temp-redirect-fixture', ['--version']);
+    assert.ok(target, 'the real PATH-installed target must still resolve');
+    assert.doesNotMatch(target.command.toLowerCase(), /krylo-temp-redirect-decoy/, 'must never resolve to the decoy even when TEMP/TMP point at it');
+    assert.ok(!fs.existsSync(decoyMarkerPath), 'the TEMP/TMP-redirected decoy must never have been executed');
+  } finally {
+    process.env.PATH = originalPath;
+    process.env.TEMP = originalTemp;
+    process.env.TMP = originalTmp;
+    fs.rmSync(pathFixtureDir, { recursive: true, force: true });
+    fs.rmSync(decoyDir, { recursive: true, force: true });
+  }
+});
+
 test('on Windows, spawning the resolved real target actually works (real process, real version output)', { skip: os.platform() !== 'win32' }, () => {
   const target = platformSpawnTarget('node', ['--version']);
   assert.ok(target);
