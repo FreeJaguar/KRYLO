@@ -279,9 +279,25 @@ function removeRules(apply, projectDir) {
 // that event automatically rather than guess.
 
 const HOOKS_VERSION = '0.2.0';
-const HOOK_EVENTS = ['UserPromptSubmit', 'PreToolUse', 'PostToolUse'];
+// docs/adr/0033-codex-lifecycle-enforcement.md adds Stop/SessionStart/
+// SessionEnd to the original ADR-0032 set. classifyEventOwnership()/
+// planHooksInstall()/removeHooks() below are already generic over this
+// array -- no further per-event special-casing was needed to extend them.
+const HOOK_EVENTS = ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SessionStart', 'SessionEnd'];
 const LAUNCHER_REL_PATH = path.join('.codex', 'krylo', 'codex-project-hook-launcher.mjs');
-const EVENT_LAUNCHER_ARG = { UserPromptSubmit: 'user-prompt-submit', PreToolUse: 'pre-tool-use', PostToolUse: 'post-tool-use' };
+const EVENT_LAUNCHER_ARG = {
+  UserPromptSubmit: 'user-prompt-submit',
+  PreToolUse: 'pre-tool-use',
+  PostToolUse: 'post-tool-use',
+  Stop: 'stop',
+  SessionStart: 'session-start',
+  SessionEnd: 'session-end',
+};
+// SessionEnd's real platform timeout budget is confirmed ~1-3 seconds
+// (docs/adr/0033, direct source inspection of SESSION_END_MAX_TIMEOUT_SEC);
+// Stop uses the same generous budget the Claude Stop hook already does
+// (skills/run/SKILL.md); every other event keeps the original 15s default.
+const EVENT_TIMEOUT_SEC = { PreToolUse: 30, Stop: 60, SessionEnd: 3 };
 
 function launcherCommandsFor(event) {
   const arg = EVENT_LAUNCHER_ARG[event];
@@ -293,7 +309,7 @@ function launcherCommandsFor(event) {
 
 function krylOwnedEntryFor(event) {
   const { command, commandWindows } = launcherCommandsFor(event);
-  const hookDef = { type: 'command', command, commandWindows, timeout: event === 'PreToolUse' ? 30 : 15 };
+  const hookDef = { type: 'command', command, commandWindows, timeout: EVENT_TIMEOUT_SEC[event] ?? 15 };
   return event === 'PreToolUse'
     ? { matcher: 'Bash|shell|exec_command|apply_patch|mcp__.*', hooks: [hookDef] }
     : { hooks: [hookDef] };

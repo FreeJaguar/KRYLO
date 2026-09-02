@@ -30,6 +30,9 @@ const EVENT_SCRIPTS = {
   'user-prompt-submit': ['security', 'user-prompt-submit-codex.mjs'],
   'pre-tool-use': ['security', 'risk-gate-codex.mjs'],
   'post-tool-use': ['runtime', 'posttool-telemetry-codex.mjs'],
+  stop: ['orbit', 'stop-gate-codex.mjs'],
+  'session-start': ['security', 'session-start-codex.mjs'],
+  'session-end': ['status', 'session-end-codex.mjs'],
 };
 
 function resolveStandaloneRoot() {
@@ -53,16 +56,21 @@ function denyPreToolUse(reason) {
   process.exit(0);
 }
 
-// A PreToolUse hook that fails to emit valid, well-formed output is
-// confirmed to FAIL OPEN on the current stable Codex release (the tool
-// call proceeds) -- re-verified directly against rust-v0.152.1's own
-// pre_tool_use.rs unit tests (docs/codex-capability-matrix.md,
-// docs/adr/0032-codex-project-scoped-hook-enforcement.md). Every exit path
-// for the pre-tool-use event below therefore goes through denyPreToolUse(),
-// including an unexpected exception or a spawnSync that could not even
-// launch the real script -- never a silent/empty exit for that one event.
+// PreToolUse is the ONLY event among the six above where "fail toward
+// denying" is the safe direction -- confirmed directly against
+// rust-v0.152.1's own pre_tool_use.rs unit tests: a PreToolUse hook that
+// fails to emit valid output FAILS OPEN (the tool call proceeds), so this
+// launcher must never let a crash/missing-runtime/spawn-failure silently
+// allow a tool call through. Every OTHER event's safe direction is the
+// opposite: stop-gate-codex.mjs's own confirmed-safe fail-toward-ending
+// property (docs/adr/0033-codex-lifecycle-enforcement.md) means "stop"
+// must exit 0/no-output on any failure here too, never emit a block
+// decision it cannot back with a real classification -- and
+// session-start/session-end are non-security-boundary lifecycle events
+// where a missing runtime simply means no run could exist to act on.
 function main() {
   const event = process.argv[2];
+  const isPreToolUse = event === 'pre-tool-use';
   try {
     const scriptRel = EVENT_SCRIPTS[event];
     if (!scriptRel) {
@@ -78,7 +86,7 @@ function main() {
     const root = resolveStandaloneRoot();
     const scriptPath = path.join(root, 'scripts', ...scriptRel);
     if (!fs.existsSync(scriptPath)) {
-      if (event === 'pre-tool-use') {
+      if (isPreToolUse) {
         // PreToolUse is the security boundary: with no real script to
         // delegate to, this launcher cannot determine whether a KRYLO run
         // is even active, so it cannot safely no-op. Deny, matching this
@@ -90,10 +98,10 @@ function main() {
         );
         return;
       }
-      // UserPromptSubmit/PostToolUse are not the security boundary
-      // (lifecycle bootstrap and post-execution telemetry respectively) --
-      // a missing runtime here means no run can ever have been created, so
-      // a silent no-op matches the same inactive-run contract the real
+      // Every other event (stop, session-start, session-end,
+      // user-prompt-submit, post-tool-use): a missing runtime here means
+      // no run can ever have been created or need continuing, so a silent
+      // no-op matches the same inactive-run/safe-ending contract the real
       // hooks already implement, without pure UX noise.
       process.exit(0);
       return;
@@ -106,24 +114,30 @@ function main() {
     }
     // Nonzero exit, or a null status (spawnSync could not even launch the
     // real script -- a permission error, or the path exists but is not
-    // executable content): the real script's own contract guarantees exit
-    // 0 always means either a valid PreToolUse decision was already
-    // written to inherited stdout, or an intentional silent-allow for a
-    // legitimate no-active-run case -- anything else means it crashed
-    // before reaching that point (corrupted install, syntax error, etc.).
-    // Same "cannot determine whether a run is active" fail-closed reasoning
-    // as the missing-runtime branch above.
-    if (event === 'pre-tool-use') {
+    // executable content): every real hook script's own contract
+    // guarantees exit 0 always means either a valid decision was already
+    // written to inherited stdout, or an intentional silent-allow -- so
+    // anything else means it crashed before reaching that point (corrupted
+    // install, syntax error, etc.).
+    if (isPreToolUse) {
       denyPreToolUse("KRYLO project hook launcher's real enforcement script did not complete normally and denied as a fail-safe.");
       return;
     }
-    process.exit(typeof result.status === 'number' ? result.status : 1);
+    // Deliberately always exit 0 here, never propagate a raw crash exit
+    // code: for "stop" specifically, this launcher has no independent
+    // basis to know how Codex's own hook-run-failure handling would
+    // interpret a nonzero/null status, so the only verified-safe choice is
+    // the same clean "no decision" exit the real script's own worst-case
+    // fail path already produces. The same exit is harmless for
+    // session-start/session-end, which have no decision to communicate at
+    // all.
+    process.exit(0);
   } catch {
-    if (event === 'pre-tool-use') {
+    if (isPreToolUse) {
       denyPreToolUse('KRYLO project hook launcher hit an unexpected error and denied as a fail-safe.');
       return;
     }
-    process.exit(1);
+    process.exit(0);
   }
 }
 

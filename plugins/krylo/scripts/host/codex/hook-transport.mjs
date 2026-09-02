@@ -118,3 +118,32 @@ export function emitCodexPermissionRequestDecision(behavior, message) {
 export function allowCodexSilently() {
   process.exit(0);
 }
+
+/**
+ * Block a Stop hook and inject a continuation reason. Confirmed accepted
+ * (not merely schema-valid) directly against rust-v0.152.1's own
+ * pre_tool_use.rs-sibling stop.rs unit tests: {"decision":"block","reason"}
+ * sets should_block=true and injects `reason` as a continuation prompt
+ * fragment -- functionally identical to Claude's own {decision:'block',
+ * reason} contract. Deliberately never includes a `continue` field: the
+ * same source confirms continue:false OVERRIDES decision:"block" (the
+ * session stops anyway), so omitting it (defaulting to true per the output
+ * schema) is required for decision:"block" to actually take effect.
+ */
+export function emitCodexStopBlock(reason) {
+  process.stdout.write(JSON.stringify({ decision: 'block', reason }));
+  process.exit(0);
+}
+
+/**
+ * SessionStart's only output capability -- informational context for the
+ * model, never a decision. Used only when an active KRYLO run is already
+ * genuinely bound to this exact session (e.g. a resumed session); never
+ * fabricated.
+ */
+export function emitCodexSessionStartContext(text) {
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: text },
+  }));
+  process.exit(0);
+}

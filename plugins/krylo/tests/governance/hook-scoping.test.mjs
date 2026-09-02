@@ -181,7 +181,14 @@ test('codex-hooks.json matches the real installed binary\'s confirmed PreToolUse
   const codexHooks = JSON.parse(fs.readFileSync(codexHooksPath, 'utf8'));
   assert.match(codexHooks.PreToolUse[0].matcher, /(^|\|)Bash(\||$)/, 'the PreToolUse matcher must match the literal "Bash" tool_name real Codex builds send, not only speculative alternatives');
   assert.ok(!('PermissionRequest' in codexHooks), 'PermissionRequest must not be registered until a build confirmed to support that hook event is verified (absent from the installed 0.120.0 build\'s own HookEventNameWire enum)');
-  const confirmedEvents = ['PreToolUse', 'PostToolUse', 'SessionStart', 'UserPromptSubmit', 'Stop'];
+  // SessionEnd added to the confirmed set by docs/adr/0033-codex-lifecycle-enforcement.md:
+  // its own input schema (session-end.command.input.schema.json) and Rust
+  // handler (codex-rs/hooks/src/events/session_end.rs) were fetched and
+  // read directly at the current stable tag (rust-v0.152.1), confirming
+  // the event genuinely exists and is dispatched -- it simply has no
+  // output schema at all (cannot return a decision), which is why
+  // session-end-codex.mjs never attempts to emit one.
+  const confirmedEvents = ['PreToolUse', 'PostToolUse', 'SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop'];
   for (const registeredEvent of Object.keys(codexHooks)) {
     if (registeredEvent.startsWith('$')) continue; // $comment
     assert.ok(confirmedEvents.includes(registeredEvent), `${registeredEvent} is not in the installed build's own confirmed HookEventNameWire enum`);

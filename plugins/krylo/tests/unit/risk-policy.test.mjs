@@ -1331,6 +1331,13 @@ test('shared risk policy denies a Bash command directly invoking any Codex Hook 
     // route around every filename above by invoking it through this
     // redirector instead of the real script directly.
     '.codex/krylo/codex-project-hook-launcher.mjs',
+    // Lifecycle enforcement (docs/adr/0033): Stop/SessionStart/SessionEnd
+    // entrypoints, same forgery risk (e.g. a fabricated Stop payload could
+    // be used to probe for another session's run, or a direct invocation
+    // could bypass the real hook firing and thus the Orbit budget check).
+    'scripts/orbit/stop-gate-codex.mjs',
+    'scripts/security/session-start-codex.mjs',
+    'scripts/status/session-end-codex.mjs',
   ];
   for (const entrypoint of codexEntrypoints) {
     const result = classifyRiskAction({

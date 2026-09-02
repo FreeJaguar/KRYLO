@@ -93,6 +93,14 @@ const HOOK_ENTRYPOINT_FILENAMES = [
   // entry here, a model could route around every filename check above by
   // invoking the launcher instead of the real script directly.
   'codex-project-hook-launcher.mjs',
+  // Codex lifecycle enforcement (docs/adr/0033-codex-lifecycle-enforcement.md):
+  // same forgery risk as every entry above -- a fabricated Stop/SessionStart/
+  // SessionEnd payload run directly could probe for or mutate another
+  // session's run, or bypass the real hook firing (and therefore the Orbit
+  // budget check) entirely.
+  'stop-gate-codex.mjs',
+  'session-start-codex.mjs',
+  'session-end-codex.mjs',
 ];
 
 /**
