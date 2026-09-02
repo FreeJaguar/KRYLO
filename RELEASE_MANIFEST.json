@@ -671,8 +671,8 @@
     },
     {
       "path": "docs/adr/0034-codex-runtime-compatibility-gate.md",
-      "bytes": 21468,
-      "sha256": "04f93951b483ffd0fc7573eaf72c41a1c06b2645f5e4c6c7430716241cdb6e0d"
+      "bytes": 22261,
+      "sha256": "ab4225c94c434bd4045de93dd863e31a787ab0478ebbf7ac78490477cc7602c0"
     },
     {
       "path": "docs/adr/README.md",
@@ -1216,8 +1216,8 @@
     },
     {
       "path": "plugins/krylo/scripts/lib/spawn-platform.mjs",
-      "bytes": 11812,
-      "sha256": "7d6eb2664debdd50c101cba391cfe56e77475c00f626afe8eb69ac1ea5eb83f9"
+      "bytes": 13402,
+      "sha256": "5d7e8d27e8ae2fccaa79660f016e577bf1cb6664497dcf27d0ea6445d7c82d01"
     },
     {
       "path": "plugins/krylo/scripts/lib/state-migrations.mjs",
@@ -1821,8 +1821,8 @@
     },
     {
       "path": "plugins/krylo/tests/unit/spawn-platform.test.mjs",
-      "bytes": 12952,
-      "sha256": "cc38f8dd6a54657e06d77c136aad3304047bdf979164e8298afbce0f41a22e1e"
+      "bytes": 17476,
+      "sha256": "c853ed438229817a3f6852213cfaedede5aeac5418745052377d3eda37d2b0dc"
     },
     {
       "path": "plugins/krylo/tests/unit/state-migrations.test.mjs",
