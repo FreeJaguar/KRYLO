@@ -67,6 +67,11 @@ docs/adr/0033-codex-lifecycle-enforcement.md          # accepted: Stop/SessionSt
 docs/process/CODEX_LIFECYCLE_ENFORCEMENT_DESIGN.md    # design: per-event decision tables, edge-case
                                                        # behavior definitions
 docs/process/CODEX_LIFECYCLE_ENFORCEMENT_IMPLEMENTATION_PLAN.md  # implemented: task breakdown
+docs/adr/0034-codex-runtime-compatibility-gate.md     # accepted: admission control for a full autonomous
+                                                       # $krylo-run based on a reviewed, exact-version-match
+                                                       # Codex compatibility contract
+docs/process/CODEX_RUNTIME_COMPATIBILITY_GATE_DESIGN.md          # design: contract shape, decision table
+docs/process/CODEX_RUNTIME_COMPATIBILITY_GATE_IMPLEMENTATION_PLAN.md  # implemented: task breakdown
 ```
 
 ## Plugin root
@@ -96,6 +101,11 @@ plugins/krylo/scripts/orbit/stop-policy.mjs                  # implemented (host
                                                                # helpers shared by Claude + Codex gates)
 plugins/krylo/scripts/security/session-start-codex.mjs       # implemented (Codex SessionStart, docs/adr/0033)
 plugins/krylo/scripts/status/session-end-codex.mjs           # implemented (Codex SessionEnd, docs/adr/0033)
+plugins/krylo/scripts/host/codex/runtime-compat.mjs           # implemented (Codex Runtime Compatibility
+                                                               # Gate: contract loading, codex --version
+                                                               # probe, exact-match evaluation, docs/adr/0034)
+plugins/krylo/policies/codex-runtime-compatibility.json       # implemented (reviewed compatibility
+                                                               # contract, docs/adr/0034)
 plugins/krylo/scripts/setup/install-codex.mjs                # implemented (standalone-Skill install, now
                                                                # bundling a real runtime; execpolicy rules
                                                                # generation; project-scoped hooks install
@@ -225,6 +235,7 @@ plugins/krylo/tests/unit/cross-harness.test.mjs                # + coordinator: 
 plugins/krylo/tests/unit/spawn-platform.test.mjs                # + Windows shell:false-safe spawn wrapper
 plugins/krylo/tests/hooks/cross-harness-run.test.mjs            # + end-to-end CLI, real fake-worker fixtures
 plugins/krylo/tests/fixtures/cross-harness/                     # + deterministic fake Claude/Codex worker CLI
+plugins/krylo/tests/fixtures/codex-runtime-compat/               # + deterministic fake Codex CLI (docs/adr/0034)
 plugins/krylo/tests/maintenance/*.test.mjs   # + Ecosystem Maintenance: version parsing, upstream-client
                                               # safety, per-category checks, result schema, offline/live
                                               # integration (docs/adr/0031)
