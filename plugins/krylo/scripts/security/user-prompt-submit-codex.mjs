@@ -50,6 +50,7 @@ import {
   computeProjectRootHash,
 } from '../lib/state.mjs';
 import { bootstrapCodexRuntimeEnvironment } from '../host/codex/context.mjs';
+import { evaluateCodexRuntimeCompatibility } from '../host/codex/runtime-compat.mjs';
 
 // Exactly `$krylo-run` as the first non-whitespace token, followed by
 // whitespace or end-of-string -- never a substring match, so
@@ -176,6 +177,47 @@ async function main() {
     kryloVersion: process.env.KRYLO_VERSION || 'unknown',
     runId,
   });
+
+  // Codex Runtime Compatibility Gate (docs/adr/0034-codex-runtime-compatibility-gate.md):
+  // admission control for a FULL AUTONOMOUS run, evaluated once per fresh
+  // bootstrap attempt (never for the idempotent reuse above, and never for
+  // an ordinary, non-$krylo-run prompt, which returns long before this
+  // point). cliPath/contractPath are operator/test-only overrides read
+  // directly from process.env here -- never from payload/prompt content, so
+  // the model has no channel to influence the verdict. An untrusted result
+  // still creates a real, inspectable state.json (never silently doing
+  // nothing) but saves it ALREADY terminal -- no active-run pointer is ever
+  // written for it, so every other Codex hook's own existing
+  // `terminalState !== null` check already treats it as inert with zero
+  // change to any of them.
+  const cliPathOverride = process.env.KRYLO_CODEX_CLI_PATH;
+  const contractPathOverride = process.env.KRYLO_CODEX_COMPAT_CONTRACT_PATH;
+  const compatibility = evaluateCodexRuntimeCompatibility({
+    cliPath: typeof cliPathOverride === 'string' && cliPathOverride.trim() !== '' ? cliPathOverride.trim() : 'codex',
+    env: process.env,
+    ...(typeof contractPathOverride === 'string' && contractPathOverride.trim() !== '' ? { contractPath: contractPathOverride.trim() } : {}),
+  });
+
+  if (!compatibility.trusted) {
+    state.findings.push({
+      id: 'finding-1',
+      severity: 'high',
+      status: 'open',
+      summary: compatibility.reason.slice(0, 300),
+      source: 'codex-runtime-compat',
+    });
+    state.terminalState = 'SAFE_BLOCKED';
+    state.phase = 'BLOCKED';
+
+    const blockedSaveResult = saveState(state);
+    if (!blockedSaveResult.ok) allowSilently(); // not even the blocked audit record could be persisted
+
+    emitAdditionalContext(
+      `KRYLO Codex run ${runId} could not start autonomously: ${compatibility.reason} `
+      + 'This run has been recorded as SAFE_BLOCKED for audit purposes only -- do not attempt the task autonomously; report this limitation to the user.',
+    );
+    return;
+  }
 
   const saveResult = saveState(state);
   if (!saveResult.ok) allowSilently(); // no state persisted: never write a pointer to it
