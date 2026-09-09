@@ -17,7 +17,9 @@ import { getDataRoot, ensureDir } from '../lib/paths.mjs';
 import { readJson } from '../lib/atomic.mjs';
 import { readActiveRunPointerForCwd, loadState } from '../lib/state.mjs';
 import { redactText } from '../lib/redact.mjs';
-import { bootstrapClaudeStorageEnvironment } from '../host/claude/context.mjs';
+import { bootstrapStorageEnvironment, detectHost } from '../lib/host-dispatch.mjs';
+import { resolveClaudeDataRoot } from '../host/claude/context.mjs';
+import { resolveCodexDataRoot } from '../host/codex/context.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(HERE, '..', '..');
@@ -111,9 +113,70 @@ function checkComponents(problems) {
   return { skills, agents, hooksHealthy, missingHookScripts };
 }
 
-function checkStorage(problems) {
-  const dataRoot = getDataRoot();
-  const report = { dataRoot: redactText(dataRoot), writable: false, pointerValid: null, runCount: 0, telemetryFiles: 0 };
+// A previous version of this function always bootstrapped and probed the
+// Claude data root, regardless of which host doctor was actually invoked
+// under -- a Codex-side run would be silently misreported as "no active
+// run" because doctor was reading the wrong directory entirely. `host` is
+// now the ACTUAL detected host for this invocation (host-dispatch.mjs's own
+// detectHost(), the same function every other host-neutral entrypoint
+// uses), and `dataRoot` must already reflect that host (getDataRoot() does,
+// once bootstrapStorageEnvironment() has run in main()).
+/**
+ * Codex-side equivalent of checkComponents()'s hook-health check. Codex's
+ * hook wiring has no Skill-scoped lifecycle (docs/adr/0029) -- it is
+ * referenced directly from .codex-plugin/plugin.json's own "hooks" field,
+ * pointing at hooks/codex-hooks.json. This checks the SAME package-integrity
+ * question checkComponents() already checks for the Claude side (are the
+ * hook scripts this manifest references actually present in this install?)
+ * regardless of which host doctor happens to be invoked under -- both are
+ * part of the one shipped plugin tree.
+ */
+function checkCodexComponents(problems) {
+  let hooksHealthy = true;
+  const missingHookScripts = [];
+  try {
+    const manifest = readJson(path.join(PLUGIN_ROOT, '.codex-plugin', 'plugin.json'));
+    if (!manifest.ok) throw new Error('plugin.json unreadable');
+    const hooksField = manifest.value.hooks;
+    if (typeof hooksField !== 'string' || hooksField.trim() === '') throw new Error('plugin.json has no hooks field');
+    const hooksPath = path.join(PLUGIN_ROOT, ...hooksField.replace(/^\.\//, '').split('/'));
+    const hooksManifest = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+    let sawAny = false;
+    for (const [key, matchers] of Object.entries(hooksManifest)) {
+      if (key.startsWith('$') || !Array.isArray(matchers)) continue;
+      for (const matcher of matchers) {
+        for (const hook of matcher?.hooks ?? []) {
+          const match = /\$\{PLUGIN_ROOT\}\/([^"'\s]+\.mjs)/.exec(hook?.command ?? '');
+          if (!match) continue;
+          sawAny = true;
+          const scriptPath = path.join(PLUGIN_ROOT, ...match[1].split('/'));
+          if (!fs.existsSync(scriptPath)) {
+            hooksHealthy = false;
+            missingHookScripts.push(match[1]);
+          }
+        }
+      }
+    }
+    if (!sawAny) {
+      hooksHealthy = false;
+      missingHookScripts.push('codex-hooks.json declares no hook scripts');
+    }
+  } catch (err) {
+    hooksHealthy = false;
+    missingHookScripts.push(`Codex hooks manifest unreadable: ${err.message}`);
+  }
+  if (!hooksHealthy) {
+    problems.push({
+      severity: 'critical',
+      problem: `Codex hook scripts missing or codex-hooks.json unreadable: ${missingHookScripts.join(', ')}`,
+      remediation: 'Reinstall the KRYLO plugin (Codex host).',
+    });
+  }
+  return { hooksHealthy, missingHookScripts };
+}
+
+function checkStorage(problems, host, dataRoot) {
+  const report = { host, dataRoot: redactText(dataRoot), writable: false, pointerValid: null, runCount: 0, telemetryFiles: 0 };
   try {
     const probeDir = ensureDir(path.join(dataRoot, '.doctor-probe'));
     const probeFile = path.join(probeDir, `probe-${crypto.randomBytes(4).toString('hex')}`);
@@ -125,8 +188,8 @@ function checkStorage(problems) {
     report.writable = false;
     problems.push({
       severity: 'critical',
-      problem: 'KRYLO runtime storage is not writable',
-      remediation: `Check permissions for ${redactText(dataRoot)} or set CLAUDE_PLUGIN_DATA to a writable directory.`,
+      problem: `KRYLO runtime storage is not writable (${host} host)`,
+      remediation: `Check permissions for ${redactText(dataRoot)} or set ${host === 'codex' ? 'PLUGIN_DATA' : 'CLAUDE_PLUGIN_DATA'}/KRYLO_DATA_ROOT to a writable directory.`,
     });
   }
   try {
@@ -136,9 +199,10 @@ function checkStorage(problems) {
     report.telemetryFiles = fs.existsSync(telemetryDir) ? fs.readdirSync(telemetryDir).length : 0;
     // Doctor is a sessionless storage probe: it has no session identity to
     // offer, so this falls back to the most recently updated pointer inside
-    // the `claude` host directory for this project only (never crosses into
-    // another host's directory) -- informational only, never written to.
-    const pointer = readActiveRunPointerForCwd(process.cwd(), { host: 'claude' });
+    // the DETECTED host's own directory for this project only (never
+    // crosses into another host's directory) -- informational only, never
+    // written to.
+    const pointer = readActiveRunPointerForCwd(process.cwd(), { host });
     if (pointer.ok && pointer.value?.runId) {
       report.pointerValid = loadState(pointer.value.runId).ok;
     }
@@ -146,6 +210,21 @@ function checkStorage(problems) {
     // informational only
   }
   return report;
+}
+
+/**
+ * Read-only, no write probe: reports where the OTHER (non-active) host's
+ * data root would resolve to and whether it currently exists, without
+ * touching it. Deliberately does not write-probe or scan run counts for the
+ * inactive host -- doctor's own contract is exactly one write probe, in the
+ * correctly-detected active host's own directory (checkStorage() above);
+ * probing an inactive host's real directory too would be a second,
+ * undisclosed write surface.
+ */
+function checkOtherHostStorage(activeHost) {
+  const otherHost = activeHost === 'codex' ? 'claude' : 'codex';
+  const dataRoot = otherHost === 'codex' ? resolveCodexDataRoot(process.env) : resolveClaudeDataRoot(process.env);
+  return { host: otherHost, dataRoot: redactText(dataRoot), exists: fs.existsSync(dataRoot) };
 }
 
 function checkAlias() {
@@ -156,6 +235,24 @@ function checkAlias() {
   const content = fs.readFileSync(skillFile, 'utf8');
   if (/krylo-alias-version:/.test(content)) {
     const version = /krylo-alias-version:\s*([\w.-]+)/.exec(content)?.[1] ?? 'unknown';
+    return { state: 'krylo-owned', version };
+  }
+  return { state: 'foreign' };
+}
+
+/**
+ * Read-only equivalent of checkAlias() for Codex's own installed Skill
+ * (scripts/setup/install-codex.mjs's `--target skill`), using the same
+ * ownership marker that installer stamps (`krylo-codex-skill-version:`).
+ */
+function checkCodexSkill() {
+  const skillDir = path.join(homeDir(), '.agents', 'skills', 'krylo-run');
+  const skillFile = path.join(skillDir, 'SKILL.md');
+  if (!fs.existsSync(skillDir)) return { state: 'absent' };
+  if (!fs.existsSync(skillFile)) return { state: 'foreign', detail: 'directory exists without SKILL.md' };
+  const content = fs.readFileSync(skillFile, 'utf8');
+  if (/krylo-codex-skill-version:/.test(content)) {
+    const version = /krylo-codex-skill-version:\s*([\w.-]+)/.exec(content)?.[1] ?? 'unknown';
     return { state: 'krylo-owned', version };
   }
   return { state: 'foreign' };
@@ -188,11 +285,10 @@ function checkCatalog() {
   }
 }
 
-// Deliberately Claude-specific (docs/process/MULTI_HOST_FOUNDATION_IMPLEMENTATION_PLAN.md,
-// Task 8): doctor.mjs is a Claude-facing diagnostic surface in this phase and
-// may report the raw CLAUDE_PLUGIN_OPTION_* keys the Claude host exposes,
-// even though Shared Core storage access below is bootstrapped to the
-// host-neutral KRYLO_DATA_ROOT.
+// Still Claude-specific: only CLAUDE_PLUGIN_OPTION_* is reported here.
+// Codex has no equivalent plugin-options mechanism wired yet (a disclosed,
+// separate gap from the host-storage/hook-wiring/skill-install awareness
+// added elsewhere in this file) -- not fixed here to stay focused.
 function userConfigReport() {
   const nonSensitive = [
     'LANGUAGE',
@@ -213,24 +309,37 @@ function userConfigReport() {
 }
 
 function main() {
-  // doctor.mjs is a sessionless storage utility: it bootstraps the Claude
-  // data root (CLAUDE_PLUGIN_DATA -> KRYLO_DATA_ROOT) without requiring a
-  // session identity, so checkStorage() below reads/probes the same
-  // host-neutral KRYLO_DATA_ROOT every other KRYLO entrypoint uses.
-  bootstrapClaudeStorageEnvironment();
+  // doctor.mjs is a sessionless storage utility. `host` is the ACTUAL host
+  // this invocation is running under (host-dispatch.mjs's own detectHost(),
+  // the same detection every other host-neutral entrypoint uses) -- a
+  // previous version of this file always bootstrapped and probed the Claude
+  // data root regardless, so a Codex-side doctor run silently reported the
+  // wrong directory's state. otherHostReport is computed BEFORE the
+  // bootstrap call below: both resolveClaudeDataRoot()/resolveCodexDataRoot()
+  // check the same shared KRYLO_DATA_ROOT override first, so computing it
+  // after bootstrapStorageEnvironment() has already set that override for
+  // the ACTIVE host would make the "other" host's report wrongly echo the
+  // active host's own root.
+  const host = detectHost();
+  const otherHostReport = checkOtherHostStorage(host);
+  bootstrapStorageEnvironment();
 
   const problems = [];
   const pluginManifest = readJson(path.join(PLUGIN_ROOT, '.claude-plugin', 'plugin.json'));
 
   const report = {
+    host,
     versions: {
       node: process.version,
       git: detectCli('git'),
       claude: detectCli('claude'),
+      codex: detectCli('codex'),
       krylo: pluginManifest.ok ? pluginManifest.value.version : 'unreadable',
     },
     components: checkComponents(problems),
-    storage: checkStorage(problems),
+    codexComponents: checkCodexComponents(problems),
+    storage: checkStorage(problems, host, getDataRoot()),
+    otherHostStorage: otherHostReport,
     userConfig: userConfigReport(),
     adapters: {
       git: detectCli('git'),
@@ -243,6 +352,7 @@ function main() {
     },
     toolTrust: checkCatalog(),
     alias: checkAlias(),
+    codexSkill: checkCodexSkill(),
     conflictingOrchestrators: checkConflicts(),
     problems,
   };
@@ -253,10 +363,12 @@ function main() {
     process.stdout.write(JSON.stringify({ ok: !critical, ...report }, null, 2));
   } else {
     const lines = [];
-    lines.push(`KRYLO doctor ${report.versions.krylo} | node ${report.versions.node} | git ${report.versions.git.detected ? report.versions.git.version : 'not detected'} | claude ${report.versions.claude.detected ? report.versions.claude.version : 'not detected'}`);
-    lines.push(`components: ${report.components.skills} skills, ${report.components.agents} agents, hooks ${report.components.hooksHealthy ? 'healthy' : 'BROKEN'}`);
-    lines.push(`storage: ${report.storage.dataRoot} (${report.storage.writable ? 'writable' : 'NOT WRITABLE'}), ${report.storage.runCount} runs, pointer ${report.storage.pointerValid === null ? 'none' : report.storage.pointerValid ? 'valid' : 'INVALID'}`);
-    lines.push(`alias: ${report.alias.state}${report.alias.version ? ` (v${report.alias.version})` : ''}`);
+    lines.push(`KRYLO doctor ${report.versions.krylo} | node ${report.versions.node} | git ${report.versions.git.detected ? report.versions.git.version : 'not detected'} | claude ${report.versions.claude.detected ? report.versions.claude.version : 'not detected'} | codex ${report.versions.codex.detected ? report.versions.codex.version : 'not detected'}`);
+    lines.push(`active host: ${report.host}`);
+    lines.push(`components: ${report.components.skills} skills, ${report.components.agents} agents, Claude hooks ${report.components.hooksHealthy ? 'healthy' : 'BROKEN'}, Codex hooks ${report.codexComponents.hooksHealthy ? 'healthy' : 'BROKEN'}`);
+    lines.push(`storage (${report.storage.host}): ${report.storage.dataRoot} (${report.storage.writable ? 'writable' : 'NOT WRITABLE'}), ${report.storage.runCount} runs, pointer ${report.storage.pointerValid === null ? 'none' : report.storage.pointerValid ? 'valid' : 'INVALID'}`);
+    lines.push(`other host (${report.otherHostStorage.host}, informational): ${report.otherHostStorage.dataRoot} (${report.otherHostStorage.exists ? 'exists' : 'not present'})`);
+    lines.push(`alias: ${report.alias.state}${report.alias.version ? ` (v${report.alias.version})` : ''}; codex skill: ${report.codexSkill.state}${report.codexSkill.version ? ` (v${report.codexSkill.version})` : ''}`);
     lines.push(`adapters: ${Object.entries(report.adapters).map(([k, v]) => `${k}=${v.detected ? 'yes' : 'no'}`).join(' ')}`);
     lines.push(`tool trust: ${report.toolTrust.tools ?? '?'} records, ${report.toolTrust.pendingReview ?? '?'} pending review, ${report.toolTrust.blockedEntries ?? '?'} blocked`);
     if (report.conflictingOrchestrators.length > 0) {
