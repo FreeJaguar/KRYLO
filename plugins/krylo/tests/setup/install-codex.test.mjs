@@ -125,6 +125,48 @@ test('install-codex: fresh --apply installs the skill verbatim from the reposito
   }
 });
 
+test('install-codex: a pre-existing krylo-run directory with no SKILL.md at all is backed up, not hard-failed (regression)', () => {
+  // An independent review found classifySkillOwnership() only checks
+  // whether SKILL.md exists, so a directory that exists but has no
+  // SKILL.md (a stray/partial directory, e.g. containing only a README)
+  // was classified 'absent' -- skipping the move-aside entirely and making
+  // the atomic swap-in rename fail on a non-empty target (a functional
+  // regression against the pre-atomic-swap code, which used to merge into
+  // such a directory via copyDirRecursive instead of failing).
+  const home = mkHome();
+  const project = mkProject();
+  try {
+    const strayDir = path.join(home, '.agents', 'skills', 'krylo-run');
+    fs.mkdirSync(strayDir, { recursive: true });
+    fs.writeFileSync(path.join(strayDir, 'README.md'), 'not a KRYLO skill, no SKILL.md here', 'utf8');
+
+    const res = run(['--target', 'skill', '--apply'], home, project);
+    assert.equal(res.status, 0, res.stdout);
+    assert.equal(res.json.skill.applied, true);
+    assert.ok(res.json.skill.backup, 'the stray pre-existing directory must be backed up, not silently discarded or hard-failed');
+    assert.ok(fs.existsSync(path.join(res.json.skill.backup, 'README.md')), 'the stray directory\'s own content must survive in the backup');
+    assert.ok(fs.existsSync(path.join(strayDir, 'SKILL.md')), 'the new install must be live at the destination');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('install-codex: an unrecognized flag is rejected, never silently ignored', () => {
+  const home = mkHome();
+  const project = mkProject();
+  try {
+    const res = run(['--targt', 'skill'], home, project); // typo of --target
+    assert.equal(res.status, 1);
+    assert.equal(res.json.ok, false);
+    assert.equal(res.json.error, 'unknown-flag');
+    assert.ok(!fs.existsSync(path.join(home, '.agents', 'skills', 'krylo-run')), 'no mutation must occur for an unrecognized flag');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test('install-codex: a foreign (non-KRYLO) skill named krylo-run is never overwritten', () => {
   const home = mkHome();
   const project = mkProject();

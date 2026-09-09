@@ -98,10 +98,24 @@ test('doctor: under a Codex-shaped environment, storage tracks the Codex data ro
     assert.equal(res.json.host, 'codex');
     assert.equal(res.json.storage.host, 'codex');
     assert.equal(res.json.storage.writable, true);
+    // Pin down the actual bug this fix closes, not just the label: an
+    // independent review found the original version of this test asserted
+    // storage.host === 'codex' (which merely echoes the detectHost() value
+    // passed in) without ever confirming storage.dataRoot itself resolved
+    // under the Codex data dir rather than a Claude default -- codexDataDir
+    // is outside $HOME, so redactText() will not mask it here.
+    assert.ok(
+      res.json.storage.dataRoot.includes(path.basename(codexDataDir)),
+      `storage.dataRoot must resolve under the Codex data dir, got: ${res.json.storage.dataRoot}`,
+    );
     // otherHostStorage must describe Claude's own default root, informational
     // only (no write probe -- this test never grants doctor a Claude data
     // root override, so a write attempt there would escape the isolated dirs).
     assert.equal(res.json.otherHostStorage.host, 'claude');
+    assert.ok(
+      !res.json.otherHostStorage.dataRoot.includes(path.basename(codexDataDir)),
+      'otherHostStorage must never echo the active (Codex) data root',
+    );
     assert.equal(res.json.codexComponents.hooksHealthy, true);
     assert.equal(res.json.codexSkill.state, 'absent');
   } finally {

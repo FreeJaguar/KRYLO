@@ -4,7 +4,9 @@
 //   runs/<runId>/state.json
 //   runs/<runId>/artifacts/
 //   telemetry/<runId>.jsonl
-//   active-runs/<projectRootHash>/<sessionSegment>.json  (per-project, per-session pointer)
+//   active-runs/<projectRootHash>/<host>/<sessionSegment>.json  (per-project, per-host, per-session pointer)
+//   bootstrap-failures/<projectRootHash>/<host>/<sessionSegment>.json  (short-lived,
+//     TTL-gated; not yet pruned by scripts/runtime/cleanup.mjs -- a documented follow-up)
 //   current-run.json  (legacy single pointer; read once for migration, then removed)
 //
 // Every path used by the runtime must be produced through safeJoin() so a

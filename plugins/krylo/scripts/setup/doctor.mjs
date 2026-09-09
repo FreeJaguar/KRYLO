@@ -227,7 +227,21 @@ function checkStorage(problems, host, dataRoot) {
  */
 function checkOtherHostStorage(activeHost) {
   const otherHost = activeHost === 'codex' ? 'claude' : 'codex';
-  const dataRoot = otherHost === 'codex' ? resolveCodexDataRoot(process.env) : resolveClaudeDataRoot(process.env);
+  // Both resolveClaudeDataRoot/resolveCodexDataRoot check the shared
+  // KRYLO_DATA_ROOT override before their own host-native variable -- if
+  // the user (or a wrapper script) has that override set externally (not
+  // just this file's own bootstrap, whose mutation this function already
+  // runs ahead of), the "other host" would otherwise resolve to the exact
+  // same path as the active host's own storage.dataRoot while still being
+  // labeled as if it were a distinct host's root -- an independent review
+  // found this genuinely misleading. Excluding KRYLO_DATA_ROOT from the
+  // view used here reports what the OTHER host's own native path actually
+  // is, which is the informative answer for this field regardless of
+  // whatever override the ACTIVE host happens to be using.
+  const envWithoutSharedOverride = { ...process.env, KRYLO_DATA_ROOT: undefined };
+  const dataRoot = otherHost === 'codex'
+    ? resolveCodexDataRoot(envWithoutSharedOverride)
+    : resolveClaudeDataRoot(envWithoutSharedOverride);
   return { host: otherHost, dataRoot: redactText(dataRoot), exists: fs.existsSync(dataRoot) };
 }
 

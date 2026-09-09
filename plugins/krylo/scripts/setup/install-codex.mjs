@@ -94,7 +94,19 @@ function planSkillInstall(apply) {
     };
   }
 
-  const backupPath = existing === 'krylo-owned' ? `${skillDestDir}.backup-${Date.now()}` : null;
+  // A rename's target must not already exist -- so ANY pre-existing
+  // directory at the destination must be moved aside first, not only a
+  // 'krylo-owned' one. An independent review found classifySkillOwnership()
+  // only checks whether SKILL.md itself exists, so a directory that exists
+  // but happens to have no SKILL.md (a stray/partial install, or simply a
+  // foreign-named directory containing unrelated files) was classified
+  // 'absent' -- skipping the move-aside entirely and making the swap-in
+  // rename below fail on a non-empty target. The pre-atomic-swap code used
+  // copyDirRecursive(), which merges into an existing directory rather than
+  // failing; this preserves that same "never destroy what was already
+  // there" property, just via a backup instead of a silent merge.
+  const skillDestDirExists = fs.existsSync(skillDestDir);
+  const backupPath = skillDestDirExists ? `${skillDestDir}.backup-${Date.now()}` : null;
   const plan = {
     ok: true,
     target: 'skill',
@@ -106,8 +118,9 @@ function planSkillInstall(apply) {
       ? `restore ${backupPath} over ${skillDestDir}, or remove ${skillDestDir} entirely`
       : `remove ${skillDestDir} entirely`,
     actions: [
-      ...(backupPath ? [`copy ${skillDestDir} -> ${backupPath}`] : []),
-      `copy ${skillSrcDir} -> ${skillDestDir}`,
+      `stage ${skillSrcDir} -> ${skillDestDir}.new-<pid>-<ts> and verify it`,
+      ...(backupPath ? [`move ${skillDestDir} -> ${backupPath}`] : []),
+      `move ${skillDestDir}.new-<pid>-<ts> -> ${skillDestDir}`,
     ],
   };
 
@@ -140,22 +153,33 @@ function planSkillInstall(apply) {
 
     // Move the current install aside (if any) and swap the verified
     // replacement in. Never a delete-then-copy: at every point up to the
-    // rename below, the live install directory still holds its ORIGINAL
-    // content or the backup does.
-    if (backupPath) fs.renameSync(skillDestDir, backupPath);
+    // final rename, the live install directory still holds its ORIGINAL
+    // content or the backup does. An independent review found the
+    // move-aside rename itself was previously OUTSIDE this try/catch --
+    // reproduced a raw, uncaught crash (a real Windows EBUSY, e.g. the
+    // directory open in an editor or AV/indexer) that left the staged
+    // tempDir orphaned on disk instead of the clean {ok:false} this
+    // function promises everywhere else. Both renames, and the tempDir
+    // cleanup, are now one failure-handled unit.
     try {
+      if (backupPath) fs.renameSync(skillDestDir, backupPath);
       fs.renameSync(tempDir, skillDestDir);
     } catch (err) {
       let restored = false;
       if (backupPath && fs.existsSync(backupPath) && !fs.existsSync(skillDestDir)) {
-        fs.renameSync(backupPath, skillDestDir);
-        restored = true;
+        try {
+          fs.renameSync(backupPath, skillDestDir);
+          restored = true;
+        } catch {
+          // Best-effort restore only; fall through to report the failure.
+        }
       }
+      fs.rmSync(tempDir, { recursive: true, force: true });
       return {
         ok: false,
         target: 'skill',
         error: 'swap-failed',
-        message: `Failed to move the staged Skill into place: ${err.message}. ${restored ? 'The previous install was automatically restored.' : `Manual recovery may be required: staged copy at ${tempDir}, ${backupPath ? `backup at ${backupPath}` : 'no backup existed (this was a fresh install)'}.`}`,
+        message: `Failed to install the staged Skill: ${err.message}. ${restored ? 'The previous install was automatically restored.' : (backupPath ? `Manual recovery may be required: check ${backupPath}.` : 'No prior install existed at this destination; nothing was lost.')}`,
       };
     }
     plan.applied = true;
@@ -307,10 +331,26 @@ function readFlagValue(argv, flag) {
   const idx = argv.indexOf(flag);
   if (idx === -1) return { present: false, value: undefined };
   const value = argv[idx + 1];
-  if (value === undefined || KNOWN_FLAGS.has(value)) {
+  // An empty string (e.g. `--project-dir=`) is treated the same as a
+  // missing value -- silently resolving it to `path.resolve('')` ===
+  // process.cwd() would mask exactly the kind of typo this validation
+  // exists to catch.
+  if (value === undefined || value === '' || KNOWN_FLAGS.has(value)) {
     return { present: true, value: undefined, missing: true };
   }
   return { present: true, value };
+}
+
+/**
+ * An unrecognized `--`-prefixed flag (e.g. `--targt skill`, a typo of
+ * `--target`) was previously ignored entirely, silently falling through to
+ * every default -- the same "malformed input does the wrong thing
+ * silently" class every other check in this function's neighborhood
+ * exists to close. Only `--`-prefixed tokens are checked; flag VALUES
+ * never start with `--` in this script's own usage.
+ */
+function findUnknownFlag(argv) {
+  return argv.find((token) => token.startsWith('--') && !KNOWN_FLAGS.has(token));
 }
 
 /**
@@ -339,6 +379,13 @@ function expandEqualsFlags(argv) {
 
 function main() {
   const argv = expandEqualsFlags(process.argv.slice(2));
+
+  const unknownFlag = findUnknownFlag(argv);
+  if (unknownFlag) {
+    process.stdout.write(JSON.stringify({ ok: false, error: 'unknown-flag', message: `Unrecognized flag: ${unknownFlag}.` }, null, 2));
+    process.exit(1);
+  }
+
   const apply = argv.includes('--apply');
   const remove = argv.includes('--remove');
 
