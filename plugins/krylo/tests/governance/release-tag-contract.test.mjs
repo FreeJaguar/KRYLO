@@ -76,6 +76,29 @@ test('every uses: reference in release.yml is pinned to a full commit SHA', () =
   }
 });
 
+// Regression: `gh release create "$TAG"` with no --target tags whatever
+// commit the repository's DEFAULT BRANCH points to at the moment the
+// GitHub API call executes, not the commit this job's own checkout
+// resolved and built the archive/checksums/attestation from. If `main`
+// advances (another push/merge lands) between this job's checkout and this
+// step running, the tag would silently point to that newer commit while
+// the uploaded archive was built from the older, actually-verified one --
+// a real tag/archive mismatch. `GITHUB_SHA` is fixed for the whole
+// workflow run to the commit resolved at dispatch time, so pinning
+// `--target "$GITHUB_SHA"` closes the race regardless of what happens to
+// the branch afterwards. Extracts the real step text (not a
+// reimplementation) matching this file's own established convention.
+test('the release-creation step explicitly pins the tag target to GITHUB_SHA, never the live default branch', () => {
+  const workflowText = fs.readFileSync(RELEASE_WORKFLOW, 'utf8');
+  const script = extractStepScript(workflowText, 'Create GitHub release (draft)');
+  assert.ok(script.includes('gh release create "$TAG"'), 'the extracted script does not look like the expected release-create step -- release.yml may have changed shape');
+  assert.match(
+    script,
+    /gh release create "\$TAG" \\\s*\n\s*--target "\$GITHUB_SHA"/,
+    'gh release create must pin --target "$GITHUB_SHA" immediately, not rely on the API\'s default-branch-at-call-time behavior',
+  );
+});
+
 test('the verify job requests only contents:read; the release job (needs:verify, gated behind manual dispatch + a passing verify) is the only job with write permissions', () => {
   const text = fs.readFileSync(RELEASE_WORKFLOW, 'utf8');
   const topLevelPermissions = /^permissions:\s*\n\s+contents:\s*read\s*$/m.exec(text);

@@ -73,7 +73,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.event.inputs.tag }}
         run: |
+          # `gh release create` with no --target tags whatever commit the
+          # repository's default branch points to AT THE MOMENT the GitHub
+          # API call executes -- not the commit this job actually checked
+          # out and built the archive from. workflow_dispatch's checkout
+          # above resolves the ref selected at dispatch time, but if `main`
+          # advances (another push/merge lands) before this step runs, the
+          # tag would point to that newer commit while the uploaded
+          # archive/checksums/attestation above were built from the older,
+          # actually-verified one -- a real tag/archive mismatch race.
+          # github.sha is fixed for the whole workflow run to the commit
+          # resolved at dispatch time, so pinning the tag to it explicitly
+          # closes the race regardless of what happens to the branch after.
           gh release create "$TAG" \
+            --target "$GITHUB_SHA" \
             --draft \
             --title "KRYLO $TAG" \
             --notes "See CHANGELOG.md." \
