@@ -198,8 +198,12 @@ test('user-prompt-submit-codex: a Codex run does not adopt or collide with an ex
 });
 
 // H. A persistence failure must not leave a dangling active-run pointer or
-// emit a false success context.
-test('user-prompt-submit-codex: a save/lock failure leaves no active run and emits no success context', () => {
+// emit a false success context -- and (an independent review found the
+// original version of this fix missed exactly this case, since saveState()'s
+// own final write is unguarded and THROWS rather than returning {ok:false}
+// on a genuine I/O failure) must warn instead of going fully silent, since a
+// real $krylo-run invocation WAS recognized.
+test('user-prompt-submit-codex: a save/lock failure leaves no active run and warns instead of going silent', () => {
   const dataDir = mkTempDataDir('krylo-ups-');
   const projectDir = mkTempDataDir('krylo-ups-project-');
   try {
@@ -211,9 +215,13 @@ test('user-prompt-submit-codex: a save/lock failure leaves no active run and emi
     fs.writeFileSync(blockedDataDir, 'not a directory', 'utf8');
     const res = run(payload({ prompt: '$krylo-run task', cwd: projectDir }), blockedDataDir);
     assert.equal(res.status, 0, 'a persistence failure must still exit 0, never crash the hook');
-    assert.equal(res.stdout, '', 'a persistence failure must never emit a success additionalContext');
+    assert.notEqual(res.stdout, '', 'a recognized invocation that fails to persist must not go fully silent');
+    assert.doesNotMatch(additionalContext(res) ?? '', /now active/, 'must never emit a false success context');
+    assert.match(additionalContext(res) ?? '', /FAILED TO INITIALIZE/);
     // blockedDataDir is itself a file, not a directory, so no runs/ or
-    // active-runs/ tree could have been created under it at all.
+    // active-runs/ tree could have been created under it at all -- nor
+    // could the (best-effort) bootstrap-failure marker itself, since that
+    // marker also lives under this same unwritable data root.
     assert.ok(!fs.existsSync(path.join(blockedDataDir, 'runs')), 'no state must be persisted anywhere reachable');
     assert.ok(!fs.existsSync(path.join(blockedDataDir, 'active-runs')), 'no active-run pointer must be persisted anywhere reachable');
   } finally {

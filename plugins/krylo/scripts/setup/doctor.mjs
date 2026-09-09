@@ -163,7 +163,11 @@ function checkCodexComponents(problems) {
     }
   } catch (err) {
     hooksHealthy = false;
-    missingHookScripts.push(`Codex hooks manifest unreadable: ${err.message}`);
+    // redactText masks the home directory (and other sensitive fragments)
+    // a raw fs error message embeds -- doctor output is exactly what users
+    // paste into bug reports; every other path in this file already goes
+    // through redactText for the same reason.
+    missingHookScripts.push(`Codex hooks manifest unreadable: ${redactText(err.message)}`);
   }
   if (!hooksHealthy) {
     problems.push({

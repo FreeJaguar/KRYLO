@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 
 import { mkTempDataDir, createActiveRunCodexOnly, runHookCodexOnly, cleanup } from './helpers.mjs';
 import { computeProjectRootHash } from '../../scripts/lib/state.mjs';
@@ -43,6 +44,15 @@ function bashPayload(cwd, command, permissionMode = 'default') {
 
 function decision(res) {
   return res.json?.hookSpecificOutput?.permissionDecision ?? null;
+}
+
+// Mirrors paths.mjs's safeSessionSegment(): a session id that already
+// matches its pass-through regex is used verbatim; anything else (here, an
+// over-length id that also fails createHostIdentity's own <=256 validation,
+// deliberately) is SHA-256 hashed the same way.
+function markerSessionSegment(sessionId) {
+  if (/^[A-Za-z0-9_-]{1,128}$/.test(sessionId)) return sessionId;
+  return crypto.createHash('sha256').update(sessionId, 'utf8').digest('hex');
 }
 
 test('risk-gate-codex: no active run -> everything passes silently (no output, exit 0)', () => {
@@ -90,6 +100,31 @@ test('risk-gate-codex: an EXPIRED bootstrap-failure marker no longer denies (TTL
     const res = runHookCodexOnly(GATE, bashPayload(dataDir, 'ls -la'), dataDir);
     assert.equal(res.status, 0);
     assert.equal(res.stdout, '', 'an expired marker must not deny -- the session reverts to the ordinary no-run silent pass-through');
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate-codex: a fresh marker also denies via the invalid-host-identity fail-safe path, not just the normal !run.active path', () => {
+  // A session_id that is present (so normalizeCodexHookPayload's own
+  // resolveCodexSessionId(...) !== null check is satisfied) but exceeds
+  // createHostIdentity's 256-char limit makes bootstrapCodexRuntimeEnvironment
+  // throw -- normalizeCodexHookPayload then returns {ok:false, error:
+  // 'invalid-host-identity'}, which routes through failSafeOnUnreadablePayload(),
+  // NOT the main !run.active branch. An independent review found this second
+  // path never checked the marker at all.
+  const dataDir = mkTempDataDir('krylo-codex-hook-');
+  try {
+    const overlongSessionId = 'x'.repeat(300);
+    const hash = computeProjectRootHash(dataDir);
+    const markerPath = path.join(dataDir, 'bootstrap-failures', hash, 'codex', `${markerSessionSegment(overlongSessionId)}.json`);
+    fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+    fs.writeFileSync(markerPath, JSON.stringify({ reason: 'host identity bootstrap failed', createdAt: new Date().toISOString() }), 'utf8');
+
+    const payload = { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'ls -la' }, cwd: dataDir, session_id: overlongSessionId };
+    const res = runHookCodexOnly(GATE, payload, dataDir);
+    assert.equal(res.status, 0);
+    assert.equal(decision(res), 'deny', 'the invalid-host-identity fail-safe path must also honor a fresh bootstrap-failure marker');
   } finally {
     cleanup(dataDir);
   }

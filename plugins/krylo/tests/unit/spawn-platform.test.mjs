@@ -175,6 +175,44 @@ test('on Windows, redirecting TEMP/TMP back to a decoy directory does not revive
   }
 });
 
+test('on Windows, a RELATIVE PATH entry is never trusted as a PATH-membership match, even when it resolves to the untrusted cwd (regression)', { skip: os.platform() !== 'win32' }, () => {
+  // An independent review found pathDirectorySet() previously called
+  // path.resolve(entry) on every PATH entry unconditionally -- a relative
+  // entry (here, a bare ".") resolves against THIS PROCESS'S OWN cwd, which
+  // during real Cross-Harness worker capability detection is the untrusted
+  // project root. Combined with TEMP/TMP also redirected there (so where's
+  // own cwd-first search finds the decoy), a decoy that is NOT a real PATH
+  // member was still accepted. This test reproduces exactly that
+  // combination and confirms the fix (dropping non-absolute PATH entries
+  // before resolving) closes it.
+  const decoyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-relative-path-decoy-'));
+  const originalPath = process.env.PATH;
+  const originalTemp = process.env.TEMP;
+  const originalTmp = process.env.TMP;
+  const originalCwd = process.cwd();
+  try {
+    const decoyMarkerPath = path.join(decoyDir, 'RELATIVE_PATH_DECOY_EXECUTED.txt');
+    fs.writeFileSync(path.join(decoyDir, 'krylo-relative-path-fixture.cmd'), `@ECHO off\r\necho decoy-version 0.0.0\r\necho executed > "${decoyMarkerPath}"\r\n`);
+
+    // A bare "." (relative) PATH entry, deliberately with no genuine
+    // absolute entry for this fixture name anywhere else on PATH.
+    process.env.PATH = `.${path.delimiter}${originalPath}`;
+    process.env.TEMP = decoyDir;
+    process.env.TMP = decoyDir;
+    process.chdir(decoyDir);
+
+    const target = platformSpawnTarget('krylo-relative-path-fixture', ['--version']);
+    assert.equal(target, null, 'a relative PATH entry must never be trusted as a membership match for a decoy in the untrusted cwd');
+    assert.ok(!fs.existsSync(decoyMarkerPath), 'the decoy must never have been executed');
+  } finally {
+    process.chdir(originalCwd);
+    process.env.PATH = originalPath;
+    process.env.TEMP = originalTemp;
+    process.env.TMP = originalTmp;
+    fs.rmSync(decoyDir, { recursive: true, force: true });
+  }
+});
+
 test('on Windows, spawning the resolved real target actually works (real process, real version output)', { skip: os.platform() !== 'win32' }, () => {
   const target = platformSpawnTarget('node', ['--version']);
   assert.ok(target);

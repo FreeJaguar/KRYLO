@@ -69,6 +69,26 @@ test('install-codex: --project-dir immediately followed by another flag is rejec
   }
 });
 
+test('install-codex: --target=skill (equals form) is parsed the same as --target skill, not silently treated as "all"', () => {
+  // An independent review found argv.indexOf('--target') never matches the
+  // whole token '--target=skill', so target silently defaulted to 'all'
+  // and BOTH skill and rules were installed -- the same "malformed flag
+  // silently does the wrong thing" class the two-argument-form validation
+  // above exists to close, in the more permissive direction.
+  const home = mkHome();
+  const project = mkProject();
+  try {
+    const res = run(['--target=skill'], home, project);
+    assert.equal(res.status, 0);
+    assert.equal(res.json.mode, 'dry-run');
+    assert.ok('skill' in res.json, 'the skill target must be planned');
+    assert.ok(!('rules' in res.json), 'the rules target must NOT be planned for --target=skill');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test('install-codex: default (no --apply) is a dry run that changes nothing on disk', () => {
   const home = mkHome();
   const project = mkProject();

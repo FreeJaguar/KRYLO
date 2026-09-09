@@ -1012,14 +1012,23 @@ export function writeBootstrapFailureMarker({ projectRootHash, host, hostSession
   }
 }
 
-/** Read a still-fresh bootstrap-failure marker for this exact triple, if any. Never throws. */
+/**
+ * Read a still-fresh bootstrap-failure marker for this exact triple, if
+ * any. Never throws. The returned `reason` is redacted and re-truncated
+ * even though the writer already only ever stores one of a few fixed
+ * internal strings (redact-on-read, not just redact-on-write, is the same
+ * defense-in-depth this codebase already applies to Cross-Harness worker
+ * results -- an independent review found this marker's reason otherwise
+ * flowed unredacted into a model-facing PreToolUse deny message).
+ */
 export function readBootstrapFailureMarker({ projectRootHash, host, hostSessionId }) {
   try {
     const result = readJson(bootstrapFailurePath(projectRootHash, host, hostSessionId));
     if (!result.ok || !result.value || typeof result.value.createdAt !== 'string') return { active: false };
     const ageMs = Date.now() - Date.parse(result.value.createdAt);
     if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > BOOTSTRAP_FAILURE_TTL_MS) return { active: false };
-    return { active: true, reason: typeof result.value.reason === 'string' ? result.value.reason : 'unknown' };
+    const rawReason = typeof result.value.reason === 'string' ? result.value.reason : 'unknown';
+    return { active: true, reason: redactText(rawReason).slice(0, 200) };
   } catch {
     return { active: false };
   }

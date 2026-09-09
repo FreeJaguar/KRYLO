@@ -44,6 +44,8 @@
 // review-finding history for the two earlier, unsafe model-side bootstrap
 // attempts this design replaces.
 
+import path from 'node:path';
+
 import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
 import {
   normalizeCodexHookPayload,
@@ -55,6 +57,28 @@ import { recordEvent } from '../lib/telemetry.mjs';
 import { classifyRiskAction } from './risk-policy.mjs';
 import { computeProjectRootHash, readBootstrapFailureMarker } from '../lib/state.mjs';
 
+// Shared by both call sites below (the normal !run.active path, and
+// failSafeOnUnreadablePayload's own invalid-host-identity path): if a
+// bootstrap-failure marker is fresh for this exact project+session, deny
+// instead of falling through to the ordinary silent-allow. Never throws --
+// any lookup failure here must fall through to the caller's own existing
+// fail-safe behavior, not introduce a new crash path.
+function denyIfBootstrapFailureMarked(host, projectRoot, hostSessionId) {
+  if (!projectRoot || !hostSessionId) return;
+  try {
+    const projectRootHash = computeProjectRootHash(projectRoot);
+    const failure = readBootstrapFailureMarker({ projectRootHash, host, hostSessionId });
+    if (failure.active) {
+      emitCodexPreToolDeny(
+        `KRYLO failed to initialize for this session (${failure.reason}) after an explicit $krylo-run invocation. `
+        + 'This action is denied until KRYLO successfully initializes: retry $krylo-run, or proceed outside an autonomous KRYLO run.',
+      );
+    }
+  } catch {
+    // best-effort marker check only; never itself a new failure mode
+  }
+}
+
 // shell/exec_command -> Bash; apply_patch keeps its own distinct identity
 // (never relabeled as Claude's Edit/Write, per the task's explicit
 // instruction); mcp__server__tool-shaped names and any other local function
@@ -65,11 +89,26 @@ function normalizeCodexToolName(rawName) {
   return rawName;
 }
 
-function failSafeOnUnreadablePayload() {
+// `rawPayload`, when available, lets this check for a bootstrap-failure
+// marker even when normalizeCodexHookPayload() itself failed
+// ('invalid-host-identity') -- an independent review found this path
+// previously had NO marker check at all, so the exact case
+// user-prompt-submit-codex.mjs writes an identity-bootstrap-failure marker
+// for was silently allowed here regardless: session_id/cwd are read
+// directly off the raw payload (the same authoritative host-supplied
+// fields the marker was written against), never trusted for anything else.
+function failSafeOnUnreadablePayload(rawPayload) {
   const identity = codexCwdFallbackIdentity();
   if (identity) {
     const run = resolveActiveRun({ projectRoot: identity.projectRoot, host: identity.host, hostSessionId: identity.hostSessionId });
     if (run.active) emitCodexPreToolDeny('KRYLO risk gate could not read this action and denied it as a fail-safe. Re-run with a well-formed request.');
+  }
+  const rawSessionId = typeof rawPayload?.session_id === 'string' && rawPayload.session_id.trim() !== '' ? rawPayload.session_id.trim() : null;
+  const rawCwd = typeof rawPayload?.cwd === 'string' && rawPayload.cwd.trim() !== '' ? rawPayload.cwd : null;
+  if (rawSessionId && rawCwd) {
+    let projectRoot = null;
+    try { projectRoot = path.resolve(rawCwd); } catch { projectRoot = null; }
+    denyIfBootstrapFailureMarked('codex', projectRoot, rawSessionId);
   }
   allowCodexSilently();
 }
@@ -78,7 +117,7 @@ async function main() {
   const input = await readStdinJson();
   if (!input.ok) failSafeOnUnreadablePayload();
   const normalized = normalizeCodexHookPayload(input.value);
-  if (!normalized.ok) failSafeOnUnreadablePayload();
+  if (!normalized.ok) failSafeOnUnreadablePayload(input.value);
   const payload = normalized.payload;
 
   const run = resolveActiveRun({
@@ -95,18 +134,7 @@ async function main() {
     // second case. user-prompt-submit-codex.mjs records that distinction
     // as a short-lived marker; check it before falling through to the
     // ordinary silent-allow path.
-    const projectRootHash = computeProjectRootHash(normalized.identity.projectRoot);
-    const failure = readBootstrapFailureMarker({
-      projectRootHash,
-      host: normalized.identity.host,
-      hostSessionId: normalized.identity.hostSessionId,
-    });
-    if (failure.active) {
-      emitCodexPreToolDeny(
-        `KRYLO failed to initialize for this session (${failure.reason}) after an explicit $krylo-run invocation. `
-        + 'This action is denied until KRYLO successfully initializes: retry $krylo-run, or proceed outside an autonomous KRYLO run.',
-      );
-    }
+    denyIfBootstrapFailureMarked('codex', normalized.identity.projectRoot, normalized.identity.hostSessionId);
     allowCodexSilently();
   }
 

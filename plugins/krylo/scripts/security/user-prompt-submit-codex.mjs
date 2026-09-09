@@ -64,7 +64,7 @@ import {
   writeBootstrapFailureMarker,
   clearBootstrapFailureMarker,
 } from '../lib/state.mjs';
-import { bootstrapCodexRuntimeEnvironment } from '../host/codex/context.mjs';
+import { bootstrapCodexRuntimeEnvironment, bootstrapCodexStorageEnvironment } from '../host/codex/context.mjs';
 
 // Exactly `$krylo-run` as the first non-whitespace token, followed by
 // whitespace or end-of-string -- never a substring match, so
@@ -105,6 +105,15 @@ function allowSilently() {
 // UserPromptSubmit/additionalContext is coordination context for the
 // model, never the enforcement mechanism itself.
 function denyBootstrapFailure({ projectRootHash, sessionId, reason }) {
+  // When THIS call is reached because bootstrapCodexRuntimeEnvironment()
+  // itself just threw, KRYLO_DATA_ROOT was never set by that failed call --
+  // an independent review found the marker would then be written under the
+  // wrong (unconfigured-fallback) data root, one risk-gate-codex.mjs's own
+  // successful bootstrap would never read back. bootstrapCodexStorageEnvironment()
+  // is the simpler, non-throwing half of that same bootstrap (env/PLUGIN_DATA
+  // resolution only, no session identity required) -- safe and idempotent to
+  // call again here even when the fuller bootstrap already succeeded.
+  bootstrapCodexStorageEnvironment();
   writeBootstrapFailureMarker({ projectRootHash, host: 'codex', hostSessionId: sessionId, reason });
   emitAdditionalContext(
     `KRYLO FAILED TO INITIALIZE for this session (${reason}). This session is NOT under KRYLO governance: `
@@ -222,7 +231,22 @@ async function main() {
     runId,
   });
 
-  const saveResult = saveState(state);
+  // saveState() can both return {ok:false} (schema validation, or a failed
+  // pre-migration backup write) AND throw (its own final writeJsonAtomic
+  // call is unguarded, so a genuine I/O failure -- an unwritable/full/
+  // broken data root, the single most realistic real-world failure mode
+  // here -- propagates as an exception, not a clean return value). An
+  // independent review found the `!saveResult.ok` check alone therefore
+  // missed exactly the failure case it most needed to catch: a throw here
+  // used to escape to the top-level main().catch() below and go fully
+  // silent, even though a real invocation had already been recognized.
+  let saveResult;
+  try {
+    saveResult = saveState(state);
+  } catch {
+    denyBootstrapFailure({ projectRootHash, sessionId, reason: 'run state could not be persisted' });
+    return;
+  }
   if (!saveResult.ok) {
     // No state persisted: never write a pointer to it. But the model was
     // just told (by the prompt it typed) that a KRYLO run should now be

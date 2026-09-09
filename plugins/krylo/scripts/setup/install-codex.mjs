@@ -313,8 +313,32 @@ function readFlagValue(argv, flag) {
   return { present: true, value };
 }
 
+/**
+ * `--target=skill` (the equals form) previously bypassed readFlagValue()
+ * entirely -- `argv.indexOf('--target')` never matches `'--target=skill'`
+ * as a whole token, so `target` silently defaulted to `'all'` and BOTH the
+ * skill and rules targets were installed, the same "malformed flag
+ * silently does the wrong thing" class this file's own --target validation
+ * exists to close, just in the more permissive direction. Normalizing
+ * `--flag=value` into `--flag`, `value` up front means every downstream
+ * check sees one consistent shape, exactly as if the two-argument form had
+ * been used.
+ */
+function expandEqualsFlags(argv) {
+  const expanded = [];
+  for (const token of argv) {
+    const eqIdx = token.startsWith('--') ? token.indexOf('=') : -1;
+    if (eqIdx > 2) {
+      expanded.push(token.slice(0, eqIdx), token.slice(eqIdx + 1));
+    } else {
+      expanded.push(token);
+    }
+  }
+  return expanded;
+}
+
 function main() {
-  const argv = process.argv.slice(2);
+  const argv = expandEqualsFlags(process.argv.slice(2));
   const apply = argv.includes('--apply');
   const remove = argv.includes('--remove');
 

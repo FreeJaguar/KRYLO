@@ -89,6 +89,17 @@ export function killProcessTree(pid) {
  * "path" (Windows itself treats env var names case-insensitively, and this
  * process's own `process.env.PATH` is not guaranteed to be the exact key
  * name a differently-cased inherited environment used).
+ *
+ * A RELATIVE `PATH` entry (a bare `.`, a relative segment, or a driveless
+ * Windows path like `C:` without a root) is dropped, never resolved: an
+ * independent review found `path.resolve(entry)` on a relative entry
+ * resolves it against THIS PROCESS'S OWN cwd -- during Cross-Harness worker
+ * capability detection that cwd is the untrusted project root -- which
+ * partially revived the exact cwd-shadow exploit this module's caller
+ * (`resolveOnPath`) exists to close: a relative `.` entry plus a decoy
+ * planted in that same cwd made the decoy pass this membership check even
+ * though it is not a real PATH-installed target. A relative `PATH` entry is
+ * already meaningless for locating a genuine system binary in any case.
  */
 function pathDirectorySet() {
   const rawPathKey = Object.keys(process.env).find((k) => k.toLowerCase() === 'path');
@@ -99,6 +110,7 @@ function pathDirectorySet() {
       .split(path.delimiter)
       .map((entry) => entry.trim())
       .filter(Boolean)
+      .filter((entry) => path.isAbsolute(entry))
       .map((entry) => path.resolve(entry).toLowerCase().replace(/[\\/]+$/, '')),
   );
 }
