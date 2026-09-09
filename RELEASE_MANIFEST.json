@@ -121,8 +121,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 22718,
-      "sha256": "59d4d13496f55027bc160f2d1db8c606f6e096687668526e32cfaa45ac490ca0"
+      "bytes": 25040,
+      "sha256": "5b4770ef095bfb3ac507577791e7b40821b7798cd7817f03af4d077d1402d9d1"
     },
     {
       "path": "CLAUDE.md",
@@ -156,8 +156,8 @@
     },
     {
       "path": "RELEASE_READINESS.md",
-      "bytes": 29770,
-      "sha256": "5348cbe9212210c24fdcc32107c2bafd93a02729e2ecd215535285e7af671083"
+      "bytes": 32167,
+      "sha256": "ccdbb5083c92e3c7c2e7df650f87ebdd573b8f41516df256aae659674ac87c98"
     },
     {
       "path": "SECURITY.md",
@@ -671,8 +671,8 @@
     },
     {
       "path": "docs/codex-capability-matrix.md",
-      "bytes": 18576,
-      "sha256": "d67842e26b4d7eebd28fb26098af6037c5c173ff04625a2c9ac1c4ce051bd78a"
+      "bytes": 20310,
+      "sha256": "e82c4fccc93286c03e4ebce9156d3695a42977a35a79cbaf8815aaf562cd00f2"
     },
     {
       "path": "docs/external-adapter-audit-2026-07-27.md",
@@ -1151,8 +1151,8 @@
     },
     {
       "path": "plugins/krylo/scripts/lib/paths.mjs",
-      "bytes": 8781,
-      "sha256": "dd643cfe4eeb4d61afdb23e393609d8e3b8c2596a857583d7964b4a48940cc36"
+      "bytes": 8975,
+      "sha256": "aac25f2854e97787c54e9530d43e8f7ff5d00f6f2fbba059b959292677b7b17e"
     },
     {
       "path": "plugins/krylo/scripts/lib/redact.mjs",
@@ -1326,8 +1326,8 @@
     },
     {
       "path": "plugins/krylo/scripts/setup/doctor.mjs",
-      "bytes": 18140,
-      "sha256": "ba44c78b13b96c6239d4f1fcc497af84c019c368d0fbb26ddc034634bb92352e"
+      "bytes": 19052,
+      "sha256": "d677759112efc200b7f432eaaada5978db7bbff2711e08abdbdc7cd71c0c89ff"
     },
     {
       "path": "plugins/krylo/scripts/setup/install-alias.mjs",
@@ -1336,8 +1336,8 @@
     },
     {
       "path": "plugins/krylo/scripts/setup/install-codex.mjs",
-      "bytes": 18098,
-      "sha256": "280a1bf8fc2695097eae2ca85f5cedfc8deb076020f2d90154979fd036be93ab"
+      "bytes": 20657,
+      "sha256": "59996d99e27bb13aa88e0ddfbd8a2facfef6f7525ded6c83cecaaf04894e900f"
     },
     {
       "path": "plugins/krylo/scripts/setup/remove-alias.mjs",
@@ -1611,13 +1611,13 @@
     },
     {
       "path": "plugins/krylo/tests/setup/doctor.test.mjs",
-      "bytes": 7378,
-      "sha256": "baaee015d58380cba7b64a05ee3dd9277973bdb20815c1d67950d29601ee33ea"
+      "bytes": 8182,
+      "sha256": "fbcc0d460f45fe2686baa3deba2c1b0cc73beee9510dfe1ce3a5a8966bfb61f1"
     },
     {
       "path": "plugins/krylo/tests/setup/install-codex.test.mjs",
-      "bytes": 13043,
-      "sha256": "ff1918d8d46b8d7350f82c15a751f480fff796c3e4c2cf0476a3c4bb432802fe"
+      "bytes": 15269,
+      "sha256": "c965ad71dd5bc7a1c9a89da03023f0f4176f4387936382d3c791a56eafc2bebe"
     },
     {
       "path": "plugins/krylo/tests/status/agent-events.test.mjs",
