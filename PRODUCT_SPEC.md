@@ -84,14 +84,14 @@ KRYLO v0.1.0 will not:
 - Ship a real Codex CLI plugin (`.codex-plugin/plugin.json`, explicit-only `krylo-run` Skill, Codex Hook transport) reusing Shared Core, per `docs/adr/0029-codex-host-packaging-and-approval-boundary.md`.
 - Preserve every Claude host guarantee unchanged (regression-proven, `docs/codex-capability-matrix.md` and the full test suite).
 - Document every Codex capability gap with an explicit safe fallback rather than overclaim parity with Claude -- most notably, `require-approval` denies deterministically on Codex instead of using a native approval prompt, since current Codex `PreToolUse` output does not support one.
-- Scheduled upstream/ecosystem maintenance workflows, full VS Code project-hook enforcement setup, and the `0.2.0` version bump itself remain explicitly out of scope for this checkpoint and are tracked as separate, later work.
+- Full VS Code project-scoped hook enforcement setup (`<repo>/.codex/hooks.json` with dry-run/backup/rollback) remains explicitly out of scope for this checkpoint and is tracked as separate, later work; the standalone-Skill install path ships now. Scheduled Ecosystem Maintenance and the `0.2.0` version bump are implemented in this same release line (see `docs/adr/0031-ecosystem-maintenance-drift-checker.md` and CHANGELOG's `[0.2.0]` entry).
 
 ## Goals for 0.2 (Cross-Harness)
 
 - Let a KRYLO run on one native host request an optional, bounded, read-only, advisory second opinion from the OPPOSITE provider's own CLI, per `docs/adr/0030-cross-harness-advisory-workers.md`.
 - Keep the native host the sole writer and sole completion authority; a Cross-Harness worker's result is advisory evidence only.
 - Code-enforce recursion depth 1, reuse the existing native-approval/deterministic-deny boundary for data egress with no new local approval mechanism, and degrade safely (never block normal KRYLO operation) whenever the opposite provider is missing, unauthenticated, unsupported, or times out.
-- Ecosystem Maintenance and the `0.2.0` version bump remain explicitly out of scope for this checkpoint and are tracked as separate, later work.
+- Cross-Harness v1 ships in the same `0.2.0` release line as Ecosystem Maintenance and the version bump itself (see `docs/adr/0031-ecosystem-maintenance-drift-checker.md` and CHANGELOG's `[0.2.0]` entry); none of the three is deferred to later work.
 
 ## User-visible terminal states
 

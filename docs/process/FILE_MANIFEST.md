@@ -17,13 +17,10 @@ LICENSE                                     # implemented, Apache-2.0 canonical 
 package.json / package-lock.json            # implemented (zero dependencies, node:test)
 RELEASE_READINESS.md                        # implemented (progress + evidence record)
 RELEASE_MANIFEST.json                       # implemented (per-file SHA-256 of the release tree).
-                                             # STALE as of the multi-host Foundation / security-hardening
-                                             # checkpoints (generated 2026-07-30): every file these
-                                             # checkpoints touched has a different hash than recorded, and
-                                             # ADR-0024/0025/0026 are not listed at all. Regenerate before
-                                             # any release build; not done as part of this checkpoint
-                                             # (release-prep scope, not one of its stated acceptance
-                                             # criteria).
+                                             # Regenerated multiple times since the 2026-07-30 note this
+                                             # replaces (most recently at PR #9 head 79f2625, 2026-08-26);
+                                             # deterministic regeneration and independent verification
+                                             # re-confirmed 2026-09-09 (343 files, byte-identical, 0 errors).
 BLUEPRINT_MANIFEST.json                     # immutable blueprint record (paths updated for the
                                              # archive/ move below; content and hashes unchanged)
 archive/blueprint-v0.1.2/                   # immutable blueprint drafts (unchanged content; moved
@@ -78,6 +75,9 @@ plugins/krylo/scripts/host/codex/           # implemented (context.mjs, hook-tra
 plugins/krylo/scripts/lib/host-dispatch.mjs # implemented (host adapter registry; routes Shared Core
                                              # runtime CLIs to the correct host adapter)
 plugins/krylo/scripts/security/risk-gate-codex.mjs          # implemented (Codex PreToolUse gate)
+plugins/krylo/scripts/security/risk-policy.mjs               # implemented (shared, host-neutral risk
+                                                               # classification policy consumed by both
+                                                               # risk-gate.mjs and risk-gate-codex.mjs)
 plugins/krylo/scripts/security/permission-request-codex.mjs # implemented (Codex PermissionRequest hook)
 plugins/krylo/scripts/runtime/posttool-telemetry-codex.mjs  # implemented (Codex PostToolUse telemetry)
 plugins/krylo/scripts/setup/install-codex.mjs                # implemented (standalone-Skill install +
@@ -193,7 +193,8 @@ plugins/krylo/adapters/{mattpocock-skills,omniroute,code-review-graph}.md   # + 
 ## Tests and evaluations
 
 ```text
-plugins/krylo/tests/unit/*.test.mjs          # state, redact, atomic, telemetry, cli, cleanup, resume
+plugins/krylo/tests/unit/*.test.mjs          # state, redact, atomic, telemetry, cli, cleanup, resume,
+                                              # risk-policy (host-neutral classification policy cases)
 plugins/krylo/tests/platform/paths.test.mjs
 plugins/krylo/tests/hooks/*.test.mjs         # question-gate, risk-gate, stop-gate, fingerprint, posttool (+helpers.mjs)
 plugins/krylo/tests/security/injection.test.mjs

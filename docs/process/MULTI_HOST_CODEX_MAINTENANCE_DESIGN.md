@@ -1219,4 +1219,3 @@ This specification has been checked for the following:
 - Rollback exists independently for Claude, Codex, VS Code setup, cross-harness, and maintenance workflows.
 - Release and marketplace publication remain separate human approvals.
 - The design is decomposed into phases small enough for implementation and review checkpoints.
-
