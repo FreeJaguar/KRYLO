@@ -146,8 +146,8 @@
     },
     {
       "path": "PRODUCT_SPEC.md",
-      "bytes": 6196,
-      "sha256": "131358418a040b23e93809688fdd3fa973c5b5a6dcd9e62bcb20a62f63204161"
+      "bytes": 6519,
+      "sha256": "80503a1099ff250a77b877d088877d5f0606d7020b5ac5f850abf99187b967d5"
     },
     {
       "path": "README.md",
@@ -156,8 +156,8 @@
     },
     {
       "path": "RELEASE_READINESS.md",
-      "bytes": 21561,
-      "sha256": "3659afb8f2fb7d64823a66ecec77db22f4aad9cdb589fa0b0f7fa64ae917341a"
+      "bytes": 27809,
+      "sha256": "5ecced7c343e2f6950b4cfaa2c4d0c9f22d3a398db4c619a25762f1fe7d2a52c"
     },
     {
       "path": "SECURITY.md",
@@ -696,8 +696,8 @@
     },
     {
       "path": "docs/process/FILE_MANIFEST.md",
-      "bytes": 15381,
-      "sha256": "0ca1bbf8224a906bbddf2c6658201fa258e56edf1c1940af77a1c609431f0b16"
+      "bytes": 15539,
+      "sha256": "9772f1d99d59355dd4875742b54807916ef8bbc82d46d2288658b134bf66410c"
     },
     {
       "path": "docs/process/IMPLEMENTATION_PLAN.md",
@@ -711,8 +711,8 @@
     },
     {
       "path": "docs/process/MULTI_HOST_CODEX_MAINTENANCE_DESIGN.md",
-      "bytes": 52451,
-      "sha256": "0c2d04b93a3c5d781fa415d3e04968c76ff7585b7c59534249413c1fe1624404"
+      "bytes": 52450,
+      "sha256": "7e186b29b7e701a365f9ffd0875b2769e2518c29bba13ff59847cb5f32c58ad9"
     },
     {
       "path": "docs/process/MULTI_HOST_FOUNDATION_IMPLEMENTATION_PLAN.md",
