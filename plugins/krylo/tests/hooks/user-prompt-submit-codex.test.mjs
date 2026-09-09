@@ -222,6 +222,65 @@ test('user-prompt-submit-codex: a save/lock failure leaves no active run and emi
   }
 });
 
+// H2. A RECOGNIZED invocation that persists its state but then fails to
+// write the active-run pointer must fail CLOSED (a marker that
+// risk-gate-codex.mjs checks), not silently -- unlike H above (a total
+// data-root failure caught only by the outermost catch, before any of this
+// file's own denyBootstrapFailure paths are ever reached), this isolates
+// the write-pointer failure specifically: `runs/` stays writable so
+// saveState() succeeds, only `active-runs/` is blocked.
+test('user-prompt-submit-codex: a pointer-write failure after successful state persistence writes a bootstrap-failure marker and warns the model, never silently', () => {
+  const dataDir = mkTempDataDir('krylo-ups-');
+  const projectDir = mkTempDataDir('krylo-ups-project-');
+  try {
+    fs.writeFileSync(path.join(dataDir, 'active-runs'), 'not a directory', 'utf8');
+    const res = run(payload({ prompt: '$krylo-run task', sessionId: 'codex-session-B', cwd: projectDir }), dataDir);
+    assert.equal(res.status, 0, 'a pointer-write failure must still exit 0, never crash the hook');
+    assert.notEqual(res.stdout, '', 'must not go fully silent once a real invocation was recognized');
+    assert.match(additionalContext(res) ?? '', /FAILED TO INITIALIZE/);
+    assert.match(additionalContext(res) ?? '', /NOT under KRYLO governance/);
+
+    // The state file itself WAS persisted (proves this is the pointer-write
+    // failure path specifically, not the total-failure path from test H).
+    const runsDir = path.join(dataDir, 'runs');
+    assert.ok(fs.existsSync(runsDir) && fs.readdirSync(runsDir).length === 1, 'state must still have been persisted');
+
+    const hash = computeProjectRootHash(projectDir);
+    const markerPath = path.join(dataDir, 'bootstrap-failures', hash, 'codex', 'codex-session-B.json');
+    assert.ok(fs.existsSync(markerPath), 'a bootstrap-failure marker must be written for this exact project+session');
+    const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+    assert.equal(typeof marker.reason, 'string');
+    assert.equal(typeof marker.createdAt, 'string');
+  } finally {
+    cleanup(dataDir);
+    cleanup(projectDir);
+  }
+});
+
+// H3. A subsequent SUCCESSFUL bootstrap for the same session must clear any
+// marker a previous failed invocation left behind -- otherwise a session
+// that failed once and later succeeded would keep denying actions forever
+// (until the marker's own TTL expired) even though a real run is now active
+// and already gates those same actions correctly on its own.
+test('user-prompt-submit-codex: a successful bootstrap clears a pre-existing bootstrap-failure marker for the same session', () => {
+  const dataDir = mkTempDataDir('krylo-ups-');
+  const projectDir = mkTempDataDir('krylo-ups-project-');
+  try {
+    const hash = computeProjectRootHash(projectDir);
+    const markerPath = path.join(dataDir, 'bootstrap-failures', hash, 'codex', 'codex-session-C.json');
+    fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+    fs.writeFileSync(markerPath, JSON.stringify({ reason: 'earlier failure', createdAt: new Date().toISOString() }), 'utf8');
+
+    const res = run(payload({ prompt: '$krylo-run task', sessionId: 'codex-session-C', cwd: projectDir }), dataDir);
+    assert.equal(res.status, 0);
+    assert.match(additionalContext(res) ?? '', /now active/);
+    assert.ok(!fs.existsSync(markerPath), 'the stale marker must be cleared once this session has a real active run');
+  } finally {
+    cleanup(dataDir);
+    cleanup(projectDir);
+  }
+});
+
 // I. Repeat invocation in the same active session reuses the existing run,
 // never silently creating a second one.
 test('user-prompt-submit-codex: invoking $krylo-run twice in the same session reuses the existing active run', () => {

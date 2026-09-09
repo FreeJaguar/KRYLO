@@ -196,6 +196,22 @@ export function activeRunPointerPath(projectRootHash, host, hostSessionId) {
 }
 
 /**
+ * Path to a short-lived marker recording that a RECOGNIZED $krylo-run
+ * invocation failed to bootstrap for this exact project + host + session.
+ * scripts/security/user-prompt-submit-codex.mjs writes it; risk-gate-codex.mjs
+ * reads it to fail CLOSED (deny) instead of silently treating the session as
+ * ordinary/ungoverned, the same problem an absent active-run pointer would
+ * otherwise leave indistinguishable. Deliberately a separate top-level
+ * directory from active-runs/ so it can never collide with, or be mistaken
+ * for, a real run pointer -- reuses the same safeJoin/assertValidHost/
+ * safeSessionSegment path-safety primitives as activeRunPointerPath() above.
+ */
+export function bootstrapFailurePath(projectRootHash, host, hostSessionId) {
+  assertValidHost(host);
+  return safeJoin(getDataRoot(), 'bootstrap-failures', projectRootHash, host, `${safeSessionSegment(hostSessionId)}.json`);
+}
+
+/**
  * Path to the pre-0.2.0 flat pointer layout (`active-runs/<project>/<session>.json`,
  * no host segment). Read-only: used only to detect and lazily migrate a
  * still-active 0.1.1 pointer into the new host-scoped layout.

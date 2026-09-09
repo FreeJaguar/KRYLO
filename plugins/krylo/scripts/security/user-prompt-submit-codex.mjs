@@ -36,6 +36,19 @@
 // state is ever left with an active-run pointer referencing it, and an
 // ordinary (non-KRYLO) prompt is never affected by a failed bootstrap
 // attempt for a DIFFERENT session.
+//
+// A RECOGNIZED $krylo-run invocation that fails AFTER a real session_id and
+// project root are known (host identity bootstrap, state persistence, or
+// pointer write all failing) does NOT go silent: it writes a short-lived
+// bootstrap-failure marker (scripts/lib/state.mjs's writeBootstrapFailureMarker)
+// that risk-gate-codex.mjs's PreToolUse hook checks and denies against --
+// otherwise this session would be indistinguishable, at PreToolUse time,
+// from an ordinary session that never invoked KRYLO at all, and every
+// action would be silently allowed while the user believed KRYLO was
+// governing it. The marker is the actual (deterministic, PreToolUse-level)
+// fail-closed boundary; the additionalContext text emitted alongside it is
+// coordination context for the model only, same as every other emit in this
+// file, never itself the enforcement mechanism.
 
 import crypto from 'node:crypto';
 import path from 'node:path';
@@ -48,6 +61,8 @@ import {
   readActiveRunPointer,
   loadState,
   computeProjectRootHash,
+  writeBootstrapFailureMarker,
+  clearBootstrapFailureMarker,
 } from '../lib/state.mjs';
 import { bootstrapCodexRuntimeEnvironment } from '../host/codex/context.mjs';
 
@@ -75,6 +90,29 @@ function allowSilently() {
   process.exit(0);
 }
 
+// Called ONLY after a prompt has already been recognized as an explicit
+// $krylo-run invocation (parseInvocation returned non-null) AND we have a
+// real projectRootHash + sessionId to scope a marker to. UserPromptSubmit
+// has no verified deny/block output shape for the installed codex-cli
+// 0.120.0 build (unlike PreToolUse's permissionDecision:"deny", which IS
+// verified against this exact binary elsewhere in this codebase) -- so this
+// does not itself block the prompt. Instead it (a) tells the model plainly
+// that KRYLO did not initialize and this session is NOT governed, so a
+// well-behaved model does not proceed as if it were, and (b) writes a
+// bootstrap-failure marker that risk-gate-codex.mjs's PreToolUse hook
+// checks and denies against -- the actual, deterministic fail-closed
+// boundary, consistent with this codebase's established rule that
+// UserPromptSubmit/additionalContext is coordination context for the
+// model, never the enforcement mechanism itself.
+function denyBootstrapFailure({ projectRootHash, sessionId, reason }) {
+  writeBootstrapFailureMarker({ projectRootHash, host: 'codex', hostSessionId: sessionId, reason });
+  emitAdditionalContext(
+    `KRYLO FAILED TO INITIALIZE for this session (${reason}). This session is NOT under KRYLO governance: `
+    + 'do not proceed with the requested task as an autonomous KRYLO run. Report this failure to the user and stop. '
+    + 'KRYLO will deny risk-gated actions in this session until this is resolved and $krylo-run is invoked again successfully.',
+  );
+}
+
 async function main() {
   const input = await readStdinJson();
   if (!input.ok) allowSilently();
@@ -100,6 +138,11 @@ async function main() {
     return;
   }
 
+  // Computed before the identity-bootstrap attempt below (a pure hash of
+  // projectRoot, no dependency on `identity`) so a bootstrap failure can
+  // still be recorded against the correct, real project+session scope.
+  const projectRootHash = computeProjectRootHash(projectRoot);
+
   let identity;
   try {
     // explicitSessionId is passed explicitly (not left to fall back to
@@ -112,11 +155,9 @@ async function main() {
       projectRoot,
     });
   } catch {
-    allowSilently();
+    denyBootstrapFailure({ projectRootHash, sessionId, reason: 'host identity bootstrap failed' });
     return;
   }
-
-  const projectRootHash = computeProjectRootHash(projectRoot);
 
   // Idempotency (required behavior C/D/I): reuse an already-active,
   // non-terminal run bound to this EXACT session and project rather than
@@ -149,6 +190,10 @@ async function main() {
     // Fall through to a fresh bootstrap attempt below.
   }
   if (existingRunId) {
+    // Defensive cleanup: a marker from an EARLIER failed invocation in this
+    // same session must not keep denying actions now that a real active run
+    // was found for it.
+    clearBootstrapFailureMarker({ projectRootHash, host: 'codex', hostSessionId: sessionId });
     emitAdditionalContext(
       `KRYLO Codex run ${existingRunId} is already active for this host session. `
       + 'Follow the krylo-run Skill workflow using this existing run; do not initialize another run.',
@@ -178,7 +223,13 @@ async function main() {
   });
 
   const saveResult = saveState(state);
-  if (!saveResult.ok) allowSilently(); // no state persisted: never write a pointer to it
+  if (!saveResult.ok) {
+    // No state persisted: never write a pointer to it. But the model was
+    // just told (by the prompt it typed) that a KRYLO run should now be
+    // active -- it must not be left believing that silently.
+    denyBootstrapFailure({ projectRootHash, sessionId, reason: 'run state could not be persisted' });
+    return;
+  }
 
   try {
     writeActiveRunPointer({ runId, projectRootHash, host: 'codex', hostSessionId: sessionId });
@@ -186,9 +237,14 @@ async function main() {
     // State exists but no pointer was written -- the run is never resolved
     // as active by resolveActiveRun() (which requires a valid pointer), so
     // this is a harmless orphaned state file, not a dangling "active" run.
-    allowSilently();
+    // Still not silent, for the same reason as the saveState failure above.
+    denyBootstrapFailure({ projectRootHash, sessionId, reason: 'run pointer could not be written' });
     return;
   }
+
+  // A fresh, successful bootstrap supersedes any marker left by an earlier
+  // failed invocation in this same session.
+  clearBootstrapFailureMarker({ projectRootHash, host: 'codex', hostSessionId: sessionId });
 
   emitAdditionalContext(
     `KRYLO Codex run ${runId} is now active for this host session. Follow the krylo-run Skill workflow. Do not initialize another run.`,

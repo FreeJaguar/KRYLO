@@ -14,6 +14,7 @@ import {
   legacyActiveRunPointerPath,
   activeRunPointerPath,
   activeRunsHostDir,
+  bootstrapFailurePath,
 } from './paths.mjs';
 import { writeJsonAtomic, readJson } from './atomic.mjs';
 import { redactText } from './redact.mjs';
@@ -980,6 +981,56 @@ export function clearActiveRunPointer({ projectRootHash, host, hostSessionId, ru
     }
   } catch {
     // ignore: pointer may already be absent
+  }
+}
+
+// A RECOGNIZED $krylo-run invocation (the user's prompt literally started
+// with $krylo-run) that fails to bootstrap is, without this marker,
+// indistinguishable at PreToolUse time from an ordinary session that never
+// invoked KRYLO at all -- both simply have no active run, and
+// risk-gate-codex.mjs's existing contract is to allow everything silently
+// in that case (correct for the ordinary case, unsafe for the failed-
+// invocation case: the user believes the session is under KRYLO's
+// governance and it silently is not). This marker closes that gap: written
+// by user-prompt-submit-codex.mjs on a failed bootstrap AFTER a real
+// invocation was recognized, read by risk-gate-codex.mjs to deny instead of
+// silently pass. Short TTL (matching the existing 15-minute pending-
+// approval convention) so a stale marker from a long-since-resolved
+// failure does not deny forever.
+const BOOTSTRAP_FAILURE_TTL_MS = 15 * 60 * 1000;
+
+/** Record that a recognized $krylo-run invocation failed to bootstrap for this exact triple. Best-effort. */
+export function writeBootstrapFailureMarker({ projectRootHash, host, hostSessionId, reason }) {
+  try {
+    const markerPath = bootstrapFailurePath(projectRootHash, host, hostSessionId);
+    ensureDir(path.dirname(markerPath));
+    writeJsonAtomic(markerPath, { reason: typeof reason === 'string' ? reason.slice(0, 200) : 'unknown', createdAt: nowIso() });
+  } catch {
+    // Best-effort: if even this fails, the caller's own additionalContext
+    // warning to the model (which does not depend on this marker) remains
+    // the fallback signal.
+  }
+}
+
+/** Read a still-fresh bootstrap-failure marker for this exact triple, if any. Never throws. */
+export function readBootstrapFailureMarker({ projectRootHash, host, hostSessionId }) {
+  try {
+    const result = readJson(bootstrapFailurePath(projectRootHash, host, hostSessionId));
+    if (!result.ok || !result.value || typeof result.value.createdAt !== 'string') return { active: false };
+    const ageMs = Date.now() - Date.parse(result.value.createdAt);
+    if (!Number.isFinite(ageMs) || ageMs < 0 || ageMs > BOOTSTRAP_FAILURE_TTL_MS) return { active: false };
+    return { active: true, reason: typeof result.value.reason === 'string' ? result.value.reason : 'unknown' };
+  } catch {
+    return { active: false };
+  }
+}
+
+/** Clear a bootstrap-failure marker, e.g. after a subsequent successful bootstrap. Best-effort. */
+export function clearBootstrapFailureMarker({ projectRootHash, host, hostSessionId }) {
+  try {
+    fs.rmSync(bootstrapFailurePath(projectRootHash, host, hostSessionId), { force: true });
+  } catch {
+    // ignore: marker may already be absent
   }
 }
 

@@ -13,7 +13,11 @@
 // as the Claude gate, and the same one every Codex hook needs per
 // docs/process/MULTI_HOST_CODEX_MAINTENANCE_DESIGN.md Section 10.6, since
 // Codex has no Skill-scoped hook lifecycle -- these hooks fire for every
-// ordinary Codex session, not only $krylo-run).
+// ordinary Codex session, not only $krylo-run) -- UNLESS a bootstrap-failure
+// marker (scripts/lib/state.mjs) shows a RECOGNIZED $krylo-run invocation
+// in THIS exact session failed to bootstrap, in which case this also denies
+// (see the check below): an ordinary session with no marker still passes
+// through exactly as before.
 //
 // Approval boundary (docs/adr/0029-codex-host-packaging-and-approval-boundary.md):
 // EVERY `require-approval` classification -- shell, apply_patch, or MCP --
@@ -49,6 +53,7 @@ import {
 } from '../host/codex/hook-transport.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { classifyRiskAction } from './risk-policy.mjs';
+import { computeProjectRootHash, readBootstrapFailureMarker } from '../lib/state.mjs';
 
 // shell/exec_command -> Bash; apply_patch keeps its own distinct identity
 // (never relabeled as Claude's Edit/Write, per the task's explicit
@@ -81,7 +86,29 @@ async function main() {
     host: normalized.identity.host,
     hostSessionId: normalized.identity.hostSessionId,
   });
-  if (!run.active) allowCodexSilently();
+  if (!run.active) {
+    // No active run is normally the "ordinary Codex session" case (silent
+    // pass-through, by design -- see this file's header). But it is ALSO
+    // what a RECOGNIZED $krylo-run invocation that failed to bootstrap
+    // looks like from here, and those two must not be treated the same:
+    // the user believes this session is under KRYLO's governance in the
+    // second case. user-prompt-submit-codex.mjs records that distinction
+    // as a short-lived marker; check it before falling through to the
+    // ordinary silent-allow path.
+    const projectRootHash = computeProjectRootHash(normalized.identity.projectRoot);
+    const failure = readBootstrapFailureMarker({
+      projectRootHash,
+      host: normalized.identity.host,
+      hostSessionId: normalized.identity.hostSessionId,
+    });
+    if (failure.active) {
+      emitCodexPreToolDeny(
+        `KRYLO failed to initialize for this session (${failure.reason}) after an explicit $krylo-run invocation. `
+        + 'This action is denied until KRYLO successfully initializes: retry $krylo-run, or proceed outside an autonomous KRYLO run.',
+      );
+    }
+    allowCodexSilently();
+  }
 
   const state = run.state;
 

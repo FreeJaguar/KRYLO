@@ -1,9 +1,26 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import { mkTempDataDir, createActiveRunCodexOnly, runHookCodexOnly, cleanup } from './helpers.mjs';
+import { computeProjectRootHash } from '../../scripts/lib/state.mjs';
 
 const GATE = 'security/risk-gate-codex.mjs';
+
+// Mirrors scripts/lib/paths.mjs's bootstrapFailurePath() layout directly
+// (dataDir/bootstrap-failures/<projectRootHash>/codex/<sessionId>.json) --
+// sessionId values used in this suite are plain identifiers that already
+// satisfy safeSessionSegment()'s pass-through regex, so no hashing is
+// needed here to match it.
+function writeMarkerFile(dataDir, projectDir, sessionId, { reason = 'test failure', ageMs = 0 } = {}) {
+  const hash = computeProjectRootHash(projectDir);
+  const markerPath = path.join(dataDir, 'bootstrap-failures', hash, 'codex', `${sessionId}.json`);
+  fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+  const createdAt = new Date(Date.now() - ageMs).toISOString();
+  fs.writeFileSync(markerPath, JSON.stringify({ reason, createdAt }), 'utf8');
+  return markerPath;
+}
 
 // tool_name: 'Bash' is the REAL, confirmed value -- an independent review
 // plus direct byte inspection of the installed codex-cli 0.120.0 binary's
@@ -45,6 +62,46 @@ test('risk-gate-codex: malformed stdin without active run passes silently', () =
     const res = runHookCodexOnly(GATE, null, dataDir, { rawInput: 'not json' });
     assert.equal(res.status, 0);
     assert.equal(res.stdout, '');
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate-codex: no active run BUT a fresh bootstrap-failure marker -> denies instead of silently passing', () => {
+  const dataDir = mkTempDataDir('krylo-codex-hook-');
+  try {
+    // No createActiveRunCodexOnly() call: this reproduces exactly the case
+    // a recognized-but-failed $krylo-run invocation leaves behind -- no
+    // active run, but a marker recording that a real invocation was made.
+    writeMarkerFile(dataDir, dataDir, 'codex-hook-session');
+    const res = runHookCodexOnly(GATE, bashPayload(dataDir, 'ls -la'), dataDir);
+    assert.equal(res.status, 0);
+    assert.equal(decision(res), 'deny', 'a session with a fresh bootstrap-failure marker must never silently allow actions');
+    assert.match(res.json.hookSpecificOutput.permissionDecisionReason, /failed to initialize/i);
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate-codex: an EXPIRED bootstrap-failure marker no longer denies (TTL respected)', () => {
+  const dataDir = mkTempDataDir('krylo-codex-hook-');
+  try {
+    writeMarkerFile(dataDir, dataDir, 'codex-hook-session', { ageMs: 30 * 60 * 1000 }); // 30 min old, TTL is 15 min
+    const res = runHookCodexOnly(GATE, bashPayload(dataDir, 'ls -la'), dataDir);
+    assert.equal(res.status, 0);
+    assert.equal(res.stdout, '', 'an expired marker must not deny -- the session reverts to the ordinary no-run silent pass-through');
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate-codex: a marker scoped to a DIFFERENT session never denies this session', () => {
+  const dataDir = mkTempDataDir('krylo-codex-hook-');
+  try {
+    writeMarkerFile(dataDir, dataDir, 'some-other-session');
+    const res = runHookCodexOnly(GATE, bashPayload(dataDir, 'ls -la'), dataDir); // session_id: 'codex-hook-session'
+    assert.equal(res.status, 0);
+    assert.equal(res.stdout, '', 'a marker for an unrelated session must not affect this one');
   } finally {
     cleanup(dataDir);
   }
