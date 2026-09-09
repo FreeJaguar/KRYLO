@@ -1161,8 +1161,8 @@
     },
     {
       "path": "plugins/krylo/scripts/lib/spawn-platform.mjs",
-      "bytes": 14181,
-      "sha256": "40e74f6bd7d6220ce41c29a2271c096ad551602ba4265164180b28f88c4790b7"
+      "bytes": 15289,
+      "sha256": "8d9e5ed784a9a8a3307cd564e19e45bb9d166e161b348579f839ea61bfa3bc08"
     },
     {
       "path": "plugins/krylo/scripts/lib/state-migrations.mjs",
@@ -1396,8 +1396,8 @@
     },
     {
       "path": "plugins/krylo/tests/fixtures/cross-harness/fake-worker.mjs",
-      "bytes": 6091,
-      "sha256": "19e27817b7de2501edb3c2b739a7510c99db8791ca885dae94eb99674bef20c7"
+      "bytes": 7093,
+      "sha256": "b0dda6d0267755dc028a6a8746352442ba8b07eceb07f2658bb12d28f09d3239"
     },
     {
       "path": "plugins/krylo/tests/fixtures/cross-harness/fake-worker.sh",
