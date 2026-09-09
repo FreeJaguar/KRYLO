@@ -3,10 +3,22 @@
 // docs/process/CODEX_HOST_IMPLEMENTATION_PLAN.md Tasks 6 and 9).
 //
 // DEFAULT IS DRY RUN: prints the exact plan and changes nothing. --apply
-// performs the installation. Mirrors scripts/setup/install-alias.mjs's own
-// established ownership/backup/rollback contract exactly: a foreign file is
-// never overwritten in any mode, and a KRYLO-owned older version is backed
-// up before being replaced.
+// performs the installation. Shares scripts/setup/install-alias.mjs's own
+// ownership/backup contract: a foreign file is never overwritten in any
+// mode, and a KRYLO-owned older version is backed up before being replaced.
+// An earlier version of this apply path built the replacement copy directly
+// on top of the live destination (backup, `rmSync` the live install, THEN
+// copy the new content in) -- if the copy step failed partway, the user was
+// left with neither a working old install nor a working new one, and only
+// a prose "rollback" hint pointed at a backup they had to restore manually.
+// The skill-install path (planSkillInstall) now stages the replacement in a
+// sibling temp directory first, verifies it round-trips from disk before
+// touching the live install at all, swaps it in with a single atomic
+// rename (never a delete-then-copy), and automatically restores the prior
+// install from its backup if the swap itself fails. The rules-install path
+// (planRulesInstall) writes its replacement to a temp file and atomically
+// renames it over the destination, so a mid-write crash can never leave a
+// truncated rules file in place.
 //
 // Two independent, separately-scoped targets (run one, or both, via
 // --target skill|rules|all):
@@ -101,15 +113,51 @@ function planSkillInstall(apply) {
 
   if (apply) {
     fs.mkdirSync(path.dirname(skillDestDir), { recursive: true });
-    if (backupPath) {
-      copyDirRecursive(skillDestDir, backupPath);
-      fs.rmSync(skillDestDir, { recursive: true, force: true });
+
+    // Stage the full replacement in a sibling temp directory (same parent,
+    // so the final swap below is a same-volume rename -- atomic on both
+    // POSIX and Windows) and verify it before the live install is touched
+    // at all.
+    const tempDir = `${skillDestDir}.new-${process.pid}-${Date.now()}`;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    copyDirRecursive(skillSrcDir, tempDir);
+    const tempSkillFile = path.join(tempDir, 'SKILL.md');
+    // Stamp ownership onto the staged copy without mutating the
+    // repository's own source file.
+    const stamped = `${fs.readFileSync(tempSkillFile, 'utf8')}\n<!-- krylo-codex-skill-version: ${RULES_VERSION} -->\n<!-- Installed by install-codex.mjs. Remove by deleting this directory. -->\n`;
+    fs.writeFileSync(tempSkillFile, stamped, 'utf8');
+
+    const verified = fs.existsSync(tempSkillFile) && /krylo-codex-skill-version:/.test(fs.readFileSync(tempSkillFile, 'utf8'));
+    if (!verified) {
+      fs.rmSync(tempDir, { recursive: true, force: true });
+      return {
+        ok: false,
+        target: 'skill',
+        error: 'staging-verification-failed',
+        message: 'The new Skill copy could not be verified before installation; the existing install (if any) was left untouched.',
+      };
     }
-    copyDirRecursive(skillSrcDir, skillDestDir);
-    // Stamp ownership onto the copy without mutating the repository's own
-    // source file.
-    const stamped = `${fs.readFileSync(skillDestFile, 'utf8')}\n<!-- krylo-codex-skill-version: ${RULES_VERSION} -->\n<!-- Installed by install-codex.mjs. Remove by deleting this directory. -->\n`;
-    fs.writeFileSync(skillDestFile, stamped, 'utf8');
+
+    // Move the current install aside (if any) and swap the verified
+    // replacement in. Never a delete-then-copy: at every point up to the
+    // rename below, the live install directory still holds its ORIGINAL
+    // content or the backup does.
+    if (backupPath) fs.renameSync(skillDestDir, backupPath);
+    try {
+      fs.renameSync(tempDir, skillDestDir);
+    } catch (err) {
+      let restored = false;
+      if (backupPath && fs.existsSync(backupPath) && !fs.existsSync(skillDestDir)) {
+        fs.renameSync(backupPath, skillDestDir);
+        restored = true;
+      }
+      return {
+        ok: false,
+        target: 'skill',
+        error: 'swap-failed',
+        message: `Failed to move the staged Skill into place: ${err.message}. ${restored ? 'The previous install was automatically restored.' : `Manual recovery may be required: staged copy at ${tempDir}, ${backupPath ? `backup at ${backupPath}` : 'no backup existed (this was a fresh install)'}.`}`,
+      };
+    }
     plan.applied = true;
   }
   return plan;
@@ -197,7 +245,11 @@ function planRulesInstall(apply, projectDir, codexBinary) {
   if (apply) {
     fs.mkdirSync(rulesDir, { recursive: true });
     if (backupPath) fs.copyFileSync(rulesFile, backupPath);
-    fs.writeFileSync(rulesFile, content, 'utf8');
+    // Write-then-rename (same directory, same volume): a mid-write crash
+    // can never leave a truncated rules file at the live path.
+    const tempFile = `${rulesFile}.new-${process.pid}-${Date.now()}`;
+    fs.writeFileSync(tempFile, content, 'utf8');
+    fs.renameSync(tempFile, rulesFile);
     plan.applied = true;
     plan.validation = validateRulesWithCodex(rulesFile, codexBinary);
   }
@@ -235,16 +287,61 @@ function removeRules(apply, projectDir) {
   return plan;
 }
 
+const KNOWN_FLAGS = new Set(['--apply', '--remove', '--target', '--project-dir', '--codex-binary']);
+const VALID_TARGETS = new Set(['skill', 'rules', 'all']);
+
+/**
+ * Reject before any mutation, not after: an unknown/missing --target value
+ * previously fell through both `target === 'skill' || target === 'all'` /
+ * `target === 'rules' || target === 'all'` checks silently, leaving
+ * `results` empty -- `Object.values({}).every(...)` is vacuously true, so a
+ * typo (e.g. `--target skils`) reported a clean success with nothing
+ * installed or removed. A missing trailing value for `--target`,
+ * `--project-dir`, or `--codex-binary` (the flag is the last argv element,
+ * or immediately followed by another known flag) previously reached
+ * `path.resolve(undefined)` and crashed with a raw TypeError instead of a
+ * clear error. Both are now caught here, deterministically, before any
+ * plan/apply function runs.
+ */
+function readFlagValue(argv, flag) {
+  const idx = argv.indexOf(flag);
+  if (idx === -1) return { present: false, value: undefined };
+  const value = argv[idx + 1];
+  if (value === undefined || KNOWN_FLAGS.has(value)) {
+    return { present: true, value: undefined, missing: true };
+  }
+  return { present: true, value };
+}
+
 function main() {
   const argv = process.argv.slice(2);
   const apply = argv.includes('--apply');
   const remove = argv.includes('--remove');
-  const targetArgIdx = argv.indexOf('--target');
-  const target = targetArgIdx !== -1 ? argv[targetArgIdx + 1] : 'all';
-  const projectDirArgIdx = argv.indexOf('--project-dir');
-  const projectDir = projectDirArgIdx !== -1 ? path.resolve(argv[projectDirArgIdx + 1]) : process.cwd();
-  const codexBinaryArgIdx = argv.indexOf('--codex-binary');
-  const codexBinary = codexBinaryArgIdx !== -1 ? argv[codexBinaryArgIdx + 1] : null;
+
+  const targetFlag = readFlagValue(argv, '--target');
+  if (targetFlag.missing) {
+    process.stdout.write(JSON.stringify({ ok: false, error: 'missing-target-value', message: '--target requires a value: skill, rules, or all.' }, null, 2));
+    process.exit(1);
+  }
+  const target = targetFlag.present ? targetFlag.value : 'all';
+  if (!VALID_TARGETS.has(target)) {
+    process.stdout.write(JSON.stringify({ ok: false, error: 'unknown-target', message: `--target must be one of: skill, rules, all (got ${JSON.stringify(target)}).` }, null, 2));
+    process.exit(1);
+  }
+
+  const projectDirFlag = readFlagValue(argv, '--project-dir');
+  if (projectDirFlag.missing) {
+    process.stdout.write(JSON.stringify({ ok: false, error: 'missing-project-dir-value', message: '--project-dir requires a path value.' }, null, 2));
+    process.exit(1);
+  }
+  const projectDir = projectDirFlag.present ? path.resolve(projectDirFlag.value) : process.cwd();
+
+  const codexBinaryFlag = readFlagValue(argv, '--codex-binary');
+  if (codexBinaryFlag.missing) {
+    process.stdout.write(JSON.stringify({ ok: false, error: 'missing-codex-binary-value', message: '--codex-binary requires a value.' }, null, 2));
+    process.exit(1);
+  }
+  const codexBinary = codexBinaryFlag.present ? codexBinaryFlag.value : null;
 
   const results = {};
   if (remove) {

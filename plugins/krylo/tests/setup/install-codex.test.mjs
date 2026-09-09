@@ -25,6 +25,50 @@ function mkProject() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-codex-setup-proj-'));
 }
 
+test('install-codex: an unknown --target is rejected deterministically, never silently succeeds', () => {
+  const home = mkHome();
+  const project = mkProject();
+  try {
+    const res = run(['--target', 'skils', '--apply'], home, project);
+    assert.equal(res.status, 1, 'a typo\'d target must never exit 0');
+    assert.equal(res.json.ok, false);
+    assert.equal(res.json.error, 'unknown-target');
+    assert.ok(!('skill' in res.json) && !('rules' in res.json), 'nothing should have been planned or applied for an unrecognized target');
+    assert.ok(!fs.existsSync(path.join(home, '.agents', 'skills', 'krylo-run')), 'no mutation must occur for an unknown target');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('install-codex: a --target flag with no following value is rejected, not a raw crash', () => {
+  const home = mkHome();
+  const project = mkProject();
+  try {
+    const res = run(['--target'], home, project);
+    assert.equal(res.status, 1);
+    assert.equal(res.json.ok, false);
+    assert.equal(res.json.error, 'missing-target-value');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+test('install-codex: --project-dir immediately followed by another flag is rejected, not silently treated as the value', () => {
+  const home = mkHome();
+  const project = mkProject();
+  try {
+    const res = run(['--target', 'rules', '--project-dir', '--apply'], home, project);
+    assert.equal(res.status, 1);
+    assert.equal(res.json.ok, false);
+    assert.equal(res.json.error, 'missing-project-dir-value');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test('install-codex: default (no --apply) is a dry run that changes nothing on disk', () => {
   const home = mkHome();
   const project = mkProject();
@@ -99,6 +143,12 @@ test('install-codex: re-applying over a KRYLO-owned install backs up the previou
     assert.ok(fs.existsSync(path.join(second.json.skill.backup, 'SKILL.md')));
     // The live install must still be present and valid after the upgrade.
     assert.ok(fs.existsSync(path.join(home, '.agents', 'skills', 'krylo-run', 'SKILL.md')));
+
+    // The atomic stage-verify-swap must never leave a temp staging
+    // directory behind, whether this was a fresh install or an upgrade.
+    const skillsDir = path.join(home, '.agents', 'skills');
+    const leftoverStaging = fs.readdirSync(skillsDir).filter((name) => name.includes('.new-'));
+    assert.deepEqual(leftoverStaging, [], 'no .new-* staging directory should remain after a successful apply');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(project, { recursive: true, force: true });
@@ -157,6 +207,11 @@ test('install-codex: rules target generates a project-scoped Starlark .rules fil
     assert.match(content, /prefix_rule\(/);
     assert.match(content, /pattern = \["git", "push"\]/);
     assert.match(content, /decision = "prompt"/);
+
+    // The write-then-rename must never leave a .new-* temp file behind.
+    const rulesDir = path.join(project, '.codex', 'rules');
+    const leftoverStaging = fs.readdirSync(rulesDir).filter((name) => name.includes('.new-'));
+    assert.deepEqual(leftoverStaging, [], 'no .new-* temp file should remain after a successful rules apply');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(project, { recursive: true, force: true });
