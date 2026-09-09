@@ -1161,8 +1161,8 @@
     },
     {
       "path": "plugins/krylo/scripts/lib/spawn-platform.mjs",
-      "bytes": 10393,
-      "sha256": "b44592305e311853cc0695d3cd44b63513f182747dceb02a8b51f88b52232d43"
+      "bytes": 13394,
+      "sha256": "a1da6bb343fdf2c33056ec22a55ac91c5a2118aa08e5664b54362fbb727ef640"
     },
     {
       "path": "plugins/krylo/scripts/lib/state-migrations.mjs",
@@ -1701,8 +1701,8 @@
     },
     {
       "path": "plugins/krylo/tests/unit/spawn-platform.test.mjs",
-      "bytes": 9713,
-      "sha256": "5ad528170e237554aa1529afda4536ff89eb95203bccfbd3183e30e8094ff2e3"
+      "bytes": 17476,
+      "sha256": "c853ed438229817a3f6852213cfaedede5aeac5418745052377d3eda37d2b0dc"
     },
     {
       "path": "plugins/krylo/tests/unit/state-migrations.test.mjs",
