@@ -79,8 +79,21 @@ function runMode() {
       process.exit(1);
       break;
     case 'huge-output':
-      writeRaw('x'.repeat(50_000_000));
-      process.exit(0);
+      // A real Ubuntu CI failure (production code, not this fixture, was
+      // suspected first -- see claude-worker.mjs/codex-worker.mjs's own
+      // maxBuffer-detection comments) traced back to THIS fixture:
+      // process.stdout.write() to a pipe is asynchronous on POSIX (unlike
+      // Windows, where a non-TTY stdout pipe is often written
+      // synchronously), so the immediate process.exit(0) that used to
+      // follow this write raced the actual flush -- on Linux CI, the
+      // parent (spawnSync) observed only whatever small amount of data
+      // made it into the pipe buffer before the process died, well under
+      // CROSS_HARNESS_MAX_OUTPUT_BYTES, which the production code correctly
+      // (and unfixably, from its side) reported as unparseable
+      // (INVALID_OUTPUT) rather than oversized. Waiting for the write's own
+      // completion callback before exiting makes this fixture actually
+      // emit the full 50MB it claims to on every platform.
+      process.stdout.write('x'.repeat(50_000_000), () => process.exit(0));
       break;
     case 'nested-cross-harness-attempt':
       // Proves the depth marker is what stops this, not merely that the

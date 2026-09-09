@@ -101,6 +101,30 @@ export function killProcessTree(pid) {
  * though it is not a real PATH-installed target. A relative `PATH` entry is
  * already meaningless for locating a genuine system binary in any case.
  */
+/**
+ * Canonicalize a directory path for exact-membership comparison.
+ * fs.realpathSync.native resolves symlinks/junctions AND, critically on
+ * Windows, expands an 8.3 short-name form (e.g. `RUNNER~1`) to its real
+ * long-name form -- confirmed via a real GitHub Actions Windows runner
+ * failure: `where.exe` returned a candidate under a short-name path while
+ * the PATH entry (from a freshly created temp directory) was in long-name
+ * form, so the plain `path.resolve().toLowerCase()` comparison this
+ * function used before never matched, and a genuine PATH-installed target
+ * was wrongly reported as unavailable (a fail-CLOSED false negative, not a
+ * security hole, but a real functional regression). Falls back to the
+ * plain resolved form if realpath fails (e.g. the directory does not
+ * exist) -- comparison then simply cannot match, which is the same safe
+ * "unavailable" outcome as before this fix for a nonexistent directory.
+ */
+function canonicalDir(dirPath) {
+  const resolved = path.resolve(dirPath).replace(/[\\/]+$/, '');
+  try {
+    return fs.realpathSync.native(resolved).toLowerCase();
+  } catch {
+    return resolved.toLowerCase();
+  }
+}
+
 function pathDirectorySet() {
   const rawPathKey = Object.keys(process.env).find((k) => k.toLowerCase() === 'path');
   const rawPath = rawPathKey ? process.env[rawPathKey] : undefined;
@@ -111,7 +135,7 @@ function pathDirectorySet() {
       .map((entry) => entry.trim())
       .filter(Boolean)
       .filter((entry) => path.isAbsolute(entry))
-      .map((entry) => path.resolve(entry).toLowerCase().replace(/[\\/]+$/, '')),
+      .map((entry) => canonicalDir(entry)),
   );
 }
 
@@ -155,7 +179,7 @@ function resolveOnPath(command) {
     if (res.status !== 0 || typeof res.stdout !== 'string') return null;
     const allCandidates = res.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const pathDirs = pathDirectorySet();
-    const candidates = allCandidates.filter((c) => pathDirs.has(path.dirname(c).toLowerCase().replace(/[\\/]+$/, '')));
+    const candidates = allCandidates.filter((c) => pathDirs.has(canonicalDir(path.dirname(c))));
     if (candidates.length === 0) return null;
     const cmdCandidate = candidates.find((c) => c.toLowerCase().endsWith('.cmd'));
     const exeCandidate = candidates.find((c) => c.toLowerCase().endsWith('.exe'));
