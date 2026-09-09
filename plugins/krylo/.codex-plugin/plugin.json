@@ -1,0 +1,20 @@
+{
+  "name": "krylo",
+  "version": "0.2.0",
+  "description": "Autonomous, evidence-driven software-development workflow. One explicit command turns a task into a controlled run: acceptance criteria, minimal agent team, deterministic verification, independent review, bounded Orbit loop, and an evidence-backed final report.",
+  "author": {
+    "name": "KRYLO Maintainers"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "autonomous-development",
+    "workflow",
+    "orchestration",
+    "verification",
+    "code-review",
+    "security"
+  ],
+  "$comment": "KRYLO reuses the same plugins/krylo/ Core source tree Claude's .claude-plugin/plugin.json packages (docs/adr/0029-codex-host-packaging-and-approval-boundary.md) -- no second copy of Core. skills points at codex/skills/krylo-run, NOT the shared skills/ directory Claude's .claude-plugin/plugin.json auto-discovers by the same directory convention -- an independent review found a Claude-shaped skill sitting inside the shared skills/ directory with no disable-model-invocation field would itself become a 6th, model-invocable Claude skill, a real Claude-side regression; an explicit, separate path avoids that collision entirely, mirroring the same reasoning already applied to hooks below. hooks intentionally points at hooks/codex-hooks.json, NOT the shared hooks/hooks.json Claude's own (deliberately empty, docs/adr/0021-hook-scoping-to-run-skill.md) plugin-wide hooks file occupies by the same directory-auto-discovery convention. No mcpServers/apps entries: KRYLO Core requires no mandatory MCP server or external service.",
+  "skills": ["./codex/skills/krylo-run"],
+  "hooks": "./hooks/codex-hooks.json"
+}

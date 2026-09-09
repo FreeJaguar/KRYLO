@@ -14,6 +14,7 @@ import { spawnSync } from 'node:child_process';
 
 import { getDataRoot, ensureDir } from '../lib/paths.mjs';
 import { createInitialState, validateState, saveState, loadState, ENUMS, REQUIRED_TOP_LEVEL } from '../lib/state.mjs';
+import { createHostIdentity } from '../lib/host-context.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPTS_ROOT = path.resolve(__dirname, '..');
@@ -92,17 +93,56 @@ function crossCheckSchema() {
   return errors;
 }
 
+// Governance guard for the multi-host foundation (ADR-0023): Shared Core
+// library modules must stay host-neutral. Only the Claude host adapter
+// (scripts/host/claude/**) may read CLAUDE_-prefixed environment or Hook
+// fields directly; everything else consumes normalized KRYLO_* values.
+const ISOLATED_SHARED_FILES = [
+  path.join(SCRIPTS_ROOT, 'lib'),
+];
+
+// Shared Core modules that live outside scripts/lib/ but must stay just as
+// host-neutral (e.g. security/risk-policy.mjs shares its directory with the
+// Claude-facing security/risk-gate.mjs adapter, so it cannot be covered by a
+// directory-wide scan without also flagging legitimate Claude adapter code).
+const ISOLATED_SHARED_SINGLE_FILES = [
+  path.join(SCRIPTS_ROOT, 'security', 'risk-policy.mjs'),
+];
+
+function checkHostIsolation() {
+  const errors = [];
+  const files = [
+    ...ISOLATED_SHARED_FILES.flatMap((root) => listMjsFiles(root)),
+    ...ISOLATED_SHARED_SINGLE_FILES,
+  ];
+  for (const file of files) {
+    const contents = fs.readFileSync(file, 'utf8');
+    if (/CLAUDE_/.test(contents)) {
+      errors.push(`${path.relative(SCRIPTS_ROOT, file).split(path.sep).join('/')} must not reference CLAUDE_-prefixed identifiers; Shared Core is host-neutral`);
+    }
+  }
+  return errors;
+}
+
 function runtimeSmokeTest() {
   const errors = [];
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-validate-'));
-  const prevDataRoot = process.env.CLAUDE_PLUGIN_DATA;
-  process.env.CLAUDE_PLUGIN_DATA = tempRoot;
+  const prevDataRoot = process.env.KRYLO_DATA_ROOT;
+  process.env.KRYLO_DATA_ROOT = tempRoot;
   try {
     ensureDir(getDataRoot());
 
+    const hostIdentity = createHostIdentity({
+      host: 'claude',
+      hostSessionId: 'validate-session',
+      projectRoot: tempRoot,
+      pluginRoot: path.resolve(__dirname, '..', '..'),
+      dataRoot: tempRoot,
+    });
+
     const state = createInitialState({
       goalText: 'validation smoke test goal',
-      sessionId: 'validate-session',
+      hostIdentity,
       projectDir: tempRoot,
       lane: 'BUILD',
       risk: 'low',
@@ -122,8 +162,8 @@ function runtimeSmokeTest() {
   } catch (err) {
     errors.push(`runtime smoke test threw: ${err && err.message}`);
   } finally {
-    if (prevDataRoot === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
-    else process.env.CLAUDE_PLUGIN_DATA = prevDataRoot;
+    if (prevDataRoot === undefined) delete process.env.KRYLO_DATA_ROOT;
+    else process.env.KRYLO_DATA_ROOT = prevDataRoot;
     try {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     } catch {
@@ -146,14 +186,16 @@ function main() {
   }
 
   const schemaErrors = crossCheckSchema();
+  const isolationErrors = checkHostIsolation();
   const smokeErrors = runtimeSmokeTest();
-  const ok = syntaxPass && schemaErrors.length === 0 && smokeErrors.length === 0;
+  const ok = syntaxPass && schemaErrors.length === 0 && isolationErrors.length === 0 && smokeErrors.length === 0;
 
   console.log(JSON.stringify({
     ok,
     mode: 'full',
     syntax: { pass: syntaxPass, results: syntaxResults },
     schemaConsistency: { pass: schemaErrors.length === 0, errors: schemaErrors },
+    hostIsolation: { pass: isolationErrors.length === 0, errors: isolationErrors },
     runtimeSmoke: { pass: smokeErrors.length === 0, errors: smokeErrors },
   }));
   process.exit(ok ? 0 : 1);

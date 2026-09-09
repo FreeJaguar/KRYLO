@@ -1,0 +1,9 @@
+# KRYLO must remain explicit-only on Codex, exactly as it is not the
+# default agent on Claude Code (docs/adr/0009-not-a-default-agent.md,
+# generalized to both hosts by docs/adr/0023-multi-host-product-and-shared-core.md).
+# allow_implicit_invocation: false confirmed against current official Codex
+# skill documentation (docs/process/CODEX_HOST_IMPLEMENTATION_PLAN.md
+# Section 2.2): the model will not select this Skill on its own from an
+# ambiguous prompt. Only explicit $krylo-run invocation runs it.
+policy:
+  allow_implicit_invocation: false

@@ -8,8 +8,10 @@ The command names documented in `docs/01-command-surface.md` are public API.
 
 The schema must be versioned and include:
 
-- Identifiers.
-- Project metadata.
+- `runId`: the KRYLO-owned run identifier. It is never a raw host session identifier.
+- `host`: the host this run executes on, with `host.name` (`claude` or `codex`), `host.sessionId`, and optional `host.turnId`. This describes where the run executes.
+- `delegation`: `delegation.externalWorker` (boolean), `delegation.depth`, and optional `delegation.parentRunId`. This describes how the run was reached, directly or as a bounded delegation from another run.
+- Project metadata: a hash of the project root only. Host data roots and raw project paths are never persisted.
 - Lane and risk.
 - Goal and criteria.
 - Agent and model records.

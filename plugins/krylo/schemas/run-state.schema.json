@@ -8,7 +8,8 @@
   "required": [
     "schemaVersion",
     "kryloVersion",
-    "sessionId",
+    "host",
+    "delegation",
     "runId",
     "project",
     "goal",
@@ -35,9 +36,27 @@
       "type": "string",
       "description": "KRYLO plugin version that created the run."
     },
-    "sessionId": {
-      "type": "string",
-      "minLength": 1
+    "host": {
+      "type": "object",
+      "description": "The host this run executes on and its host-specific session identity. A host describes where the run executes; delegation (below) describes how it was reached.",
+      "additionalProperties": false,
+      "required": ["name", "sessionId"],
+      "properties": {
+        "name": { "type": "string", "enum": ["claude", "codex"] },
+        "sessionId": { "type": "string", "minLength": 1, "maxLength": 256 },
+        "turnId": { "type": "string", "minLength": 1, "maxLength": 256 }
+      }
+    },
+    "delegation": {
+      "type": "object",
+      "description": "How this run was reached: directly, or as a bounded delegation from another run/worker.",
+      "additionalProperties": false,
+      "required": ["externalWorker", "depth"],
+      "properties": {
+        "externalWorker": { "type": "boolean" },
+        "depth": { "type": "integer", "minimum": 0, "maximum": 1 },
+        "parentRunId": { "type": "string", "pattern": "^[A-Za-z0-9_-]{4,64}$" }
+      }
     },
     "runId": {
       "type": "string",
@@ -243,6 +262,7 @@
               "external-message",
               "external-write",
               "repository-admin",
+              "cross-harness-invocation",
               "other"
             ]
           },

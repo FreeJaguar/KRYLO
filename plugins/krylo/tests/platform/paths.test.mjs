@@ -4,7 +4,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { safeJoin } from '../../scripts/lib/paths.mjs';
+import {
+  safeJoin,
+  activeRunsHostDir,
+  activeRunPointerPath,
+  legacyActiveRunPointerPath,
+} from '../../scripts/lib/paths.mjs';
 import { computeProjectRootHash } from '../../scripts/lib/state.mjs';
 import { redactText } from '../../scripts/lib/redact.mjs';
 
@@ -67,6 +72,54 @@ test('project root hash is identical for the same directory expressed with / vs 
     assert.equal(hashA, hashB);
     assert.match(hashA, /^[a-f0-9]{64}$/);
   } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('activeRunPointerPath nests the pointer under a host segment', () => {
+  const root = mkTempRoot();
+  const prev = process.env.KRYLO_DATA_ROOT;
+  process.env.KRYLO_DATA_ROOT = root;
+  try {
+    const rootHash = 'a'.repeat(64);
+    const pointerPath = activeRunPointerPath(rootHash, 'claude', 'session-1');
+    assert.equal(pointerPath, path.join(root, 'active-runs', rootHash, 'claude', 'session-1.json'));
+
+    const hostDir = activeRunsHostDir(rootHash, 'claude');
+    assert.equal(hostDir, path.join(root, 'active-runs', rootHash, 'claude'));
+  } finally {
+    if (prev === undefined) delete process.env.KRYLO_DATA_ROOT;
+    else process.env.KRYLO_DATA_ROOT = prev;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('activeRunPointerPath and activeRunsHostDir refuse an unsupported host name', () => {
+  const root = mkTempRoot();
+  const prev = process.env.KRYLO_DATA_ROOT;
+  process.env.KRYLO_DATA_ROOT = root;
+  try {
+    const rootHash = 'a'.repeat(64);
+    assert.throws(() => activeRunPointerPath(rootHash, 'not-a-real-host', 'session-1'));
+    assert.throws(() => activeRunsHostDir(rootHash, 'not-a-real-host'));
+  } finally {
+    if (prev === undefined) delete process.env.KRYLO_DATA_ROOT;
+    else process.env.KRYLO_DATA_ROOT = prev;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('legacyActiveRunPointerPath has no host segment (the pre-0.2.0 flat layout)', () => {
+  const root = mkTempRoot();
+  const prev = process.env.KRYLO_DATA_ROOT;
+  process.env.KRYLO_DATA_ROOT = root;
+  try {
+    const rootHash = 'a'.repeat(64);
+    const legacyPath = legacyActiveRunPointerPath(rootHash, 'session-1');
+    assert.equal(legacyPath, path.join(root, 'active-runs', rootHash, 'session-1.json'));
+  } finally {
+    if (prev === undefined) delete process.env.KRYLO_DATA_ROOT;
+    else process.env.KRYLO_DATA_ROOT = prev;
     fs.rmSync(root, { recursive: true, force: true });
   }
 });

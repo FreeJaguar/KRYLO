@@ -25,6 +25,23 @@ flowchart TD
 
 ## Component boundaries
 
+### Shared Core, Claude Host, and Codex Host
+
+KRYLO has one Shared Core and thin host-specific adapters (`docs/adr/0023-multi-host-product-and-shared-core.md`).
+
+Shared Core owns:
+
+- Run state, Orbit, evidence, completion, approvals, tool governance, data-egress policy, telemetry/privacy, external-adapter policy, and logical agent roles.
+- The host-neutral `HostIdentity` and `HostContext` contracts: host name, host session identifier, optional host turn identifier, and project/plugin/data roots. Every host adapter normalizes its own inputs into this shape before calling Shared Core; Shared Core never reads a host-specific environment variable or Hook payload field directly.
+- The KRYLO-owned `runId`: the persisted run identity referenced by state, delegation, evidence, and approvals. A host session identifier is metadata attached to a run, not the run identity itself.
+
+Host adapters own invocation syntax, host-specific Hook input/output translation (the Hook transport), host session metadata, host agent configuration, model mapping, packaging, and setup mechanics.
+
+- **Claude Host** (implemented and released): the public Claude Code plugin described below.
+- **Codex Host** (implemented, not yet released): a real Codex CLI plugin package (`plugins/krylo/.codex-plugin/plugin.json`), an explicit-only `krylo-run` Skill, and a Codex-specific Hook transport (`scripts/host/codex/`) built on the same Shared Core, per `docs/adr/0029-codex-host-packaging-and-approval-boundary.md` and `docs/process/CODEX_HOST_IMPLEMENTATION_PLAN.md`. Because current official Codex `PreToolUse` output does not support the native `ask` decision Claude uses (ADR-0027), a `require-approval` classification denies deterministically on Codex instead of prompting -- see `docs/codex-capability-matrix.md` for the full, host-by-host capability comparison and every documented fallback. Full VS Code (project-scoped hook) enforcement setup remains a disclosed follow-up, not yet implemented.
+- **Cross-Harness** (implemented): a host-neutral coordinator (`scripts/lib/cross-harness.mjs`) plus two thin provider adapters (`scripts/host/cross-harness/{claude,codex}-worker.mjs`) let a run on one native host spawn the OPPOSITE provider's own CLI as an optional, read-only, depth-1, advisory-only worker, per `docs/adr/0030-cross-harness-advisory-workers.md`. The native host remains the sole writer and sole authority over completion; a worker's result is advisory evidence only. Reuses the existing risk/approval, evidence, and telemetry contracts unchanged -- no second policy or state subsystem.
+- **Ecosystem Maintenance** (implemented): a standalone, read-only drift checker (`scripts/maintenance/check-ecosystem.mjs` plus six category modules) detects whether KRYLO's own pinned Claude Code/Codex versions, GitHub Action SHA pins, Node.js support, npm dependencies, or internal version references have drifted from official upstream sources or from each other, per `docs/adr/0031-ecosystem-maintenance-drift-checker.md`. It is not part of a KRYLO run (no `HostIdentity`, no `state.json`, not risk-gated) and never edits a repository file, commits, or performs any remediation -- a detected drift is evidence for a later, separate, human-approved change, never an authorization to act.
+
 ### Plugin interface
 
 Owns:
@@ -43,7 +60,7 @@ Does not own:
 - External service accounts.
 - Third-party plugin lifecycle.
 
-### Runtime core
+### Runtime core (Shared Core)
 
 Owns:
 
@@ -56,7 +73,7 @@ Owns:
 - Local telemetry aggregation.
 - Redaction and retention.
 
-Runtime state must be written under `${CLAUDE_PLUGIN_DATA}` or an equivalent persistent plugin data directory, never inside `${CLAUDE_PLUGIN_ROOT}` and never in the application repository by default.
+Runtime state must be written under a KRYLO-owned, host-provided persistent data root that the active host adapter resolves (`${CLAUDE_PLUGIN_DATA}` on the Claude Host), never inside the plugin/installation root and never in the application repository by default.
 
 ### Repository instruction boundary
 

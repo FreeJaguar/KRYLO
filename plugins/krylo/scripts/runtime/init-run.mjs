@@ -10,6 +10,7 @@ import { spawnSync } from 'node:child_process';
 import { getDataRoot } from '../lib/paths.mjs';
 import { createInitialState, saveState, writeActiveRunPointer } from '../lib/state.mjs';
 import { redactText } from '../lib/redact.mjs';
+import { bootstrapRuntimeEnvironment } from '../lib/host-dispatch.mjs';
 
 const RISK_BUDGETS = { low: 3, medium: 5, high: 7 };
 const HARD_MAX_BUDGET = 10;
@@ -32,7 +33,7 @@ function parseArgs(argv) {
 
 function computeBudget(risk) {
   let budget = RISK_BUDGETS[risk] ?? RISK_BUDGETS.medium;
-  const cap = process.env.CLAUDE_PLUGIN_OPTION_MAX_ORBIT_CYCLES;
+  const cap = process.env.KRYLO_MAX_ORBIT_CYCLES;
   if (cap !== undefined) {
     const n = Number(cap);
     if (Number.isInteger(n) && n >= 1 && n <= 10) {
@@ -71,14 +72,24 @@ function main() {
   const lane = args.lane || 'BUILD';
   const risk = args.risk || 'medium';
   const complexity = args.complexity;
-  const budget = computeBudget(risk);
   const projectDir = path.resolve(args.projectDir);
+
+  // Detects the active host (Claude or Codex) and normalizes its
+  // session/plugin-root/data-root/option fields into the host-neutral
+  // identity and KRYLO_* runtime env vars before any budget/state/pointer
+  // logic reads them.
+  const hostIdentity = bootstrapRuntimeEnvironment({
+    explicitSessionId: args.session,
+    projectRoot: projectDir,
+  });
+
+  const budget = computeBudget(risk);
   const git = detectGit(projectDir);
   const runId = `run-${crypto.randomBytes(6).toString('hex')}`;
 
   const state = createInitialState({
     goalText: args.goal,
-    sessionId: args.session,
+    hostIdentity,
     projectDir,
     lane,
     risk,
@@ -96,7 +107,12 @@ function main() {
     return;
   }
 
-  writeActiveRunPointer({ runId, projectRootHash: state.project.rootHash, sessionId: args.session });
+  writeActiveRunPointer({
+    runId,
+    projectRootHash: state.project.rootHash,
+    host: hostIdentity.host,
+    hostSessionId: hostIdentity.hostSessionId,
+  });
 
   const statePath = path.join(getDataRoot(), 'runs', runId, 'state.json');
   console.log(JSON.stringify({

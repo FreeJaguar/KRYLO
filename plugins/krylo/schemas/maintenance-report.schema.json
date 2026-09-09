@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://krylo.dev/schemas/maintenance-report.schema.json",
+  "title": "KRYLO Ecosystem Maintenance report",
+  "description": "Cross-checked reference for scripts/lib/maintenance-schema.mjs's hand-written builder/validator (ADR-0017 convention: this file is not itself the runtime validator).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "generatedAt", "repositoryVersion", "mode", "status", "checks"],
+  "properties": {
+    "schemaVersion": { "type": "string", "pattern": "^\\d+\\.\\d+\\.\\d+$" },
+    "generatedAt": { "type": "string", "format": "date-time" },
+    "repositoryVersion": { "type": "string", "maxLength": 40 },
+    "mode": { "type": "string", "enum": ["offline", "live"] },
+    "status": { "type": "string", "enum": ["ok", "attention-required", "blocked"] },
+    "checks": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/check" }
+    }
+  },
+  "definitions": {
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "category", "status", "severity", "evidence", "recommendedAction", "requiresHumanReview"],
+      "properties": {
+        "id": { "type": "string", "maxLength": 120 },
+        "category": {
+          "type": "string",
+          "enum": ["claude-compat", "codex-compat", "actions-pins", "node-runtime", "dependencies", "internal-drift"]
+        },
+        "status": { "type": "string", "enum": ["ok", "changed", "warning", "blocked", "unavailable"] },
+        "severity": { "type": "string", "enum": ["info", "low", "medium", "high", "critical"] },
+        "current": { "type": ["string", "null"], "maxLength": 200 },
+        "observed": { "type": ["string", "null"], "maxLength": 200 },
+        "evidence": {
+          "type": "array",
+          "maxItems": 5,
+          "items": { "type": "string", "maxLength": 300 }
+        },
+        "recommendedAction": { "type": "string", "maxLength": 300 },
+        "requiresHumanReview": { "type": "boolean" }
+      }
+    }
+  }
+}

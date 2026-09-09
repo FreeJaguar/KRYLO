@@ -12,6 +12,7 @@ import {
   clearActiveRunPointerForState,
   completionEval,
   computeProjectRootHash,
+  applyApprovalResolution,
   ENUMS,
   validateEvidence,
 } from '../lib/state.mjs';
@@ -20,18 +21,7 @@ import { fingerprintText } from '../lib/action-fingerprint.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { withFileLock } from '../lib/lock.mjs';
 import { runLockPath } from '../lib/paths.mjs';
-
-// How long an approved (but not yet consumed) risk approval remains usable.
-// Long enough for the model to retry the approved action within the same
-// working session; short enough that an approval granted for one task
-// cannot linger and silently authorize an unrelated later action.
-const APPROVAL_TTL_MS = 15 * 60 * 1000;
-
-function resolveSessionId(explicit) {
-  if (typeof explicit === 'string' && explicit.trim() !== '') return explicit;
-  const env = process.env.CLAUDE_SESSION_ID;
-  return typeof env === 'string' && env.trim() !== '' ? env : undefined;
-}
+import { bootstrapStorageEnvironment, resolveSessionId, detectHost } from '../lib/host-dispatch.mjs';
 
 function nowIso() {
   return new Date().toISOString();
@@ -94,6 +84,9 @@ function parseArgv(argv) {
         break;
       case '--register-agent':
         ops.push({ op: 'register-agent', value: argv[++i] });
+        break;
+      case '--mark-external-worker':
+        ops.push({ op: 'mark-external-worker' });
         break;
       case '--agent-status':
         ops.push({ op: 'agent-status', value: argv[++i] });
@@ -246,6 +239,17 @@ function applyOp(state, op) {
       return {};
     }
 
+    case 'mark-external-worker': {
+      // Audit bookkeeping only (docs/adr/0030-cross-harness-advisory-workers.md):
+      // this run used a Cross-Harness worker at some point. Never touches
+      // delegation.depth -- a KRYLO run is always directly user-invoked and
+      // stays depth 0 for its whole lifetime; a worker never gets its own
+      // persisted run state to be "reached via delegation" into in the
+      // first place.
+      state.delegation = { ...state.delegation, externalWorker: true };
+      return {};
+    }
+
     case 'agent-status': {
       const [id, status] = String(op.value ?? '').split('=');
       if (!ENUMS.agentStatus.includes(status)) return { error: 'invalid-agent-status' };
@@ -340,7 +344,7 @@ function applyOp(state, op) {
     case 'request-approval': {
       if (!ENUMS.actionClass.includes(op.actionClass)) return { error: 'invalid-action-class' };
       const id = nextNumericId(state.riskApprovals, 'ra');
-      const environment = process.env.CLAUDE_PLUGIN_OPTION_SECURITY_PROFILE || null;
+      const environment = process.env.KRYLO_SECURITY_PROFILE || null;
       // Only `summary`/`target` are free text a caller could embed a secret
       // in; the rest are structural identifiers (a 64-hex project hash would
       // itself be mistaken for an opaque token and mangled by deepRedact).
@@ -368,17 +372,18 @@ function applyOp(state, op) {
     }
 
     case 'resolve-approval': {
+      // This CLI is model-accessible (any Bash call can invoke it), so it
+      // must never be able to turn its own pending request into an approved
+      // human authorization. Denial (the model backing off its own request)
+      // is harmless and remains allowed here. Nothing in the codebase grants
+      // `approved` any more (docs/adr/0025-native-permission-approval.md):
+      // for the Bash tool, authorization now happens live through Claude
+      // Code's own native permission prompt, not through this record.
       const [id, status] = String(op.value ?? '').split('=');
-      if (!['approved', 'denied'].includes(status)) return { error: 'invalid-approval-status' };
-      const approval = state.riskApprovals.find((a) => a.id === id);
-      if (!approval) return { error: 'approval-not-found' };
-      approval.status = status;
-      approval.resolvedAt = nowIso();
-      // The expiry clock starts at approval, not at request: a request that
-      // sits unreviewed for a while must not burn down its usable window.
-      if (status === 'approved') {
-        approval.expiresAt = new Date(Date.now() + APPROVAL_TTL_MS).toISOString();
-      }
+      if (status === 'approved') return { error: 'model-approval-forbidden' };
+      if (status !== 'denied') return { error: 'invalid-approval-status' };
+      const result = applyApprovalResolution(state, id, status);
+      if (result.error) return { error: result.error };
       return {};
     }
 
@@ -430,7 +435,12 @@ function applyOp(state, op) {
         ITERATION_LIMIT_REACHED: 'ITERATION_LIMIT',
       };
       state.phase = phaseByTerminal[op.value] || state.phase;
-      clearActiveRunPointerForState(state);
+      // The active-run pointer is cleared in loadApplySave(), after a
+      // confirmed successful save -- not here. Clearing it before the save
+      // is even attempted would leave a run with no persisted terminal
+      // state (if the save then failed) invisible to resolveActiveRun(),
+      // silently disabling every KRYLO gate for the rest of the session
+      // while state.json still says the run is active.
       return {};
     }
 
@@ -464,7 +474,12 @@ function loadApplySave(runId, ops) {
     }
 
     const saveResult = saveState(state);
-    if (!saveResult.ok) return { ok: false, error: 'invalid-state', details: saveResult.errors };
+    if (!saveResult.ok) return { ok: false, error: saveResult.error, details: saveResult.errors ?? saveResult.details };
+
+    // Only now, after a confirmed successful save, clear the pointer for a
+    // run that just reached a terminal state (see applyOp()'s 'terminal'
+    // case for why this must not happen any earlier).
+    if (state.terminalState !== null) clearActiveRunPointerForState(state);
 
     return { ok: true, applied };
   });
@@ -473,11 +488,18 @@ function loadApplySave(runId, ops) {
 function main() {
   const { runId: explicitRunId, session, projectDir, ops } = parseArgv(process.argv.slice(2));
 
+  // The data root must be bootstrapped before any state/pointer access, even
+  // when a session id is not (yet) known: --run bypasses pointer lookup
+  // entirely, but still needs the correct KRYLO_DATA_ROOT resolved from the
+  // Claude-specific env vars (and KRYLO_SECURITY_PROFILE mapped from the
+  // current userConfig option, read by the request-approval op above).
+  bootstrapStorageEnvironment();
+
   let runId = explicitRunId;
   if (!runId) {
     const projectRootHash = computeProjectRootHash(path.resolve(projectDir || process.cwd()));
-    const sessionId = resolveSessionId(session);
-    const pointer = readActiveRunPointer({ projectRootHash, sessionId });
+    const hostSessionId = resolveSessionId({ explicitSessionId: session }) || undefined;
+    const pointer = readActiveRunPointer({ projectRootHash, host: detectHost(), hostSessionId });
     if (!pointer.ok || !pointer.value || !pointer.value.runId) {
       fail('no-current-run');
       return;

@@ -60,6 +60,50 @@ test('masks credentials embedded in URLs', () => {
   assert.ok(out.includes('postgres://[REDACTED]@db.example.com'));
 });
 
+// Regression: Cross-Harness's context-packet builder (a genuinely new,
+// larger-input caller of redactText/deepRedact) reproduced a real ~50s hang
+// feeding this function a 300,000-char string with no "://" anywhere in
+// it -- maskUrlCredentials' unbounded scheme-prefix quantifier
+// ([a-zA-Z0-9+.-]*) backtracked O(n) times at each of O(n) starting
+// positions (true O(n^2) on adversarial input, not hypothetical). Fixed
+// with a cheap "does the string even contain ://" pre-check plus a bounded
+// scheme-prefix length as defense in depth.
+test('does not hang on a long string with no URL-credential shape at all (ReDoS regression)', () => {
+  const adversarial = 'x'.repeat(300_000);
+  const t0 = Date.now();
+  const out = redactText(adversarial);
+  const elapsedMs = Date.now() - t0;
+  assert.ok(elapsedMs < 2000, `redactText took ${elapsedMs}ms on adversarial input, expected well under 2000ms`);
+  assert.equal(out, '[REDACTED]', 'the long uniform run is still masked by the long-opaque-run rule, unaffected by the URL-credential fix');
+});
+
+test('a crafted string containing "://" far from a long non-matching run still runs quickly and masks correctly', () => {
+  const adversarial = `${'y'.repeat(200_000)} https://user:pass@example.com/path ${'z'.repeat(200_000)}`;
+  const t0 = Date.now();
+  const out = redactText(adversarial);
+  const elapsedMs = Date.now() - t0;
+  assert.ok(elapsedMs < 2000, `redactText took ${elapsedMs}ms, expected well under 2000ms`);
+  assert.ok(out.includes('https://[REDACTED]@example.com/path'));
+});
+
+// Regression: a fresh independent Security Reviewer's report prompted
+// discovery of a real RangeError ("Maximum call stack size exceeded")
+// thrown when redacting a single very long (multi-megabyte) unbroken
+// token-like run -- distinct from the maskUrlCredentials ReDoS above, and
+// not tied to any one specific masking pass. redactText must never throw;
+// oversized input is masked outright via MAX_REDACT_INPUT_LENGTH instead.
+test('does not throw a RangeError on a very large single-token input, and masks it outright', () => {
+  const huge = 'a'.repeat(9_000_000);
+  const out = redactText(huge);
+  assert.equal(out, '[REDACTED]', 'oversized input is masked outright rather than processed');
+});
+
+test('deepRedact does not throw when a nested string value is oversized', () => {
+  const out = deepRedact({ note: 'ok', blob: 'a'.repeat(9_000_000) });
+  assert.equal(out.note, 'ok');
+  assert.equal(out.blob, '[REDACTED]');
+});
+
 test('masks long hex and base64 runs', () => {
   const hex = 'a'.repeat(40);
   const out = redactText(`hash: ${hex}`);

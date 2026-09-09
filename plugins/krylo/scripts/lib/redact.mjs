@@ -28,10 +28,27 @@ function maskBearer(s) {
 }
 
 function maskUrlCredentials(s) {
+  // Cheap linear pre-check: without a literal "://" anywhere, the regex
+  // below can never match, so skip it entirely -- this is the overwhelming
+  // common case for ordinary source/diff content. Found necessary after
+  // Cross-Harness's context-packet builder (a genuinely new, larger-input
+  // caller of this function) reproduced a real ~50s hang on a 300,000-char
+  // string with no "://" in it at all: the unbounded `[a-zA-Z0-9+.-]*`
+  // scheme-prefix quantifier greedily consumes the whole remaining run at
+  // every one of the string's O(n) starting positions, then backtracks
+  // character-by-character (another O(n)) looking for the literal "://"
+  // that never appears -- true O(n^2) behavior on adversarial input, not
+  // hypothetical.
+  if (!s.includes('://')) return s;
+  // Bounding the scheme prefix (no real URL scheme is anywhere near this
+  // long) caps the backtracking work per starting position at a constant,
+  // closing the O(n^2) blowup even for a crafted input that DOES contain
+  // "://" somewhere far from a long non-matching run -- defense in depth
+  // alongside the early-exit above, not a substitute for it.
   // Greedy password segment backtracks to the LAST @, so passwords that
   // themselves contain @ are fully masked.
   return s.replace(
-    /([a-zA-Z][a-zA-Z0-9+.-]*):\/\/[^/\s:@]+:[^/\s]*@/g,
+    /([a-zA-Z][a-zA-Z0-9+.-]{0,31}):\/\/[^/\s:@]+:[^/\s]*@/g,
     (_m, scheme) => `${scheme}://${MASK}@`,
   );
 }
@@ -71,12 +88,38 @@ function maskLongOpaqueRuns(s) {
     .replace(/\b[A-Za-z0-9+/]{32,}={0,2}\b/g, MASK);
 }
 
+// A fresh independent Security Reviewer found a real RangeError ("Maximum
+// call stack size exceeded") thrown when redacting a single very long
+// (multi-megabyte) unbroken token-like run -- distinct from the
+// maskUrlCredentials catastrophic-backtracking ReDoS already fixed
+// elsewhere in this file, and not fully root-caused given time
+// constraints. Bounding the length any single masking pass is asked to
+// process is a safe, general guard regardless of which specific regex
+// pattern is responsible: content beyond this bound is masked outright
+// rather than risk any V8 regex engine's internal limit on a future input
+// shape not yet identified. No legitimate secret-scanning need ever
+// requires examining a single 5MB+ blob character-by-character for token
+// shapes that are, by definition, short.
+const MAX_REDACT_INPUT_LENGTH = 2_000_000;
+
 /**
  * Redact secrets, tokens, credentials, and home-directory paths from a string.
- * Non-string input is returned unchanged.
+ * Non-string input is returned unchanged. Never throws -- this function's
+ * own contract (relied on throughout state/telemetry/Cross-Harness) is to
+ * always return a safe string, never propagate an internal regex-engine
+ * failure to the caller.
  */
 export function redactText(input) {
   if (typeof input !== 'string') return input;
+  if (input.length > MAX_REDACT_INPUT_LENGTH) return MASK;
+  try {
+    return redactTextUnbounded(input);
+  } catch {
+    return MASK;
+  }
+}
+
+function redactTextUnbounded(input) {
   let out = input;
   out = maskPem(out);
   out = maskGithubTokens(out);

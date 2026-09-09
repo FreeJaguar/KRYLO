@@ -25,7 +25,13 @@ export function runCli(scriptRelPath, args, dataDir) {
   const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath), ...args], {
     encoding: 'utf8',
     cwd: dataDir,
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir },
+    // Both are set deliberately: CLAUDE_PLUGIN_DATA is what the Claude host
+    // adapter bootstrap reads (and, once bootstrapped, KRYLO_DATA_ROOT is
+    // derived from it and overwritten to the SAME dataDir); KRYLO_DATA_ROOT
+    // is also set directly so an entrypoint that has not yet been wired to
+    // the Claude adapter still resolves to this isolated temp dir instead of
+    // falling back to a real, non-isolated data root.
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, KRYLO_DATA_ROOT: dataDir },
   });
   let json;
   try {
@@ -36,13 +42,24 @@ export function runCli(scriptRelPath, args, dataDir) {
   return { status: res.status, stdout: res.stdout, stderr: res.stderr, json };
 }
 
-/** Pipe a hook payload into a hook script. Returns status/stdout/parsed JSON. */
+/**
+ * Pipe a hook payload into a hook script. Returns status/stdout/parsed JSON.
+ *
+ * CLAUDE_SESSION_ID defaults to 'hook-session' so a fixture payload that
+ * (like real Claude PreToolUse/Stop/PostToolUse payloads normally do not)
+ * omits `session_id` still normalizes to the same host session that
+ * createActiveRun() below always registers via `--session hook-session`.
+ * Pass `env: { CLAUDE_SESSION_ID: ... }` (or unset it) to exercise a
+ * different or missing session explicitly.
+ */
 export function runHook(scriptRelPath, payload, dataDir, { rawInput, env } = {}) {
   const input = rawInput !== undefined ? rawInput : JSON.stringify(payload);
   const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath)], {
     encoding: 'utf8',
     input,
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, ...env },
+    // See runCli() above for why CLAUDE_PLUGIN_DATA/KRYLO_DATA_ROOT are both
+    // set to the same isolated temp dataDir.
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, KRYLO_DATA_ROOT: dataDir, CLAUDE_SESSION_ID: 'hook-session', ...env },
   });
   let json = null;
   try {
@@ -67,6 +84,142 @@ export function createActiveRun(dataDir, { projectDir = dataDir, goal = 'hook fi
   ], dataDir);
   if (res.status !== 0 || !res.json?.ok) {
     throw new Error(`fixture init-run failed: ${res.stdout} ${res.stderr}`);
+  }
+  return {
+    runId: res.json.runId,
+    statePath: path.join(dataDir, 'runs', res.json.runId, 'state.json'),
+  };
+}
+
+/**
+ * Claude-only variants of runCli()/runHook()/createActiveRun() for the
+ * multi-host-foundation regression requirement (docs/process/
+ * MULTI_HOST_FOUNDATION_IMPLEMENTATION_PLAN.md, Task 8, Step 1): set ONLY
+ * CLAUDE_PLUGIN_DATA (never KRYLO_DATA_ROOT, explicitly deleted even if
+ * inherited from the outer shell) so every write/read genuinely exercises
+ * the Claude host adapter's own CLAUDE_PLUGIN_DATA -> KRYLO_DATA_ROOT
+ * bootstrap instead of a directly-set host-neutral override.
+ */
+function claudeOnlyEnv(dataDir, extra = {}) {
+  const env = { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, ...extra };
+  delete env.KRYLO_DATA_ROOT;
+  return env;
+}
+
+export function runCliClaudeOnly(scriptRelPath, args, dataDir) {
+  const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath), ...args], {
+    encoding: 'utf8',
+    cwd: dataDir,
+    env: claudeOnlyEnv(dataDir),
+  });
+  let json;
+  try {
+    json = JSON.parse(res.stdout.trim());
+  } catch {
+    json = null;
+  }
+  return { status: res.status, stdout: res.stdout, stderr: res.stderr, json };
+}
+
+export function runHookClaudeOnly(scriptRelPath, payload, dataDir, { rawInput, env } = {}) {
+  const input = rawInput !== undefined ? rawInput : JSON.stringify(payload);
+  const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath)], {
+    encoding: 'utf8',
+    input,
+    env: claudeOnlyEnv(dataDir, { CLAUDE_SESSION_ID: 'hook-session', ...env }),
+  });
+  let json = null;
+  try {
+    json = JSON.parse(res.stdout.trim());
+  } catch {
+    json = null;
+  }
+  return { status: res.status, stdout: res.stdout, stderr: res.stderr, json };
+}
+
+export function createActiveRunClaudeOnly(dataDir, { projectDir = dataDir, goal = 'hook fixture run', lane = 'PATCH', risk = 'low' } = {}) {
+  const res = runCliClaudeOnly('runtime/init-run.mjs', [
+    '--goal', goal,
+    '--session', 'hook-session',
+    '--project-dir', projectDir,
+    '--lane', lane,
+    '--risk', risk,
+  ], dataDir);
+  if (res.status !== 0 || !res.json?.ok) {
+    throw new Error(`fixture init-run (Claude-only env) failed: ${res.stdout} ${res.stderr}`);
+  }
+  return {
+    runId: res.json.runId,
+    statePath: path.join(dataDir, 'runs', res.json.runId, 'state.json'),
+  };
+}
+
+/**
+ * Codex-only variants of runCli()/runHook()/createActiveRun(): set ONLY
+ * PLUGIN_DATA and PLUGIN_ROOT (never KRYLO_DATA_ROOT, never a
+ * CLAUDE_SESSION_ID-style env fallback for Claude) plus KRYLO_HOST=codex so
+ * host-dispatch.mjs's detection is exercised the same way a real Codex
+ * plugin invocation would set it, and every write/read genuinely exercises
+ * the Codex host adapter's own PLUGIN_DATA -> KRYLO_DATA_ROOT bootstrap
+ * instead of a directly-set host-neutral override. Any CODEX_THREAD_ID
+ * inherited from the real outer shell is stripped BEFORE `extra` is
+ * applied, so a test that does not care about it never accidentally
+ * exercises resolveCodexSessionId()'s CODEX_THREAD_ID fallback via ambient
+ * process.env leakage, while a test that explicitly wants to exercise that
+ * fallback can still pass `{ env: { CODEX_THREAD_ID: '...' } }` and have it
+ * take effect.
+ */
+function codexOnlyEnv(dataDir, extra = {}) {
+  const env = { ...process.env, PLUGIN_DATA: dataDir, PLUGIN_ROOT: dataDir, KRYLO_HOST: 'codex' };
+  delete env.KRYLO_DATA_ROOT;
+  delete env.CLAUDE_PLUGIN_DATA;
+  delete env.CLAUDE_PLUGIN_ROOT;
+  delete env.CLAUDE_SESSION_ID;
+  delete env.CODEX_THREAD_ID;
+  return { ...env, ...extra };
+}
+
+export function runCliCodexOnly(scriptRelPath, args, dataDir, { env } = {}) {
+  const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath), ...args], {
+    encoding: 'utf8',
+    cwd: dataDir,
+    env: codexOnlyEnv(dataDir, env),
+  });
+  let json;
+  try {
+    json = JSON.parse(res.stdout.trim());
+  } catch {
+    json = null;
+  }
+  return { status: res.status, stdout: res.stdout, stderr: res.stderr, json };
+}
+
+export function runHookCodexOnly(scriptRelPath, payload, dataDir, { rawInput, env } = {}) {
+  const input = rawInput !== undefined ? rawInput : JSON.stringify(payload);
+  const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath)], {
+    encoding: 'utf8',
+    input,
+    env: codexOnlyEnv(dataDir, env),
+  });
+  let json = null;
+  try {
+    json = JSON.parse(res.stdout.trim());
+  } catch {
+    json = null;
+  }
+  return { status: res.status, stdout: res.stdout, stderr: res.stderr, json };
+}
+
+export function createActiveRunCodexOnly(dataDir, { projectDir = dataDir, goal = 'codex hook fixture run', lane = 'PATCH', risk = 'low' } = {}) {
+  const res = runCliCodexOnly('runtime/init-run.mjs', [
+    '--goal', goal,
+    '--session', 'codex-hook-session',
+    '--project-dir', projectDir,
+    '--lane', lane,
+    '--risk', risk,
+  ], dataDir);
+  if (res.status !== 0 || !res.json?.ok) {
+    throw new Error(`fixture init-run (Codex-only env) failed: ${res.stdout} ${res.stderr}`);
   }
   return {
     runId: res.json.runId,

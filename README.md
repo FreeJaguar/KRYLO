@@ -6,11 +6,11 @@
 [![secret-scan](https://github.com/FreeJaguar/KRYLO/actions/workflows/secret-scan.yml/badge.svg?branch=main)](https://github.com/FreeJaguar/KRYLO/actions/workflows/secret-scan.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
-KRYLO is a public Claude Code plugin and marketplace for autonomous, evidence-driven software development. One explicit command turns a task into a controlled run: acceptance criteria, a minimal agent team, deterministic verification, independent review, a bounded correction loop (Orbit), and an evidence-backed final report.
+KRYLO is an autonomous, evidence-driven software-development workflow, built on one Shared Core with two first-class hosts: the Claude Code plugin, and an OpenAI Codex CLI plugin. One explicit command turns a task into a controlled run: acceptance criteria, a minimal agent team, deterministic verification, independent review, a bounded correction loop (Orbit), and an evidence-backed final report.
 
-Current release: `0.1.1`. Not yet submitted to the official Claude Code marketplace; install directly from this repository (below).
+Current release: `0.2.0`. Not yet submitted to the official Claude Code marketplace; install directly from this repository (below). The Claude Code host is released; the Codex host is implemented and shipped in this repository but not yet published through any Codex distribution mechanism (Codex's own CLI has no `plugin install` subcommand on the currently tested build -- see "Codex" below for the real, current install path).
 
-## Installation
+## Installation (Claude Code)
 
 ```bash
 claude plugin marketplace add FreeJaguar/KRYLO
@@ -34,6 +34,19 @@ claude plugin update krylo@krylo-marketplace
 claude plugin uninstall krylo@krylo-marketplace
 ```
 
+## Installation (Codex)
+
+KRYLO's Codex host reuses the same Shared Core as the Claude plugin (`docs/adr/0029-codex-host-packaging-and-approval-boundary.md`). The Codex CLI's own `codex plugin` management subcommand does not exist on the currently tested build (`codex-cli 0.120.0`), so installation currently goes through KRYLO's own setup script from a clone of this repository, not a Codex-native package manager:
+
+```bash
+git clone https://github.com/FreeJaguar/KRYLO
+cd KRYLO
+node plugins/krylo/scripts/setup/install-codex.mjs          # dry run -- shows what would happen, changes nothing
+node plugins/krylo/scripts/setup/install-codex.mjs --apply  # installs the $krylo-run Skill (opt-in, explicit invocation only)
+```
+
+This installs the `krylo-run` Skill so `$krylo-run <task>` is discoverable; it does not on its own add project-scoped Hook enforcement (the Codex IDE extension does not support plugins at all, and full enforcement requires a separate, explicit trusted-rules setup step -- see `docs/codex-capability-matrix.md`). Until that additional step is completed, treat a Codex `$krylo-run` session as read-only/diagnostic rather than a fully enforced autonomous run. Uninstall by removing the installed Skill directory the script reports.
+
 ### Rollback
 
 The CLI installs the marketplace's current version; there is no version-pinned install flag. To roll back to a previous release:
@@ -50,52 +63,70 @@ Uninstalling never deletes KRYLO's own run/telemetry data; see `RELEASE_READINES
 
 ## Quick example
 
+Claude Code:
+
 ```text
 /krylo:run Add a rate limiter to the /api/upload endpoint, with tests
 ```
 
-KRYLO reads the repository, classifies the task (lane, risk, complexity), compiles observable acceptance criteria, implements with the smallest effective agent team, runs deterministic verification, gets an independent review, and stops in an explicit terminal state (e.g. `VERIFIED_COMPLETE` with evidence, or `RISK_APPROVAL_REQUIRED` if the task turns out to need a production/destructive/external-write action). Use `/krylo:status` any time to see the current run's criteria, evidence, and Orbit budget without interrupting it.
+Codex:
+
+```text
+$krylo-run Add a rate limiter to the /api/upload endpoint, with tests
+```
+
+KRYLO reads the repository, classifies the task (lane, risk, complexity), compiles observable acceptance criteria, implements with the smallest effective agent team, runs deterministic verification, gets an independent review, and stops in an explicit terminal state (e.g. `VERIFIED_COMPLETE` with evidence, or `RISK_APPROVAL_REQUIRED` if the task turns out to need a production/destructive/external-write action). Use `/krylo:status` (Claude) any time to see the current run's criteria, evidence, and Orbit budget without interrupting it.
 
 ## Commands
 
-| Command | Purpose |
-|---|---|
-| `/krylo:run <task>` | Execute the autonomous development workflow |
-| `/krylo:setup` | Validate the environment; optionally install the personal `/krylo` alias or status-line wrapper (dry run + backup first) |
-| `/krylo:doctor` | Read-only health, compatibility, and conflict diagnostics |
-| `/krylo:audit-tool <name-or-path>` | Read-only trust and security review of a tool, plugin, or path |
-| `/krylo:status` | Read-only view of the current or most recent run |
+| Command | Host | Purpose |
+|---|---|---|
+| `/krylo:run <task>` | Claude | Execute the autonomous development workflow |
+| `$krylo-run <task>` | Codex | Execute the autonomous development workflow |
+| `/krylo:setup` | Claude | Validate the environment; optionally install the personal `/krylo` alias or status-line wrapper (dry run + backup first) |
+| `/krylo:doctor` | Claude | Read-only health, compatibility, and conflict diagnostics |
+| `/krylo:audit-tool <name-or-path>` | Claude | Read-only trust and security review of a tool, plugin, or path |
+| `/krylo:status` | Claude | Read-only view of the current or most recent run |
 
-An optional setup step may install a personal wrapper so `/krylo <task>` works as a shortcut. The wrapper is convenience only; the namespaced command always works without it, and setup never overwrites a personal `krylo` skill it does not own.
+An optional setup step may install a personal wrapper so `/krylo <task>` works as a shortcut on Claude. The wrapper is convenience only; the namespaced command always works without it, and setup never overwrites a personal `krylo` skill it does not own.
 
 ## Core guarantees
 
-- One explicit entry point; no default-agent takeover of ordinary Claude Code sessions.
+- One explicit entry point per host; no default-agent takeover of ordinary Claude Code or Codex sessions.
+- One Shared Core, thin host-specific adapters -- Claude and Codex share the same run state, Orbit loop, risk policy, and completion rules (`docs/adr/0023-multi-host-product-and-shared-core.md`).
 - No required third-party integration in KRYLO Core.
 - Bounded, evidence-driven Orbit iteration instead of an unbounded prompt loop.
 - The smallest effective agent team; one source-code writer per worktree.
 - Local-only operational telemetry; no raw prompts, commands, source code, or secrets are persisted.
 - Read-only external access by default; optional tools are detected and policy-gated through adapters.
-- Human approval for production, destructive, financial, release, identity, secret, and external-write actions.
+- Human approval for production, destructive, financial, release, identity, secret, and external-write actions -- on Claude, through the host's own native permission prompt; on Codex, `require-approval` actions deny deterministically instead (no verified in-hook mechanism exists yet to produce the same real human decision on the currently tested Codex build; see `docs/codex-capability-matrix.md`).
+- **Cross-Harness** (optional): a run on one host may request a single, bounded, read-only, advisory review from the *opposite* provider's own CLI (Claude-hosted -> `codex exec`; Codex-hosted -> `claude -p`). The native host always remains the sole writer; a worker's findings are evidence only, never authority over completion (`docs/adr/0030-cross-harness-advisory-workers.md`).
+- **Ecosystem Maintenance** (optional, scheduled): a read-only, official-source-only checker detects drift in KRYLO's own pinned provider versions, GitHub Action pins, and internal version references -- detection only, never automatic remediation (`docs/adr/0031-ecosystem-maintenance-drift-checker.md`).
 - Six explicit terminal states; a model-generated phrase is never sufficient evidence of completion.
 - Windows, macOS, and Linux support.
 
-The Risk Gate is **defense in depth, not an operating-system sandbox**: it is a policy layer over the tool calls Claude Code reports to it, not process/filesystem/network confinement. Pair it with least-privileged credentials and an isolated environment for anything genuinely high-stakes; see [SECURITY.md](SECURITY.md).
+The Risk Gate is **defense in depth, not an operating-system sandbox**: it is a policy layer over the tool calls the host reports to it, not process/filesystem/network confinement. Pair it with least-privileged credentials and an isolated environment for anything genuinely high-stakes; see [SECURITY.md](SECURITY.md).
 
 ## Known limitations
 
+- **Codex `require-approval` denies deterministically instead of prompting.** Current official Codex `PreToolUse` output does not support a native `ask` decision on the currently tested build, so an action KRYLO classifies as requiring human approval is denied outright on Codex rather than pausing for a real human decision the way it does on Claude. This is a documented, capability-driven asymmetry, not an oversight (`docs/codex-capability-matrix.md`).
+- **Codex plugin installation has no native CLI path yet.** `codex plugin` management subcommands are absent on the currently tested build; installation goes through KRYLO's own setup script (see "Installation (Codex)" above), and full Hook enforcement in VS Code additionally requires a separate, not-yet-automated trusted-rules setup step.
+- **Cross-Harness is optional, advisory, and depth-1.** It never gives the opposite-provider worker write access, and its findings can never themselves prove a criterion, resolve an approval, or set run completion. It requires the opposite provider's CLI to be installed and authenticated; when unavailable, KRYLO falls back to native-only verification/review.
+- **Ecosystem Maintenance is detection-only.** It never edits a repository file, updates a dependency/pin automatically, or opens a PR/issue -- a detected drift is evidence for a separate, human-approved change.
 - MCP/external-tool classification (`plugins/krylo/scripts/security/mcp-classifier.mjs`) matches server and operation names against policy patterns; it is not a semantic analysis of what an operation actually does. Unknown MCP servers are always gated for every operation, but a known server's operation whose name does not match any configured write pattern passes through ungated.
 - Risk-approval expiry is a fixed 15 minutes and is not currently user-configurable.
 - The plugin `settings.json` `subagentStatusLine` key is deferred until the minimum supported Claude Code version reaches 2.1.207 or later (`docs/adr/0016-subagent-statusline-deferred.md`); the renderer itself ships and is offered through `/krylo:setup`.
 - Hook-scoping to the `run` skill (`docs/adr/0021-hook-scoping-to-run-skill.md`) relies on documented Claude Code skill-frontmatter behavior; it has been verified against the current official schema and an isolated real-CLI install/uninstall lifecycle, not fuzzed across every CLI patch release.
 - No macOS runner is exercised in CI (the test matrix covers `ubuntu-latest` and `windows-latest`); macOS support relies on portable Node.js and POSIX-path test coverage.
+- GitHub-hosted CI has not run on this exact release candidate until it is actually pushed; every result in `RELEASE_READINESS.md` for this release was produced by local execution.
 
-## Roadmap (v0.2, indicative)
+## Roadmap (beyond 0.2, indicative)
 
-- Plugin `settings.json` with `subagentStatusLine` once the minimum supported CLI reaches 2.1.207+.
+- Full VS Code project-scoped Hook enforcement setup for Codex (dry-run/backup/rollback), completing the standalone-Skill install already shipped.
+- Plugin `settings.json` with `subagentStatusLine` once the minimum supported Claude Code CLI reaches 2.1.207+.
 - User-configurable risk-approval TTL.
 - Broaden MCP operation classification beyond name/pattern matching where the platform exposes richer tool metadata.
-- Official Claude Code marketplace submission, pending community feedback on 0.1.x.
+- Official Claude Code marketplace submission, and an equivalent Codex distribution path once the platform provides one.
 
 ## Repository layout
 

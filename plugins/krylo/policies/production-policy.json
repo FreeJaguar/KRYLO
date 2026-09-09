@@ -1,8 +1,7 @@
 {
-  "$comment": "KRYLO production and destructive-action policy. Consumed by scripts/security/risk-gate.mjs. Patterns are matched against Bash tool commands after whitespace normalization; matching is case-insensitive substring/regex per entry. Markdown intent: SECURITY.md, plugin references/risk-policy.md.",
+  "$comment": "KRYLO production and destructive-action policy. Consumed by scripts/security/risk-policy.mjs's classifyRiskAction(), which always returns { action: 'require-approval', actionClass: <this object's key> } for a match here -- there is no per-class decision field, and none should be added back (a prior 'decision': 'deny' field on every class was removed as dead, misleading metadata: it was never read by the classifier, and every class already ended up 'require-approval' regardless of it). The Hook-level treatment of a require-approval classification (native permissionDecision:'ask' vs deterministic 'deny') is decided in scripts/security/risk-gate.mjs (NATIVE_ASK_ELIGIBLE_TOOLS plus ASK_ELIGIBLE_PERMISSION_MODES; every class here is ask-eligible per docs/adr/0027-restore-native-approval-for-all-require-approval-classes.md, not just a fixed subset), not here. Patterns are matched against Bash and PowerShell tool commands after whitespace normalization; matching is case-insensitive substring/regex per entry. Markdown intent: SECURITY.md, plugin references/risk-policy.md.",
   "approvalClasses": {
     "production-deploy": {
-      "decision": "deny",
       "reason": "Production deployment requires explicit user approval (RISK_APPROVAL_REQUIRED).",
       "patterns": [
         "\\bvercel\\b.*\\b(--prod|deploy)\\b",
@@ -21,7 +20,6 @@
       ]
     },
     "production-data-write": {
-      "decision": "deny",
       "reason": "Production data writes and migrations require explicit user approval.",
       "patterns": [
         "\\bsupabase\\b[^|;&\\n]*?\\bdb\\b[^|;&\\n]*?\\bpush\\b[^|;&\\n]*?--linked",
@@ -30,7 +28,6 @@
       ]
     },
     "destructive-operation": {
-      "decision": "deny",
       "reason": "Destructive operations require explicit user approval.",
       "patterns": [
         "\\bdrop\\s+(table|database|schema)\\b",
@@ -42,13 +39,13 @@
         "\\bgit\\b[^|;&\\n]*?\\bclean\\s+-[a-z]*f",
         "\\bgit\\b[^|;&\\n]*?\\bcheckout\\s+--\\s+\\.",
         "\\bgit\\b[^|;&\\n]*?\\brestore\\s+(--worktree\\s+)?\\.(?:\\s|$)",
-        "\\brm\\s+(-[a-z]*[rf][a-z]*\\s+)+(/|~|\\$HOME|[a-z]:\\\\)",
+        "(?<!(?:^|[;&|])\\s*(?:git|docker|npm)\\s)\\brm\\s+(-[a-z]*[rf][a-z]*\\s+)+\\S",
+        "\\b(remove-item|ri|rd|rmdir|del|erase)\\b[^|;&\\n]*?(-r\\w*|-f\\w*|/s\\b|/q\\b|/f\\b)",
         "\\bgit\\b[^|;&\\n]*?\\bbranch\\s+-[dD]\\b",
         "\\bgit\\b[^|;&\\n]*?\\bstash\\s+(drop|clear)\\b"
       ]
     },
     "package-publish": {
-      "decision": "deny",
       "reason": "Package publication requires explicit user approval.",
       "patterns": [
         "\\bnpm\\s+publish\\b",
@@ -63,7 +60,6 @@
       ]
     },
     "release": {
-      "decision": "deny",
       "reason": "Release creation requires explicit user approval.",
       "patterns": [
         "\\bgh\\b[^|;&\\n]*?\\brelease\\b[^|;&\\n]*?\\b(create|edit|delete|upload)\\b",
@@ -72,28 +68,24 @@
       ]
     },
     "git-push": {
-      "decision": "deny",
       "reason": "Git push requires explicit user approval unless the active task explicitly requested the exact action.",
       "patterns": [
-        "\\bgit\\b[^|;&\\n]*?\\bpush\\b"
+        "\\bgit(?:\\.exe|\\.cmd)?\\b['\"]?(?:\\s+(?:-{1,2}[\\w-]+(?:[=\\s](?:[^\\s\"']|\"[^\"]*\"|'[^']*')+)?))*\\s+['\"]?push['\"]?\\b"
       ]
     },
     "git-force": {
-      "decision": "deny",
       "reason": "Force push is never automatic.",
       "patterns": [
-        "\\bgit\\b[^|;&\\n]*?\\bpush\\b[^|;&\\n]*(--force(-with-lease)?\\b|\\s-f\\b|\\s\\+\\S+)"
+        "\\bgit(?:\\.exe|\\.cmd)?\\b['\"]?(?:\\s+(?:-{1,2}[\\w-]+(?:[=\\s](?:[^\\s\"']|\"[^\"]*\"|'[^']*')+)?))*\\s+['\"]?push['\"]?\\b[^|;&\\n]*(--force(-with-lease)?\\b|\\s-f\\b|\\s\\+\\S+)"
       ]
     },
     "merge": {
-      "decision": "deny",
       "reason": "Merging pull requests requires explicit user approval.",
       "patterns": [
         "\\bgh\\b[^|;&\\n]*?\\bpr\\b[^|;&\\n]*?\\bmerge\\b"
       ]
     },
     "iam-or-secrets": {
-      "decision": "deny",
       "reason": "IAM, RBAC, firewall, DNS, and secret changes require explicit user approval.",
       "patterns": [
         "\\baws\\b[^|;&\\n]*?\\biam\\b[^|;&\\n]*?\\b(create|delete|put|attach|detach|update)\\b",
@@ -106,21 +98,18 @@
       ]
     },
     "payment": {
-      "decision": "deny",
       "reason": "Payment, refund, payout, and billing actions require explicit user approval.",
       "patterns": [
         "\\bstripe\\b[^|;&\\n]*?\\b(charges|refunds|payouts|invoices)\\b[^|;&\\n]*?\\b(create|update|capture|pay)\\b"
       ]
     },
     "external-message": {
-      "decision": "deny",
       "reason": "External messages to broad audiences require explicit user approval.",
       "patterns": [
         "\\b(sendgrid|mailgun|twilio|slack)\\b[^|;&\\n]*?\\b(send|post|broadcast)\\b"
       ]
     },
     "external-write": {
-      "decision": "deny",
       "reason": "Installing, starting, or configuring an optional external adapter, and writing source or documentation through one, require explicit user approval (adapters/omniroute.md, adapters/code-review-graph.md).",
       "patterns": [
         "\\b(npm|npx|pnpm|yarn|bunx)\\b[^|;&\\n]{0,200}\\bomniroute\\b",
@@ -131,25 +120,51 @@
         "\\b(uvx|pipx?|uv\\s+tool\\s+install)\\b[^|;&\\n]{0,200}\\bcode[-_]review[-_]graph\\b",
         "\\bcode[-_]review[-_]graph\\b[^|;&\\n]{0,80}\\b(apply|serve|daemon)\\b"
       ]
+    },
+    "cross-harness-invocation": {
+      "reason": "Invoking an opposite-provider Cross-Harness advisory worker sends bounded repository context to a second model provider (data egress) and requires explicit user approval (docs/adr/0030-cross-harness-advisory-workers.md).",
+      "patterns": [
+        "\\bcross-harness-run\\.mjs\\b"
+      ]
     }
   },
   "sensitivePaths": {
     "decision": "deny",
     "reason": "Secret files are off-limits to KRYLO.",
     "patterns": [
-      "(^|[\\\\/])\\.env($|\\.|[\\\\/])",
-      "(^|[\\\\/])\\.npmrc$",
-      "(^|[\\\\/])\\.pypirc$",
-      "(^|[\\\\/])\\.netrc$",
+      "(^|[\\\\/])\\.env($|\\.|[\\\\/]|\\*)",
+      "(^|[\\\\/])\\.npmrc\\*?$",
+      "(^|[\\\\/])\\.pypirc\\*?$",
+      "(^|[\\\\/])\\.netrc\\*?$",
       "(^|[\\\\/])\\.ssh[\\\\/]",
       "(^|[\\\\/])\\.aws[\\\\/]credentials",
       "(^|[\\\\/])\\.config[\\\\/]gh[\\\\/]hosts\\.yml",
       "(^|[\\\\/])\\.kube[\\\\/]config",
-      "(^|[\\\\/])id_(rsa|ed25519|ecdsa|dsa)($|\\.)",
-      "\\.(pem|pfx|p12|key|keystore|jks)$",
-      "(^|[\\\\/])secrets?\\.(json|ya?ml|toml)$",
+      "(^|[\\\\/])id_(rsa|ed25519|ecdsa|dsa)($|\\.|\\*)",
+      "\\.(pem|pfx|p12|key|keystore|jks)\\*?$",
+      "(^|[\\\\/])secrets?\\.(json|ya?ml|toml)\\*?$",
       "(^|[\\\\/])\\.openwiki[\\\\/]\\.env"
-    ]
+    ],
+    "$globCommentary": "Structured (non-regex) targets consumed by globCouldTargetSensitivePath() in risk-policy.mjs, added by the Foundation glob-closure checkpoint. `patterns` above stays the exact/literal matcher (unchanged, preserved); these lists let the SAME canonical protected names be checked against a filesystem glob expression (Bash/PowerShell */?/[...] , Glob/Grep path-shaped fields) without duplicating a regex per wildcard example. Each entry in globProtectedPaths is a `/`-separated path suffix matched against the CANDIDATE's trailing path segments, one segment at a time; a literal `*` segment (only ever the last one, e.g. '.ssh/*') means 'any single segment directly under this protected directory'. globProtectedExtensions are checked as a suffix ('.'+ext) against the candidate's final segment only.",
+    "$globGenericExtensionBasenameNote": "secrets.json/secret.json/.yaml/.yml/.toml are NOT in globProtectedPaths below (their shared extension is an extremely common, otherwise-unprotected extension used by countless ordinary, unrelated files, so a plain path-suffix entry would deny '*.json'/'**/*.yml'/'*.toml' outright). Instead, globProtectedGenericExtensionBasenames + globGenericExtensions let globCouldTargetSensitivePath() require the candidate's BASENAME portion (the part before the shared extension) to carry genuine discriminating content that can target one of these protected basenames -- so 'secret?.json', 'secrets*.json', 'secr*.json', '[s]ecret.json' deny, while a fully generic basename glob such as '*.json' or an unrelated literal basename such as 'package*.json'/'tsconfig*.json' still passes. See docs/adr/0028-foundation-final-closure.md.",
+    "globProtectedGenericExtensionBasenames": ["secret", "secrets"],
+    "globGenericExtensions": ["json", "yaml", "yml", "toml"],
+    "globProtectedPaths": [
+      ".env",
+      ".npmrc",
+      ".pypirc",
+      ".netrc",
+      "id_rsa",
+      "id_ed25519",
+      "id_ecdsa",
+      "id_dsa",
+      ".ssh/*",
+      ".aws/credentials",
+      ".kube/config",
+      ".config/gh/hosts.yml",
+      ".openwiki/.env"
+    ],
+    "globProtectedExtensions": ["pem", "pfx", "p12", "key", "keystore", "jks"]
   },
   "failMode": "fail-safe",
   "inactiveRunBehavior": "allow",

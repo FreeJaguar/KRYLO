@@ -1,6 +1,6 @@
 {
   "name": "krylo-marketplace",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "description": "Development workspace for the KRYLO Claude Code plugin and marketplace. The published artifact is the repository itself; this package exists for tests and CI only.",
   "type": "module",
@@ -17,6 +17,7 @@
     "test:status": "node --test \"plugins/krylo/tests/status/*.test.mjs\"",
     "test:setup": "node --test \"plugins/krylo/tests/setup/*.test.mjs\"",
     "test:governance": "node --test \"plugins/krylo/tests/governance/*.test.mjs\"",
+    "test:maintenance": "node --test \"plugins/krylo/tests/maintenance/*.test.mjs\"",
     "syntax": "node plugins/krylo/scripts/validation/validate-runtime.mjs --syntax-only",
     "validate:runtime": "node plugins/krylo/scripts/validation/validate-runtime.mjs"
   }

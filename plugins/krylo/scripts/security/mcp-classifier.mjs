@@ -73,10 +73,31 @@ function catalogBlocksServer(catalog, server) {
   });
 }
 
-function findServerRule(mcpPolicy, server) {
+/**
+ * `rule.match` is a simple `|`-delimited alternation of exact server-identity
+ * keywords (e.g. "stripe|paypal|braintree|adyen", or an already-anchored
+ * "^git$") -- never a partial-match pattern. Two independent review rounds
+ * found the original unanchored `new RegExp(rule.match, 'i').test(needle)`
+ * let an attacker-chosen server name borrow trust merely by CONTAINING one
+ * of these keywords (e.g. "evil-github-proxy" matched "github" and was
+ * treated as the known, reviewed GitHub server) -- the exact same bypass
+ * class `catalogKnowsServer()` above was already hardened against; this
+ * function had not been. Exact match only (after stripping the same
+ * -mcp/-cli suffix `catalogKnowsServer()` tolerates), never substring.
+ */
+function serverNameMatchesRule(rule, server) {
   const needle = server.toLowerCase();
+  const normalizedNeedle = normalizeServerCandidate(server);
+  const alternatives = rule.match.replace(/^\^/, '').replace(/\$$/, '').split('|');
+  return alternatives.some((alt) => {
+    const altLower = alt.toLowerCase();
+    return altLower === needle || altLower === normalizedNeedle;
+  });
+}
+
+function findServerRule(mcpPolicy, server) {
   for (const rule of mcpPolicy.serverActionClasses ?? []) {
-    if (new RegExp(rule.match, 'i').test(needle)) return rule;
+    if (serverNameMatchesRule(rule, server)) return rule;
   }
   return null;
 }
@@ -107,7 +128,15 @@ export function classifyMcpTool(toolName) {
   const parsed = parseMcpToolName(toolName);
   if (!parsed) {
     // Malformed/unrecognized shape: fail toward gating, not toward trust.
-    return { className: 'other', reason: 'Unrecognized MCP tool name shape; not automatically trusted.' };
+    // `hardDeny: true` -- KRYLO cannot even identify what server or
+    // operation this is, so there is nothing a human could meaningfully
+    // evaluate in an approval prompt; this is a `deny` case, not a
+    // `require-approval` one (docs/adr/0025-native-permission-approval.md's
+    // restore-native-approval checkpoint: `deny` and `require-approval` are
+    // distinct KRYLO policy outcomes, and a `deny` case must never be
+    // routed through the native ask prompt just because MCP tools became
+    // ask-eligible for their genuine require-approval classes).
+    return { className: 'other', reason: 'Unrecognized MCP tool name shape; not automatically trusted.', hardDeny: true };
   }
   const { server, operation } = parsed;
 
@@ -115,16 +144,25 @@ export function classifyMcpTool(toolName) {
   const catalog = loadJson(CATALOG_PATH);
 
   if (catalogBlocksServer(catalog, server)) {
-    return { className: mcpPolicy.unknownServerClass, reason: 'This MCP server is blocked in the KRYLO tool trust catalog.' };
+    return {
+      className: mcpPolicy.unknownServerClass,
+      reason: 'This MCP server is blocked in the KRYLO tool trust catalog.',
+      hardDeny: true,
+    };
   }
 
   const rule = findServerRule(mcpPolicy, server);
   const isKnown = Boolean(rule) || catalogKnowsServer(catalog, server);
 
   if (!isKnown) {
+    // Same reasoning as above: an entirely unrecognized server is not a
+    // known write operation awaiting a human's informed yes/no -- there is
+    // no server identity for a human to evaluate at all, so this stays a
+    // hard `deny`, never `ask`.
     return {
       className: mcpPolicy.unknownServerClass,
       reason: 'Unrecognized MCP server; unknown MCP write-capable tools are never automatically trusted.',
+      hardDeny: true,
     };
   }
 

@@ -1,5 +1,7 @@
 # Model Routing
 
+Logical agent roles and their capability requirements (for example, which tasks need deep architectural reasoning versus lightweight lookup) are Shared Core concepts and are host-neutral. The concrete model alias each role maps to is a host adapter decision. The mapping below is the Claude Host mapping; no Codex model names are selected in this Foundation.
+
 ## Supported model policy
 
 KRYLO v0.1.0 ships portable static agent definitions using:

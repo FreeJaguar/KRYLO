@@ -21,16 +21,24 @@ const ALLOWED_FIELDS = [
   'cycle',
   'terminalState',
   'label',
+  // docs/adr/0030-cross-harness-advisory-workers.md: worker provider/role,
+  // byte counts, and finding count are safe, scalar, non-secret metadata --
+  // never the worker's raw prompt, context, or output text.
+  'provider',
+  'role',
+  'inputBytes',
+  'outputBytes',
+  'findingCount',
 ];
 
 /**
  * Append a whitelisted telemetry event for runId as one JSONL line.
  * Any field not in ALLOWED_FIELDS is silently dropped. Disabled entirely
- * when CLAUDE_PLUGIN_OPTION_LOCAL_TELEMETRY === 'false'. Never throws.
+ * when KRYLO_LOCAL_TELEMETRY === 'false'. Never throws.
  */
 export function recordEvent(runId, event) {
   try {
-    if (process.env.CLAUDE_PLUGIN_OPTION_LOCAL_TELEMETRY === 'false') {
+    if (process.env.KRYLO_LOCAL_TELEMETRY === 'false') {
       return { ok: true, skipped: 'disabled' };
     }
     if (!runId || typeof event !== 'object' || event === null) {

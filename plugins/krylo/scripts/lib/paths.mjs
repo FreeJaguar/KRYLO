@@ -4,7 +4,9 @@
 //   runs/<runId>/state.json
 //   runs/<runId>/artifacts/
 //   telemetry/<runId>.jsonl
-//   active-runs/<projectRootHash>/<sessionSegment>.json  (per-project, per-session pointer)
+//   active-runs/<projectRootHash>/<host>/<sessionSegment>.json  (per-project, per-host, per-session pointer)
+//   bootstrap-failures/<projectRootHash>/<host>/<sessionSegment>.json  (short-lived,
+//     TTL-gated; not yet pruned by scripts/runtime/cleanup.mjs -- a documented follow-up)
 //   current-run.json  (legacy single pointer; read once for migration, then removed)
 //
 // Every path used by the runtime must be produced through safeJoin() so a
@@ -15,16 +17,22 @@ import path from 'node:path';
 import os from 'node:os';
 import crypto from 'node:crypto';
 
+import { HOST_NAMES } from './host-context.mjs';
+
 /**
  * Resolve the KRYLO plugin data root.
- * Honors CLAUDE_PLUGIN_DATA so tests can point at a temp directory.
+ * Honors KRYLO_DATA_ROOT (host-neutral) so tests, and any host adapter, can
+ * point at a temp or host-specific directory. Claude-facing entrypoints
+ * bootstrap KRYLO_DATA_ROOT from the Claude-specific plugin data location via
+ * scripts/host/claude/context.mjs before this is read, so existing Claude
+ * users keep using the same physical 0.1.1 data root.
  */
 export function getDataRoot() {
-  const envRoot = process.env.CLAUDE_PLUGIN_DATA;
+  const envRoot = process.env.KRYLO_DATA_ROOT;
   if (typeof envRoot === 'string' && envRoot.trim() !== '') {
     return path.resolve(envRoot);
   }
-  return path.join(os.homedir(), '.claude', 'plugins', 'data', 'krylo');
+  return path.join(os.homedir(), '.krylo', 'data');
 }
 
 /** Create a directory (recursively) if it does not already exist. */
@@ -127,6 +135,22 @@ export function telemetryPath(runId) {
   return safeJoin(getDataRoot(), 'telemetry', `${runId}.jsonl`);
 }
 
+/**
+ * Disposable per-invocation directory for a Cross-Harness worker
+ * (docs/adr/0030-cross-harness-advisory-workers.md): the worker's cwd, and
+ * the only place its bounded context packet is ever written. Never the
+ * application repository, and outside the KRYLO run's own runs/<runId>/
+ * tree so a worker process (which never receives KRYLO_DATA_ROOT at all)
+ * has no path back to real run state even if it tried.
+ */
+export function crossHarnessRootDir() {
+  return safeJoin(getDataRoot(), 'cross-harness');
+}
+
+export function crossHarnessInvocationDir(runId, invocationId) {
+  return safeJoin(getDataRoot(), 'cross-harness', runId, invocationId);
+}
+
 /** Legacy (pre-0.1.1) single global pointer. Read only, for one-time migration. */
 export function currentRunPointerPath() {
   return safeJoin(getDataRoot(), 'current-run.json');
@@ -149,12 +173,51 @@ export function activeRunsRootDir() {
   return safeJoin(getDataRoot(), 'active-runs');
 }
 
-/** Directory holding every session pointer for one project. */
+/** Directory holding every host's pointer subdirectory for one project. */
 export function activeRunsProjectDir(projectRootHash) {
   return safeJoin(getDataRoot(), 'active-runs', projectRootHash);
 }
 
-/** Path to the pointer file for one project + session pair. */
-export function activeRunPointerPath(projectRootHash, sessionId) {
+/** A host name becomes a filesystem path segment: refuse anything not a known host. */
+function assertValidHost(host) {
+  if (!HOST_NAMES.includes(host)) {
+    throw new Error(`Refusing unsupported host as path segment: ${JSON.stringify(host)}`);
+  }
+}
+
+/** Directory holding every session pointer for one project, scoped to one host. */
+export function activeRunsHostDir(projectRootHash, host) {
+  assertValidHost(host);
+  return safeJoin(getDataRoot(), 'active-runs', projectRootHash, host);
+}
+
+/** Path to the pointer file for one project + host + host-session-id triple. */
+export function activeRunPointerPath(projectRootHash, host, hostSessionId) {
+  assertValidHost(host);
+  return safeJoin(getDataRoot(), 'active-runs', projectRootHash, host, `${safeSessionSegment(hostSessionId)}.json`);
+}
+
+/**
+ * Path to a short-lived marker recording that a RECOGNIZED $krylo-run
+ * invocation failed to bootstrap for this exact project + host + session.
+ * scripts/security/user-prompt-submit-codex.mjs writes it; risk-gate-codex.mjs
+ * reads it to fail CLOSED (deny) instead of silently treating the session as
+ * ordinary/ungoverned, the same problem an absent active-run pointer would
+ * otherwise leave indistinguishable. Deliberately a separate top-level
+ * directory from active-runs/ so it can never collide with, or be mistaken
+ * for, a real run pointer -- reuses the same safeJoin/assertValidHost/
+ * safeSessionSegment path-safety primitives as activeRunPointerPath() above.
+ */
+export function bootstrapFailurePath(projectRootHash, host, hostSessionId) {
+  assertValidHost(host);
+  return safeJoin(getDataRoot(), 'bootstrap-failures', projectRootHash, host, `${safeSessionSegment(hostSessionId)}.json`);
+}
+
+/**
+ * Path to the pre-0.2.0 flat pointer layout (`active-runs/<project>/<session>.json`,
+ * no host segment). Read-only: used only to detect and lazily migrate a
+ * still-active 0.1.1 pointer into the new host-scoped layout.
+ */
+export function legacyActiveRunPointerPath(projectRootHash, sessionId) {
   return safeJoin(getDataRoot(), 'active-runs', projectRootHash, `${safeSessionSegment(sessionId)}.json`);
 }

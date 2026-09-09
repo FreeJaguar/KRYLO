@@ -8,13 +8,13 @@ import { recordEvent } from '../../scripts/lib/telemetry.mjs';
 
 function withTempDataRoot(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-telemetry-'));
-  const prev = process.env.CLAUDE_PLUGIN_DATA;
-  process.env.CLAUDE_PLUGIN_DATA = dir;
+  const prev = process.env.KRYLO_DATA_ROOT;
+  process.env.KRYLO_DATA_ROOT = dir;
   try {
     return fn(dir);
   } finally {
-    if (prev === undefined) delete process.env.CLAUDE_PLUGIN_DATA;
-    else process.env.CLAUDE_PLUGIN_DATA = prev;
+    if (prev === undefined) delete process.env.KRYLO_DATA_ROOT;
+    else process.env.KRYLO_DATA_ROOT = prev;
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
@@ -51,10 +51,10 @@ test('recordEvent only persists whitelisted fields; extras like command/prompt a
   });
 });
 
-test('recordEvent is a no-op when CLAUDE_PLUGIN_OPTION_LOCAL_TELEMETRY=false', () => {
+test('recordEvent is a no-op when KRYLO_LOCAL_TELEMETRY=false', () => {
   withTempDataRoot((dir) => {
-    const prevOption = process.env.CLAUDE_PLUGIN_OPTION_LOCAL_TELEMETRY;
-    process.env.CLAUDE_PLUGIN_OPTION_LOCAL_TELEMETRY = 'false';
+    const prevOption = process.env.KRYLO_LOCAL_TELEMETRY;
+    process.env.KRYLO_LOCAL_TELEMETRY = 'false';
     try {
       const result = recordEvent('run-abc123', { event: 'tool-call' });
       assert.equal(result.ok, true);
@@ -62,8 +62,8 @@ test('recordEvent is a no-op when CLAUDE_PLUGIN_OPTION_LOCAL_TELEMETRY=false', (
       const filePath = path.join(dir, 'telemetry', 'run-abc123.jsonl');
       assert.equal(fs.existsSync(filePath), false);
     } finally {
-      if (prevOption === undefined) delete process.env.CLAUDE_PLUGIN_OPTION_LOCAL_TELEMETRY;
-      else process.env.CLAUDE_PLUGIN_OPTION_LOCAL_TELEMETRY = prevOption;
+      if (prevOption === undefined) delete process.env.KRYLO_LOCAL_TELEMETRY;
+      else process.env.KRYLO_LOCAL_TELEMETRY = prevOption;
     }
   });
 });

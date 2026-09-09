@@ -5,32 +5,67 @@
 // event. Only the tool NAME and duration are recorded — never arguments,
 // output, or file contents. Fail open: always exit 0, never any output.
 
-import { readStdinJson, resolveActiveRun, allowSilently } from '../lib/hook-utils.mjs';
-import { saveState } from '../lib/state.mjs';
+import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
+import { normalizeClaudeHookPayload, allowClaudeSilently } from '../host/claude/hook-transport.mjs';
+import { loadState, saveState } from '../lib/state.mjs';
+import { withFileLock } from '../lib/lock.mjs';
+import { runLockPath } from '../lib/paths.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 
 async function main() {
   const input = await readStdinJson();
-  if (!input.ok) allowSilently();
-  const payload = input.value;
+  if (!input.ok) allowClaudeSilently();
+  const normalized = normalizeClaudeHookPayload(input.value);
+  if (!normalized.ok) allowClaudeSilently();
+  const payload = normalized.payload;
 
-  const run = resolveActiveRun(payload);
-  if (!run.active) allowSilently();
+  const run = resolveActiveRun({
+    projectRoot: normalized.identity.projectRoot,
+    host: normalized.identity.host,
+    hostSessionId: normalized.identity.hostSessionId,
+  });
+  if (!run.active) allowClaudeSilently();
 
-  const state = run.state;
+  const runId = run.state.runId;
   const toolName = typeof payload.tool_name === 'string' && payload.tool_name !== '' ? payload.tool_name : 'unknown';
 
-  state.toolCounters[toolName] = (state.toolCounters[toolName] ?? 0) + 1;
-  saveState(state);
+  // Mutate under the run's exclusive lock, re-reading state fresh once
+  // acquired -- the same per-run synchronization domain approval
+  // consumption and every other real mutator uses (security-hardening
+  // checkpoint, SECURITY BLOCKER 2), so this can never race a concurrent
+  // migration-persist or another mutation and silently lose either side.
+  let counterSaveFailed = false;
+  try {
+    withFileLock(runLockPath(runId), () => {
+      const reloaded = loadState(runId);
+      if (!reloaded.ok) return;
+      const state = reloaded.value;
+      state.toolCounters[toolName] = (state.toolCounters[toolName] ?? 0) + 1;
+      const saved = saveState(state);
+      if (!saved.ok) counterSaveFailed = true;
+    });
+  } catch {
+    // Fail open: telemetry must never block or crash the tool call. This
+    // also covers a lock-acquisition failure (see scripts/lib/lock.mjs);
+    // record it as a distinguishable outcome below rather than a silent
+    // exit 0, so a real, repeated failure here is diagnosable instead of
+    // invisible.
+    counterSaveFailed = true;
+  }
 
   const duration = Number(payload.duration_ms ?? payload.durationMs);
-  recordEvent(state.runId, {
+  recordEvent(runId, {
     event: 'tool',
     toolName,
     ...(Number.isFinite(duration) ? { durationMs: duration } : {}),
+    // The tool call itself genuinely happened either way (this event is
+    // about the tool-name/duration fact, not the counter) -- `status` only
+    // flags that the toolCounters increment specifically was not persisted,
+    // so a repeated pattern here is diagnosable rather than silently lost.
+    ...(counterSaveFailed ? { status: 'counter-not-persisted' } : {}),
   });
 
-  allowSilently();
+  allowClaudeSilently();
 }
 
-main().catch(() => allowSilently());
+main().catch(() => allowClaudeSilently());

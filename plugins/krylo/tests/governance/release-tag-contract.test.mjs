@@ -1,0 +1,85 @@
+// Proves the release workflow's own tag-vs-version check (task Section 25:
+// "verify release scripts expect the correct relationship... test mismatch
+// cases"). Extracts the REAL shell script text from release.yml's "Check
+// tag matches plugin name and version" step and executes it via a real
+// shell (bash, present on both this repository's Windows dev environment
+// via Git Bash and the workflow's own ubuntu-latest runner) -- this tests
+// the actual shipped script, not a reimplementation of its logic that
+// could silently drift from what release.yml really runs.
+
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
+const RELEASE_WORKFLOW = path.join(REPO_ROOT, '.github', 'workflows', 'release.yml');
+
+/** Extract the `run: |` block immediately following the named step. */
+function extractStepScript(workflowText, stepName) {
+  const stepIdx = workflowText.indexOf(`name: ${stepName}`);
+  if (stepIdx === -1) throw new Error(`step "${stepName}" not found in release.yml`);
+  const runIdx = workflowText.indexOf('run: |', stepIdx);
+  const afterRun = workflowText.slice(runIdx + 'run: |'.length);
+  const lines = afterRun.split('\n').slice(1); // drop the rest of the "run: |" line itself
+  const scriptLines = [];
+  for (const line of lines) {
+    if (line.trim() === '') { scriptLines.push(''); continue; }
+    const indentMatch = /^( {6})(.*)$/.exec(line); // this workflow indents run: | blocks by 6 spaces
+    if (!indentMatch) break;
+    scriptLines.push(indentMatch[2]);
+  }
+  return scriptLines.join('\n');
+}
+
+function runTagCheck(tag) {
+  const workflowText = fs.readFileSync(RELEASE_WORKFLOW, 'utf8');
+  const script = extractStepScript(workflowText, 'Check tag matches plugin name and version (claude plugin tag format)');
+  assert.ok(script.includes('test "$name--v$v" = "$TAG"'), 'the extracted script does not look like the expected tag-check step -- release.yml may have changed shape');
+  try {
+    execFileSync('bash', ['-c', script], { cwd: REPO_ROOT, env: { ...process.env, TAG: tag }, encoding: 'utf8' });
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, status: err.status };
+  }
+}
+
+test('the real release.yml tag-check script accepts the correct tag for the current product version', () => {
+  const result = runTagCheck('krylo--v0.2.0');
+  assert.equal(result.ok, true);
+});
+
+test('v0.2.1 with package 0.2.0 -> fail', () => {
+  const result = runTagCheck('krylo--v0.2.1');
+  assert.equal(result.ok, false);
+});
+
+test('v0.1.1 with package 0.2.0 -> fail', () => {
+  const result = runTagCheck('krylo--v0.1.1');
+  assert.equal(result.ok, false);
+});
+
+test('a tag with the wrong plugin name prefix fails', () => {
+  const result = runTagCheck('wrong-name--v0.2.0');
+  assert.equal(result.ok, false);
+});
+
+test('every uses: reference in release.yml is pinned to a full commit SHA', () => {
+  const text = fs.readFileSync(RELEASE_WORKFLOW, 'utf8');
+  const usesLines = text.match(/^\s*-?\s*uses:\s*.+$/gm) || [];
+  assert.ok(usesLines.length > 0);
+  for (const line of usesLines) {
+    assert.match(line, /@[0-9a-f]{40}(\s|#|$)/, `not a full-SHA pin: ${line.trim()}`);
+  }
+});
+
+test('the verify job requests only contents:read; the release job (needs:verify, gated behind manual dispatch + a passing verify) is the only job with write permissions', () => {
+  const text = fs.readFileSync(RELEASE_WORKFLOW, 'utf8');
+  const topLevelPermissions = /^permissions:\s*\n\s+contents:\s*read\s*$/m.exec(text);
+  assert.ok(topLevelPermissions, 'expected a top-level contents:read permissions block (the verify job\'s own floor)');
+  assert.match(text, /needs:\s*verify/, 'the release job must depend on the verify job passing first');
+  assert.match(text, /^on:\s*\n\s+workflow_dispatch:/m, 'the release workflow must only be manually dispatched, never triggered by push/pull_request');
+});

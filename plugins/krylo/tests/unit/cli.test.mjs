@@ -55,8 +55,13 @@ test('init-run.mjs with a goal containing a fake secret never persists the secre
     assert.ok(!raw.includes(secret));
 
     const state = JSON.parse(raw);
-    assert.equal(state.schemaVersion, '1.0.0');
+    assert.equal(state.schemaVersion, '1.1.0');
     assert.equal(state.phase, 'INITIALIZING');
+    assert.equal(state.host.name, 'claude');
+    assert.equal(state.host.sessionId, 'session-cli-1');
+    assert.equal(state.delegation.externalWorker, false);
+    assert.equal(state.delegation.depth, 0);
+    assert.equal('sessionId' in state, false);
 
     // printed statePath must have the home dir masked, never a raw secret
     assert.ok(!res.json.statePath.includes(secret));
@@ -81,6 +86,50 @@ test('read-state.mjs --field returns a single dotted field', () => {
     assert.equal(res.status, 0);
     assert.equal(res.json.ok, true);
     assert.equal(res.json.value, 'BUILD');
+  } finally {
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+test('read-state.mjs and update-state.mjs resolve the current run via --session after pointer migration', () => {
+  const dataDir = mkTempDataDir();
+  try {
+    const initA = runCli('runtime/init-run.mjs', [
+      '--goal', 'session A run',
+      '--session', 'session-multi-a',
+      '--project-dir', dataDir,
+      '--lane', 'BUILD',
+      '--risk', 'low',
+    ], dataDir);
+    assert.equal(initA.json.ok, true);
+
+    const initB = runCli('runtime/init-run.mjs', [
+      '--goal', 'session B run',
+      '--session', 'session-multi-b',
+      '--project-dir', dataDir,
+      '--lane', 'BUILD',
+      '--risk', 'low',
+    ], dataDir);
+    assert.equal(initB.json.ok, true);
+
+    // Explicit --session must resolve to THAT session's own run, never
+    // whichever pointer happens to be most recently updated.
+    const readA = runCli('runtime/read-state.mjs', [
+      '--session', 'session-multi-a', '--project-dir', dataDir, '--field', 'runId',
+    ], dataDir);
+    assert.equal(readA.json.ok, true);
+    assert.equal(readA.json.value, initA.json.runId);
+
+    const updateA = runCli('runtime/update-state.mjs', [
+      '--session', 'session-multi-a', '--project-dir', dataDir, '--phase', 'EXECUTING',
+    ], dataDir);
+    assert.equal(updateA.json.ok, true);
+    assert.equal(updateA.json.runId, initA.json.runId);
+
+    const stateA = JSON.parse(fs.readFileSync(path.join(dataDir, 'runs', initA.json.runId, 'state.json'), 'utf8'));
+    assert.equal(stateA.phase, 'EXECUTING');
+    const stateB = JSON.parse(fs.readFileSync(path.join(dataDir, 'runs', initB.json.runId, 'state.json'), 'utf8'));
+    assert.equal(stateB.phase, 'INITIALIZING');
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });
   }
@@ -225,7 +274,13 @@ test('update-state.mjs: question grant/consume and budget refusal', () => {
   }
 });
 
-test('update-state.mjs: risk approval request and resolve', () => {
+test('update-state.mjs: risk approval request, model-driven denial works, model-driven approval is refused', () => {
+  // The model-accessible CLI must not be able to turn its own pending
+  // request into an approved human authorization. Denial (a model backing
+  // off its own request) is harmless and remains allowed; nothing in the
+  // codebase grants `approved` any more (docs/adr/
+  // 0025-native-permission-approval.md) -- for the Bash tool, authorization
+  // now happens live through Claude Code's own native permission prompt.
   const dataDir = mkTempDataDir();
   try {
     const init = runCli('runtime/init-run.mjs', [
@@ -244,14 +299,24 @@ test('update-state.mjs: risk approval request and resolve', () => {
     assert.equal(request.status, 0);
     assert.equal(request.json.ok, true);
 
-    const resolve = runCli('runtime/update-state.mjs', [
+    const selfApprove = runCli('runtime/update-state.mjs', [
       '--run', runId, '--resolve-approval', 'ra-1=approved',
     ], dataDir);
-    assert.equal(resolve.status, 0);
-    assert.equal(resolve.json.ok, true);
+    assert.notEqual(selfApprove.status, 0);
+    assert.equal(selfApprove.json.ok, false);
+    assert.equal(selfApprove.json.error, 'model-approval-forbidden');
+
+    const stillPending = JSON.parse(fs.readFileSync(path.join(dataDir, 'runs', runId, 'state.json'), 'utf8'));
+    assert.equal(stillPending.riskApprovals[0].status, 'pending', 'the model-driven CLI must never move an approval to approved');
+
+    const deny = runCli('runtime/update-state.mjs', [
+      '--run', runId, '--resolve-approval', 'ra-1=denied',
+    ], dataDir);
+    assert.equal(deny.status, 0);
+    assert.equal(deny.json.ok, true);
 
     const stateRaw = JSON.parse(fs.readFileSync(path.join(dataDir, 'runs', runId, 'state.json'), 'utf8'));
-    assert.equal(stateRaw.riskApprovals[0].status, 'approved');
+    assert.equal(stateRaw.riskApprovals[0].status, 'denied', 'model-driven denial of its own request remains allowed');
     assert.equal(stateRaw.riskApprovals[0].actionClass, 'git-push');
   } finally {
     fs.rmSync(dataDir, { recursive: true, force: true });

@@ -28,6 +28,23 @@ function sleepSync(ms) {
   }
 }
 
+// EEXIST is the expected, documented contention signal (another holder's
+// lock file is still there). On Windows, two independent security reviews
+// of a security-hardening checkpoint reproduced a second, real contention
+// shape: opening a lock path whose previous holder's fs.rmSync (below) has
+// just marked it delete-pending can fail with EPERM instead of EEXIST --
+// and, more rarely, EACCES/EBUSY from the same underlying delete-pending
+// window. Before this fix, any of those three codes rethrew immediately
+// instead of retrying, so a waiter arriving in that narrow window threw a
+// lock-acquisition error -- and every caller that wraps withFileLock in a
+// fail-open `catch {}` (posttool-telemetry.mjs, orbit/fingerprint.mjs,
+// status/agent-events.mjs) silently discarded its mutation with exit 0,
+// observed as an intermittent lost-increment failure under real 15-way
+// concurrent load. atomic.mjs's renameWithRetry() already treats this same
+// EPERM/EBUSY pair as transient for the analogous rename case; this applies
+// the identical, already-established reasoning to lock acquisition.
+const TRANSIENT_LOCK_ERROR_CODES = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);
+
 /**
  * Run `fn` while holding an exclusive lock at `lockPath`. Blocks (busy-wait)
  * until the lock is acquired or the retry budget is exhausted, then throws.
@@ -42,7 +59,7 @@ export function withFileLock(lockPath, fn) {
       fd = fs.openSync(lockPath, 'wx');
       break;
     } catch (err) {
-      if (!err || err.code !== 'EEXIST') throw err;
+      if (!err || !TRANSIENT_LOCK_ERROR_CODES.has(err.code)) throw err;
       sleepSync(LOCK_RETRY_DELAY_MS);
     }
   }

@@ -6,14 +6,46 @@ import { mkTempDataDir, createActiveRun, runHook, patchState, cleanup } from './
 const GATE = 'security/risk-gate.mjs';
 
 function mcpPayload(cwd, toolName, toolInput = {}) {
-  return { hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: toolInput, cwd };
+  // permission_mode: 'auto' -- ADR-0027 restores native ask to MCP
+  // require-approval classes too, so an ask-path test must supply an
+  // eligible mode explicitly (same reasoning as risk-gate.test.mjs's
+  // bashPayload()/powershellPayload()).
+  return { hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: toolInput, cwd, permission_mode: 'auto' };
 }
 
 function decision(res) {
   return res.json?.hookSpecificOutput?.permissionDecision ?? null;
 }
 
-test('risk-gate: unknown MCP server is denied for both a write- and a read-shaped operation', () => {
+test('risk-gate: a spoofed MCP server name embedding a known category keyword (e.g. "github", "cloud", "sql") is still HARD-denied through the real Hook, under an ask-eligible mode', () => {
+  // End-to-end regression for the same bypass covered at the unit level in
+  // tests/security/mcp-classifier.test.mjs: two independent review rounds
+  // reproduced permissionDecision: "ask" (with a reason misattributing the
+  // server to a known category) for an entirely unreviewed, attacker-named
+  // MCP server. This must be "deny", exactly like a genuinely unknown
+  // server, under permission_mode: "auto".
+  const dataDir = mkTempDataDir();
+  try {
+    createActiveRun(dataDir);
+    for (const toolName of [
+      'mcp__evil-github-proxy__delete_repo',
+      'mcp__attacker-email-relay__send_blast',
+      'mcp__my-sql-helper__execute_statement',
+    ]) {
+      const res = runHook(GATE, mcpPayload(dataDir, toolName, { x: 1 }), dataDir);
+      assert.equal(decision(res), 'deny', `expected hard deny for spoofed server: ${toolName}`);
+    }
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate: unknown MCP server is HARD-denied for both a write- and a read-shaped operation, even under an ask-eligible permission mode', () => {
+  // ADR-0027 restores native ask to MCP require-approval classes, but an
+  // entirely unreviewed server has no identity a human could meaningfully
+  // approve -- mcp-classifier.mjs's `hardDeny` flag keeps this a `deny`
+  // classification (not `require-approval`), so it must never reach ask
+  // regardless of permission mode.
   const dataDir = mkTempDataDir();
   try {
     createActiveRun(dataDir);
@@ -39,11 +71,11 @@ test('risk-gate: known read-only-shaped operations on catalogued MCP servers pas
   }
 });
 
-test('risk-gate: MCP writes across the required categories are denied pending approval', () => {
+test('risk-gate: MCP writes across the required categories trigger native ask under an eligible permission mode (ADR-0027)', () => {
   const dataDir = mkTempDataDir();
   try {
     createActiveRun(dataDir);
-    const denied = [
+    const gated = [
       'mcp__postgres__execute_sql',
       'mcp__supabase__update_row',
       'mcp__github__merge_pull_request',
@@ -58,17 +90,44 @@ test('risk-gate: MCP writes across the required categories are denied pending ap
       'mcp__vault__write_secret',
       'mcp__stripe__create_refund',
     ];
-    for (const toolName of denied) {
+    for (const toolName of gated) {
       const res = runHook(GATE, mcpPayload(dataDir, toolName, { x: 1 }), dataDir);
-      assert.equal(decision(res), 'deny', `expected deny for ${toolName}`);
-      assert.ok(!res.json.hookSpecificOutput.permissionDecisionReason.includes(toolName) || true);
+      assert.equal(decision(res), 'ask', `expected ask for ${toolName}`);
+      // Fixed a vacuous `|| true` left over from an earlier draft (found by
+      // independent review): this must actually check that the reason text
+      // never echoes the tool name -- now MORE relevant than before, since
+      // an MCP ask reason is shown directly to a human in the native prompt.
+      assert.ok(!res.json.hookSpecificOutput.permissionDecisionReason.includes(toolName), `reason must not echo the tool name: ${toolName}`);
     }
   } finally {
     cleanup(dataDir);
   }
 });
 
-test('risk-gate: an approved class-level approval allows exactly one MCP write and then requires a fresh approval', () => {
+test('risk-gate: the same MCP writes fall back to deny under an ineligible permission mode', () => {
+  const dataDir = mkTempDataDir();
+  try {
+    createActiveRun(dataDir);
+    for (const toolName of ['mcp__github__merge_pull_request', 'mcp__stripe__create_refund']) {
+      const bypassRes = runHook(GATE, { ...mcpPayload(dataDir, toolName, { x: 1 }), permission_mode: 'bypassPermissions' }, dataDir);
+      assert.equal(decision(bypassRes), 'deny', `expected deny (bypassPermissions) for ${toolName}`);
+      const noModeRes = runHook(GATE, { hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: { x: 1 }, cwd: dataDir }, dataDir);
+      assert.equal(decision(noModeRes), 'deny', `expected deny (absent permission_mode) for ${toolName}`);
+    }
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate: a pre-existing local "approved" record for an MCP action class cannot authorize execution on its own', () => {
+  // Same native-permission-approval invariant as the Bash case
+  // (docs/adr/0025-native-permission-approval.md, ADR-0027): a local
+  // riskApprovals record, however it got there, must never authorize
+  // execution by itself. Now that MCP require-approval classes route
+  // through the native ask prompt, the authorization decision belongs to
+  // Claude Code's own permission UI -- the persisted local record is never
+  // read or consumed here regardless, so this proves its presence changes
+  // nothing: every attempt still routes through ask, not a silent allow.
   const dataDir = mkTempDataDir();
   try {
     const { statePath } = createActiveRun(dataDir);
@@ -86,15 +145,17 @@ test('risk-gate: an approved class-level approval allows exactly one MCP write a
         consumedAt: null,
         fingerprint: null,
         target: null,
-        summary: 'merge PR #42 after review',
+        summary: 'a stale/historical local approval record',
       });
     });
 
     const first = runHook(GATE, mcpPayload(dataDir, 'mcp__github__merge_pull_request', { pr: 42 }), dataDir);
-    assert.equal(decision(first), 'allow');
+    assert.equal(decision(first), 'ask');
+    assert.notEqual(decision(first), 'allow');
 
     const second = runHook(GATE, mcpPayload(dataDir, 'mcp__github__merge_pull_request', { pr: 43 }), dataDir);
-    assert.equal(decision(second), 'deny', 'the single-use approval must not authorize a second merge');
+    assert.equal(decision(second), 'ask');
+    assert.notEqual(decision(second), 'allow');
   } finally {
     cleanup(dataDir);
   }

@@ -9,7 +9,7 @@
       "name": "krylo",
       "source": "./plugins/krylo",
       "description": "Autonomous, evidence-driven software-development workflow for Claude Code. Explicit /krylo:run entry point, bounded Orbit loop, minimal agent team, gated risk actions, local-only telemetry.",
-      "version": "0.1.1",
+      "version": "0.2.0",
       "category": "workflow",
       "license": "Apache-2.0",
       "keywords": [

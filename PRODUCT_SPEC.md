@@ -2,7 +2,7 @@
 
 ## Product summary
 
-KRYLO is a Claude Code plugin that turns one high-level task into a controlled software-development run. It analyzes the repository, derives acceptance criteria, selects a risk level and workflow lane, delegates bounded work to specialized agents, verifies the result, performs independent review, and produces an evidence-backed completion report.
+KRYLO is an evidence-driven software-development orchestration product with Claude Code and Codex as approved first-class hosts. The 0.1.x shipped surface is the Claude Code plugin; KRYLO 0.2 adds the Codex host through the approved multi-host roadmap (`docs/adr/0023-multi-host-product-and-shared-core.md`). On each host, KRYLO turns one high-level task into a controlled software-development run: it analyzes the repository, derives acceptance criteria, selects a risk level and workflow lane, delegates bounded work to specialized agents, verifies the result, performs independent review, and produces an evidence-backed completion report.
 
 ## Primary user
 
@@ -14,6 +14,8 @@ A developer, founder, product owner, or technical operator who wants Claude Code
 
 ## Primary command
 
+On the Claude host, the shipped public command is:
+
 ```text
 /krylo:run <task>
 ```
@@ -23,6 +25,14 @@ Optional local convenience alias:
 ```text
 /krylo <task>
 ```
+
+On the Codex host, the explicit invocation is:
+
+```text
+$krylo-run <task>
+```
+
+Implemented per `docs/adr/0029-codex-host-packaging-and-approval-boundary.md` and `docs/process/CODEX_HOST_IMPLEMENTATION_PLAN.md`: a real Codex CLI plugin, explicit-only (implicit invocation disabled), reusing the same Shared Core as the Claude host. `docs/codex-capability-matrix.md` records exactly which capabilities are confirmed live versus statically inspected versus deferred, including the narrower `require-approval` guarantee on Codex (deterministic deny rather than a native approval prompt) and the still-pending full VS Code project-hook enforcement setup.
 
 ## Product goals
 
@@ -62,6 +72,26 @@ KRYLO v0.1.0 will not:
 - The Orbit loop is bounded and stops on stagnation or iteration limit.
 - The plugin operates with no optional third-party integration installed.
 - Tests pass on Windows and Linux, with macOS compatibility covered by portable path and process behavior.
+
+## Goals for 0.2 (multi-host Foundation)
+
+- Generalize Shared Core so it does not depend on Claude-only session, option, model, or Hook-output field names.
+- Give every run a KRYLO-owned `runId` independent of any host session identifier.
+- Preserve all v0.1.0 Claude behavior, security controls, and success criteria unchanged while the Foundation lands.
+
+## Goals for 0.2 (Codex host)
+
+- Ship a real Codex CLI plugin (`.codex-plugin/plugin.json`, explicit-only `krylo-run` Skill, Codex Hook transport) reusing Shared Core, per `docs/adr/0029-codex-host-packaging-and-approval-boundary.md`.
+- Preserve every Claude host guarantee unchanged (regression-proven, `docs/codex-capability-matrix.md` and the full test suite).
+- Document every Codex capability gap with an explicit safe fallback rather than overclaim parity with Claude -- most notably, `require-approval` denies deterministically on Codex instead of using a native approval prompt, since current Codex `PreToolUse` output does not support one.
+- Full VS Code project-scoped hook enforcement setup (`<repo>/.codex/hooks.json` with dry-run/backup/rollback) remains explicitly out of scope for this checkpoint and is tracked as separate, later work; the standalone-Skill install path ships now. Scheduled Ecosystem Maintenance and the `0.2.0` version bump are implemented in this same release line (see `docs/adr/0031-ecosystem-maintenance-drift-checker.md` and CHANGELOG's `[0.2.0]` entry).
+
+## Goals for 0.2 (Cross-Harness)
+
+- Let a KRYLO run on one native host request an optional, bounded, read-only, advisory second opinion from the OPPOSITE provider's own CLI, per `docs/adr/0030-cross-harness-advisory-workers.md`.
+- Keep the native host the sole writer and sole completion authority; a Cross-Harness worker's result is advisory evidence only.
+- Code-enforce recursion depth 1, reuse the existing native-approval/deterministic-deny boundary for data egress with no new local approval mechanism, and degrade safely (never block normal KRYLO operation) whenever the opposite provider is missing, unauthenticated, unsupported, or times out.
+- Cross-Harness v1 ships in the same `0.2.0` release line as Ecosystem Maintenance and the version bump itself (see `docs/adr/0031-ecosystem-maintenance-drift-checker.md` and CHANGELOG's `[0.2.0]` entry); none of the three is deferred to later work.
 
 ## User-visible terminal states
 
