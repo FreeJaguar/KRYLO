@@ -76,8 +76,8 @@
     },
     {
       "path": ".github/workflows/release.yml",
-      "bytes": 3202,
-      "sha256": "805e65690f0dd13bfd82083dc19ed593211d6077299db70e9bf7e12e0cc84485"
+      "bytes": 4124,
+      "sha256": "277f1dfb57059f4a462207b5eb299fbf01063874dccd607fd0019ed920073184"
     },
     {
       "path": ".github/workflows/sbom.yml",
@@ -156,8 +156,8 @@
     },
     {
       "path": "RELEASE_READINESS.md",
-      "bytes": 38944,
-      "sha256": "7085fa68c0cbfad8be9e8b5b451a7ce33b2288271b37815b6d3acfa7e707494e"
+      "bytes": 40996,
+      "sha256": "4ca013f97a2c9e38bea9d88207036055daf61968eba62db30bd732cb78d168f3"
     },
     {
       "path": "SECURITY.md",
@@ -1446,8 +1446,8 @@
     },
     {
       "path": "plugins/krylo/tests/governance/release-tag-contract.test.mjs",
-      "bytes": 4132,
-      "sha256": "238fe574d2af838235081baae93eca9d08b4dbbc6d699890e40519096b69c269"
+      "bytes": 5654,
+      "sha256": "cc5598d21b109eac73ad6643e53b2f76f6ed3a101c25b3c55834d92d09843b64"
     },
     {
       "path": "plugins/krylo/tests/governance/repo-hygiene.test.mjs",
