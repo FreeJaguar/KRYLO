@@ -83,17 +83,68 @@ export function killProcessTree(pid) {
 }
 
 /**
+ * The literal set of directories `PATH` actually lists, resolved to
+ * absolute, lowercase, trailing-separator-stripped form for exact
+ * membership comparison. Reads whichever env key case-insensitively spells
+ * "path" (Windows itself treats env var names case-insensitively, and this
+ * process's own `process.env.PATH` is not guaranteed to be the exact key
+ * name a differently-cased inherited environment used).
+ */
+function pathDirectorySet() {
+  const rawPathKey = Object.keys(process.env).find((k) => k.toLowerCase() === 'path');
+  const rawPath = rawPathKey ? process.env[rawPathKey] : undefined;
+  if (typeof rawPath !== 'string' || rawPath === '') return new Set();
+  return new Set(
+    rawPath
+      .split(path.delimiter)
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => path.resolve(entry).toLowerCase().replace(/[\\/]+$/, '')),
+  );
+}
+
+/**
  * Resolve `command` to an absolute path via the OS's own PATH search
  * (`where` on Windows), preferring a `.cmd` result (PATHEXT's own default
  * preference order, and the shape resolveWindowsShimTarget() below knows
  * how to parse). Returns null if nothing is found.
+ *
+ * A fresh independent Security Reviewer found and reproduced, with a
+ * working exploit, that Windows' `where.exe` searches the CURRENT
+ * DIRECTORY before PATH -- confirmed directly: `where codex`, run from a
+ * directory containing an attacker-planted `codex.cmd`, lists that file
+ * FIRST, ahead of the real PATH-installed one. For a Cross-Harness worker
+ * launch (docs/adr/0030-cross-harness-advisory-workers.md), that cwd is the
+ * untrusted project root -- writable by the model through KRYLO's own
+ * ordinary, risk-gate-permitted Write tool. An earlier version
+ * of this fix pinned `where`'s own cwd to `os.tmpdir()`; a SECOND
+ * independent Security Reviewer, re-checking that exact fix, reproduced
+ * that this only RELOCATED the vulnerability rather than closing it: (a)
+ * `os.tmpdir()`'s own root is itself an equally Write-reachable location
+ * (confirmed: a decoy planted directly there is still picked first), and
+ * (b) `os.tmpdir()` is computed from the `TEMP`/`TMP` environment
+ * variables, so redirecting either back to the project root fully revives
+ * the original exploit -- no KRYLO-named sentinel gates a bare `TEMP`/`TMP`
+ * assignment. No cwd is trustworthy for this purpose, by construction: cwd
+ * only ever describes where a process happens to be running, never what a
+ * human actually approved as an executable location. The real fix does not
+ * try to find a safe cwd at all -- it validates the RESULT: after `where`
+ * returns its candidates, every one is checked against the literal
+ * directories `PATH` itself lists (pathDirectorySet(), above), and only a
+ * candidate whose own containing directory is an exact PATH member is ever
+ * accepted. A decoy anywhere else -- cwd, tmpdir, or any other writable
+ * location not itself listed in PATH -- is rejected outright, regardless
+ * of where `where` was run from or what it returned first.
  */
 function resolveOnPath(command) {
   if (path.isAbsolute(command) && fs.existsSync(command)) return command;
   try {
-    const res = spawnSync('where', [command], { encoding: 'utf8', shell: false, timeout: 5000 });
+    const res = spawnSync('where', [command], { encoding: 'utf8', shell: false, timeout: 5000, cwd: os.tmpdir() });
     if (res.status !== 0 || typeof res.stdout !== 'string') return null;
-    const candidates = res.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const allCandidates = res.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    const pathDirs = pathDirectorySet();
+    const candidates = allCandidates.filter((c) => pathDirs.has(path.dirname(c).toLowerCase().replace(/[\\/]+$/, '')));
+    if (candidates.length === 0) return null;
     const cmdCandidate = candidates.find((c) => c.toLowerCase().endsWith('.cmd'));
     const exeCandidate = candidates.find((c) => c.toLowerCase().endsWith('.exe'));
     return cmdCandidate || exeCandidate || candidates[0] || null;
