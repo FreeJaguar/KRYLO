@@ -4,6 +4,20 @@ Persistent implementation progress record. Every status below cites evidence tha
 
 Status legend: `locally passed` (executed and verified in this environment), `statically inspected` (read/analyzed, not executed), `configured but not run` (a check/tool exists and is wired correctly but did not actually execute here), `environment-blocked` (requires something this environment cannot provide, e.g. an authenticated live host session), `GitHub-hosted CI pending` (the workflow has not run remotely), `GitHub-hosted CI stuck` (the workflow run was dispatched by GitHub but never completed), `external publication not performed` (deliberately, per this checkpoint's own hard-stop boundary).
 
+## Update 2026-09-09 (final pre-merge) — this section supersedes every status section below
+
+**Last code-changing head**: `3c3b3de27729f25ee651cf396542aa42efafe367`. This is the last commit on `feat/multi-host-0.2` that changed runtime code, tests, or documentation content -- the head all evidence in this section was produced against. Any commit made AFTER this one on this branch is release-evidence/manifest-only (e.g. this very reconciliation, and the `RELEASE_MANIFEST.json` regeneration that must follow it, since the generator sources from `git ls-tree -r HEAD` and so must run after, not before, a documentation commit). Such a commit changes `HEAD` but not the validated content this section describes, and it must itself pass the full required GitHub Actions check set before this branch is considered merge-ready on ITS OWN head -- this document is not a substitute for checking that. **PR #9 (`https://github.com/FreeJaguar/KRYLO/pull/9`) is the live source of truth for the exact-current-head CI status; treat any status below as describing `3c3b3de` specifically, not necessarily the PR's current head.**
+
+As of `3c3b3de`:
+
+- **Local validation**: `git diff --check` passed; `npm run syntax` passed; `npm run validate:runtime` passed (syntax + schema consistency + host isolation + runtime smoke); `npm test`: **651 total, 650 pass, 0 fail, 1 expected skip** (a POSIX-only `spawn-platform` test correctly skipped on Windows); `claude plugin validate --strict` passed for both the plugin and marketplace manifests.
+- **Release manifest**: regenerated deterministically (two runs, byte-identical) and independently verified -- **343 files, 0 errors**.
+- **GitHub-hosted CI on this exact head**: every required check passed -- `CodeQL`, `analyze`, `dependency-review`, `osv-scan`, `osv-scanner`, `semgrep`, `secret-scan` (`trufflehog`), `validate-plugin` (`validate`), `pin-check`, and `zizmor`, plus **all four `test` matrix cells**: `ubuntu-latest` (Node 22), `ubuntu-latest` (Node 24), `windows-latest` (Node 22), `windows-latest` (Node 24).
+- **The Windows `fs.realpathSync.native` PATH-canonicalization fix (`spawn-platform.mjs`) is now empirically confirmed**, not merely locally validated: both `windows-latest` `test` matrix cells passed on real GitHub Actions infrastructure on this exact head.
+- **PR #9 state on this head**: `mergeable: MERGEABLE`, `mergeStateStatus: CLEAN`.
+- **Earlier queued/failed CI states remain historical evidence only**: the original stuck-`queued` condition on this PR's first pushed head, and the subsequent real (non-stuck) run on head `6a895d3` that failed all 4 `test` cells (root-caused and fixed on `3c3b3de`, per the "Second independent review round" / CI-fix bullets below) -- both are superseded by the green result above and are not the current state.
+- **No merge, tag, release, publication, or deployment has occurred.**
+
 ## Update 2026-09-09 — PR #9 open; this section supersedes the 2026-08-26 pre-push snapshot below
 
 `feat/multi-host-0.2` **has since been pushed** and is now **PR #9** (`feat/multi-host-0.2` → `main`), opened 2026-08-26, state `OPEN`. Everything in "Repository reality" and "Validation matrix" below was written before that push and is a historical pre-push snapshot only — kept for the record, not current fact. Current reality, re-verified 2026-09-09:
