@@ -74,17 +74,22 @@ jobs:
           TAG: ${{ github.event.inputs.tag }}
         run: |
           # `gh release create` with no --target tags whatever commit the
-          # repository's default branch points to AT THE MOMENT the GitHub
-          # API call executes -- not the commit this job actually checked
-          # out and built the archive from. workflow_dispatch's checkout
-          # above resolves the ref selected at dispatch time, but if `main`
-          # advances (another push/merge lands) before this step runs, the
-          # tag would point to that newer commit while the uploaded
-          # archive/checksums/attestation above were built from the older,
-          # actually-verified one -- a real tag/archive mismatch race.
-          # github.sha is fixed for the whole workflow run to the commit
-          # resolved at dispatch time, so pinning the tag to it explicitly
-          # closes the race regardless of what happens to the branch after.
+          # repository's default branch points to at the moment the release
+          # is actually created/finalized -- not the commit this job
+          # checked out and built the archive from. Because this release is
+          # `--draft`, GitHub does not fix a draft's target_commitish at
+          # creation time at all (confirmed against GitHub's own release
+          # API description: "unused if the git tag already exists" /
+          # resolved from the default branch); it is only resolved when a
+          # human later PUBLISHES the draft. So the mismatch window is not
+          # merely "between this job's checkout and this step running" --
+          # it is open for as long as the draft sits unpublished, and `main`
+          # can advance any number of times (any number of merges) in that
+          # window with no warning. github.sha is fixed for the whole
+          # workflow run to the commit resolved at dispatch time (and is
+          # preserved verbatim across a re-run), so pinning the tag to it
+          # explicitly closes this regardless of how long the draft
+          # persists or what happens to the branch meanwhile.
           gh release create "$TAG" \
             --target "$GITHUB_SHA" \
             --draft \

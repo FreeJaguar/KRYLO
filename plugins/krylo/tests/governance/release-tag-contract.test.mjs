@@ -78,24 +78,41 @@ test('every uses: reference in release.yml is pinned to a full commit SHA', () =
 
 // Regression: `gh release create "$TAG"` with no --target tags whatever
 // commit the repository's DEFAULT BRANCH points to at the moment the
-// GitHub API call executes, not the commit this job's own checkout
-// resolved and built the archive/checksums/attestation from. If `main`
-// advances (another push/merge lands) between this job's checkout and this
-// step running, the tag would silently point to that newer commit while
-// the uploaded archive was built from the older, actually-verified one --
-// a real tag/archive mismatch. `GITHUB_SHA` is fixed for the whole
-// workflow run to the commit resolved at dispatch time, so pinning
-// `--target "$GITHUB_SHA"` closes the race regardless of what happens to
-// the branch afterwards. Extracts the real step text (not a
-// reimplementation) matching this file's own established convention.
+// GitHub API call actually creates/finalizes the release -- for a
+// `--draft` release (as this workflow uses) that is not creation time but
+// PUBLISH time, since GitHub does not fix a draft's target_commitish until
+// it is published (confirmed against GitHub's own release-creation API
+// description). A draft published after `main` has advanced would
+// silently tag a different, unverified commit than the uploaded
+// archive/checksums/attestation. `GITHUB_SHA` is fixed for the whole
+// workflow run to the commit resolved at dispatch time (unaffected by
+// later pushes, and preserved verbatim across a re-run), so pinning
+// `--target "$GITHUB_SHA"` closes this regardless of how long the draft
+// sits before being published. Extracts the real step text (not a
+// reimplementation) matching this file's own established convention;
+// the `--target` assertion is deliberately order-independent (it must not
+// break on a harmless flag reordering) and a second assertion confirms the
+// step's own `env:` block never shadows the reserved `GITHUB_SHA` variable
+// with something else, which would silently defeat the pin.
 test('the release-creation step explicitly pins the tag target to GITHUB_SHA, never the live default branch', () => {
   const workflowText = fs.readFileSync(RELEASE_WORKFLOW, 'utf8');
   const script = extractStepScript(workflowText, 'Create GitHub release (draft)');
   assert.ok(script.includes('gh release create "$TAG"'), 'the extracted script does not look like the expected release-create step -- release.yml may have changed shape');
   assert.match(
     script,
-    /gh release create "\$TAG" \\\s*\n\s*--target "\$GITHUB_SHA"/,
-    'gh release create must pin --target "$GITHUB_SHA" immediately, not rely on the API\'s default-branch-at-call-time behavior',
+    /gh release create "\$TAG"[\s\S]*?--target "\$GITHUB_SHA"/,
+    'gh release create must pin --target "$GITHUB_SHA" (order of other flags does not matter), not rely on the API\'s default-branch-at-publish-time behavior',
+  );
+
+  const stepIdx = workflowText.indexOf('name: Create GitHub release (draft)');
+  const nextStepIdx = workflowText.indexOf('\n      - ', workflowText.indexOf('run:', stepIdx));
+  const fullStepBlock = workflowText.slice(stepIdx, nextStepIdx === -1 ? workflowText.length : nextStepIdx);
+  const envBlockMatch = /env:\s*\n((?:\s+\S.*\n?)+)/.exec(fullStepBlock);
+  assert.ok(envBlockMatch, 'expected an env: block on this step');
+  assert.doesNotMatch(
+    envBlockMatch[1],
+    /^\s*GITHUB_SHA:/m,
+    'this step\'s own env: block must never redefine GITHUB_SHA -- doing so would silently defeat the --target pin above',
   );
 });
 
