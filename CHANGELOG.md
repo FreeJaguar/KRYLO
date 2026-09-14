@@ -6,6 +6,10 @@ The project follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- **Codex project-scoped hook enforcement (ADR-0032), closing the VS Code follow-up disclosed in ADR-0029.** `scripts/setup/install-codex.mjs --target hooks` installs `<project>/.codex/hooks.json` with dry-run/backup/ownership-refusal/rollback, via a thin, policy-free project-local launcher (`codex/project-hooks/codex-project-hook-launcher.mjs`). `--target skill` now also bundles a real, functional runtime alongside the Skill so a standalone (non-plugin) Codex session is genuinely self-contained. Re-verified the Codex platform contract against the current stable release (`rust-v0.152.1`, not the 0.120.0 baseline every prior Codex document here was checked against) directly from primary source -- no `require-approval`/hard-deny behavior changed as a result; see `docs/codex-capability-matrix.md`.
+
 ### Fixed
 
 - **Documentation correction: `codex plugin` CLI installation now confirmed working.** `docs/adr/0029-codex-host-packaging-and-approval-boundary.md`, `README.md`, and `docs/codex-capability-matrix.md` claimed no native `codex plugin` CLI install path existed, verified against `codex-cli 0.120.0` (2026-08-26). Re-verified 2026-09-14 against `codex-cli 0.153.4`: `codex plugin marketplace add`/`codex plugin add` now exist and successfully installed KRYLO's plugin (`plugins/krylo/.codex-plugin/plugin.json` auto-discovered, `enabled: true`), first in an isolated `CODEX_HOME`, then against a real `~/.codex` at the user's explicit request. The `require-approval` deny-by-default boundary, PreToolUse matcher, and `UserPromptSubmit` session-bootstrap design are unaffected; only the previously-recorded installation-mechanism fact changes. Live, authenticated hook-firing through this install path remains unverified and is disclosed as such, not claimed.

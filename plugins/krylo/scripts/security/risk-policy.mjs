@@ -88,6 +88,11 @@ const HOOK_ENTRYPOINT_FILENAMES = [
   'risk-gate-codex.mjs',
   'permission-request-codex.mjs',
   'posttool-telemetry-codex.mjs',
+  // Project-scoped hook launcher (docs/adr/0032-codex-project-scoped-hook-enforcement.md):
+  // a redirector that re-executes the real scripts above -- without its own
+  // entry here, a model could route around every filename check above by
+  // invoking the launcher instead of the real script directly.
+  'codex-project-hook-launcher.mjs',
 ];
 
 /**
@@ -288,6 +293,75 @@ function touchesClaudeSettings({ toolName, toolInput, cwd }) {
       // on the real settings file once the OS resolves it. realpathBestEffort
       // mirrors touchesDataRoot()'s own symlink handling, including its
       // best-effort behavior for a target file that does not exist yet.
+      return check(realpathBestEffort(resolved));
+    } catch {
+      return false;
+    }
+  }
+
+  return false;
+}
+
+// docs/adr/0032-codex-project-scoped-hook-enforcement.md's project-scoped
+// Codex hook files. Unlike every other KRYLO-owned file this module
+// protects, these live INSIDE a user's own project tree (install-codex.mjs
+// --target hooks writes <project>/.codex/hooks.json, its ownership
+// sidecar, and the launcher directory) and are the actual PreToolUse
+// enforcement boundary for a standalone Codex session -- a fresh
+// independent Security Reviewer found and reproduced that neither was
+// protected at all: a model could Write a no-op replacement over the
+// launcher, or Write `{}` over hooks.json, both classified `pass`, and a
+// PreToolUse hook that fails to emit valid output is confirmed to fail
+// OPEN on the current stable Codex release (docs/codex-capability-matrix.md)
+// -- a silent, total enforcement bypass for the rest of the session.
+const CODEX_PROJECT_HOOK_FILES = ['hooks.json', 'krylo-hooks-meta.json'];
+
+function touchesCodexProjectHooks({ toolName, toolInput, cwd }) {
+  const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
+  const name = String(toolName ?? '');
+
+  const pathFragments = [
+    ...CODEX_PROJECT_HOOK_FILES.flatMap((f) => [`.codex/${f}`, `.codex\\${f}`]),
+    '.codex/krylo/',
+    '.codex\\krylo\\',
+  ].map((v) => v.toLowerCase());
+
+  if (name === 'Bash' || name === 'PowerShell') {
+    const command = String(input.command ?? '').toLowerCase();
+    if (pathFragments.some((v) => command.includes(v))) return true;
+    const expanded = homeExpandedVariants(command, os.homedir());
+    return expanded.some((e) => pathFragments.some((v) => e.toLowerCase().includes(v)));
+  }
+
+  if (name === 'Write' || name === 'Edit' || name === 'NotebookEdit' || name === 'apply_patch') {
+    const target = typeof input.file_path === 'string'
+      ? input.file_path
+      : typeof input.notebook_path === 'string'
+        ? input.notebook_path
+        : '';
+    if (target === '') return false;
+    // Same normalization discipline as touchesClaudeSettings() above: strip
+    // an NTFS alternate-data-stream suffix, expand a leading `~`, then
+    // resolve through `.`/`..`/double-separators (and a best-effort
+    // symlink resolution) before comparing -- never match the raw string.
+    const withoutAds = target.replace(/::[^\\/]*$/, '');
+    const tildeExpanded = /^~[/\\]/.test(withoutAds)
+      ? path.join(os.homedir(), withoutAds.slice(2))
+      : withoutAds;
+    try {
+      const resolved = path.resolve(cwd || process.cwd(), tildeExpanded);
+      const check = (candidate) => {
+        const lower = candidate.toLowerCase().replace(/\\/g, '/');
+        const base = path.basename(lower);
+        const parentBase = path.basename(path.dirname(lower));
+        if (parentBase === '.codex' && CODEX_PROJECT_HOOK_FILES.some((f) => base === f.toLowerCase())) return true;
+        // Anything under .codex/krylo/ (the launcher directory) at any
+        // depth, not just its top-level files.
+        const segments = lower.split('/');
+        const codexIdx = segments.lastIndexOf('.codex');
+        return codexIdx !== -1 && segments[codexIdx + 1] === 'krylo';
+      };
+      if (check(resolved)) return true;
       return check(realpathBestEffort(resolved));
     } catch {
       return false;
@@ -1291,6 +1365,10 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
     return { action: 'deny', category: 'security-config-protection', reason: SECURITY_CONFIG_WEAKENING_REASON };
   }
 
+  if (touchesCodexProjectHooks({ toolName: name, toolInput: input, cwd })) {
+    return { action: 'deny', category: 'security-config-protection', reason: SECURITY_CONFIG_WEAKENING_REASON };
+  }
+
   if (touchesPluginInstallation({ toolName: name, toolInput: input, cwd, pluginRoot })) {
     return { action: 'deny', category: 'plugin-installation-protection', reason: PLUGIN_INSTALLATION_REASON };
   }
@@ -1390,6 +1468,9 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
         return { action: 'deny', category: 'data-root-protection', reason: DATA_ROOT_REASON };
       }
       if (touchesClaudeSettings({ toolName: name, toolInput: syntheticInput, cwd })) {
+        return { action: 'deny', category: 'security-config-protection', reason: SECURITY_CONFIG_WEAKENING_REASON };
+      }
+      if (touchesCodexProjectHooks({ toolName: name, toolInput: syntheticInput, cwd })) {
         return { action: 'deny', category: 'security-config-protection', reason: SECURITY_CONFIG_WEAKENING_REASON };
       }
       if (touchesPluginInstallation({ toolName: name, toolInput: syntheticInput, cwd, pluginRoot })) {

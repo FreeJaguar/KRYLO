@@ -79,6 +79,17 @@ function classifySkillOwnership(skillFile) {
   return /krylo-codex-skill-version:/.test(content) ? 'krylo-owned' : 'foreign';
 }
 
+// A standalone (non-plugin) Codex session has no PLUGIN_ROOT at all, so the
+// Skill alone (SKILL.md + agents/openai.yaml) is not enough for KRYLO to
+// actually run there: every runtime script it would invoke has to
+// physically exist somewhere a portable, deterministic path can reach.
+// scripts/host/codex/context.mjs's own resolveCodexPluginRoot() already
+// falls back to an import.meta.url-relative root when PLUGIN_ROOT is unset
+// -- copying the real runtime verbatim to this same destination is what
+// makes that existing fallback resolve correctly here, with no change to
+// context.mjs itself required (docs/adr/0032-codex-project-scoped-hook-enforcement.md).
+const RUNTIME_DIRS = ['scripts', 'references', 'schemas', 'policies'];
+
 function planSkillInstall(apply) {
   const skillDestDir = path.join(homeDir(), '.agents', 'skills', 'krylo-run');
   const skillDestFile = path.join(skillDestDir, 'SKILL.md');
@@ -113,12 +124,12 @@ function planSkillInstall(apply) {
     destination: skillDestDir,
     existing,
     backup: backupPath,
-    enforcementNote: 'Installing the Skill alone makes $krylo-run discoverable/invocable (CLI and IDE), but provides NO hook enforcement on its own -- the Codex IDE extension does not support plugins. Full enforcement in VS Code additionally requires trusted project-scoped hooks, which this checkpoint does not yet automate (see the Codex capability matrix). Until then, a standalone-Skill-only session should be treated as read-only/diagnostic, not a fully enforced autonomous run.',
+    enforcementNote: 'Installing the Skill makes $krylo-run discoverable/invocable (CLI and IDE) and bundles a real, functional runtime, but provides NO hook enforcement on its own -- the Codex IDE extension does not support plugins. Full enforcement in VS Code additionally requires trusted project-scoped hooks: run install-codex.mjs --target hooks --apply in the target project (see the Codex capability matrix). Until project hooks are installed and trusted, a standalone-Skill-only session should be treated as read-only/diagnostic, not a fully enforced autonomous run.',
     rollback: backupPath
       ? `restore ${backupPath} over ${skillDestDir}, or remove ${skillDestDir} entirely`
       : `remove ${skillDestDir} entirely`,
     actions: [
-      `stage ${skillSrcDir} -> ${skillDestDir}.new-<pid>-<ts> and verify it`,
+      `stage ${skillSrcDir} (plus this repository's own ${RUNTIME_DIRS.join('/')} runtime) -> ${skillDestDir}.new-<pid>-<ts> and verify it`,
       ...(backupPath ? [`move ${skillDestDir} -> ${backupPath}`] : []),
       `move ${skillDestDir}.new-<pid>-<ts> -> ${skillDestDir}`,
     ],
@@ -134,6 +145,9 @@ function planSkillInstall(apply) {
     const tempDir = `${skillDestDir}.new-${process.pid}-${Date.now()}`;
     fs.rmSync(tempDir, { recursive: true, force: true });
     copyDirRecursive(skillSrcDir, tempDir);
+    for (const d of RUNTIME_DIRS) {
+      copyDirRecursive(path.join(pluginRoot(), d), path.join(tempDir, d));
+    }
     const tempSkillFile = path.join(tempDir, 'SKILL.md');
     // Stamp ownership onto the staged copy without mutating the
     // repository's own source file.
@@ -311,8 +325,290 @@ function removeRules(apply, projectDir) {
   return plan;
 }
 
+// Project-scoped Codex hook enforcement
+// (docs/adr/0032-codex-project-scoped-hook-enforcement.md,
+// docs/process/MULTI_HOST_CODEX_MAINTENANCE_DESIGN.md Section 10.4).
+//
+// --target hooks: installs <project>/.codex/hooks.json entries for
+// UserPromptSubmit/PreToolUse/PostToolUse, each pointing at a thin,
+// project-local launcher (<project>/.codex/krylo/codex-project-hook-launcher.mjs)
+// via a plain project-relative command path -- never a machine-specific
+// absolute path, since Codex confirms PLUGIN_ROOT/PLUGIN_DATA are
+// plugin-bundled-hook-only and no portable templating exists for
+// project-hook command strings. The launcher itself locates the real
+// runtime this repository's own --target skill install already bundles
+// (scripts/references/schemas/policies copied verbatim to
+// $HOME/.agents/skills/krylo-run/) at RUN TIME via a portable algorithm, so
+// nothing here ever embeds a per-machine path in shareable config.
+//
+// hooks.json is a file Codex itself may also use for a project's OWN
+// unrelated hooks, so this is a genuine semantic array-level merge, not a
+// whole-file replace like the Skill/.rules installs above: KRYLO owns
+// exactly one matcher-group entry per event, tracked via a KRYLO-owned
+// sidecar (<project>/.codex/krylo-hooks-meta.json) recording exactly which
+// entry KRYLO installed, so a later upgrade/removal can find and replace/
+// remove precisely that entry and leave every other entry (KRYLO's own
+// other events, or another tool's own hooks entirely) byte-for-byte
+// untouched. If the sidecar's recorded entry no longer matches what is
+// actually live (hand-edited or partially removed), setup refuses to touch
+// that event automatically rather than guess.
+
+const HOOKS_VERSION = '0.2.0';
+const HOOK_EVENTS = ['UserPromptSubmit', 'PreToolUse', 'PostToolUse'];
+const LAUNCHER_REL_PATH = path.join('.codex', 'krylo', 'codex-project-hook-launcher.mjs');
+const EVENT_LAUNCHER_ARG = { UserPromptSubmit: 'user-prompt-submit', PreToolUse: 'pre-tool-use', PostToolUse: 'post-tool-use' };
+
+function launcherCommandsFor(event) {
+  const arg = EVENT_LAUNCHER_ARG[event];
+  return {
+    command: `node ${LAUNCHER_REL_PATH.split(path.sep).join('/')} ${arg}`,
+    commandWindows: `node ${LAUNCHER_REL_PATH.split(path.sep).join('\\')} ${arg}`,
+  };
+}
+
+function krylOwnedEntryFor(event) {
+  const { command, commandWindows } = launcherCommandsFor(event);
+  const hookDef = { type: 'command', command, commandWindows, timeout: event === 'PreToolUse' ? 30 : 15 };
+  return event === 'PreToolUse'
+    ? { matcher: 'Bash|shell|exec_command|apply_patch|mcp__.*', hooks: [hookDef] }
+    : { hooks: [hookDef] };
+}
+
+function readJsonFileSafe(file) {
+  if (!fs.existsSync(file)) return { ok: true, value: null };
+  try {
+    return { ok: true, value: JSON.parse(fs.readFileSync(file, 'utf8')) };
+  } catch {
+    return { ok: false, value: null };
+  }
+}
+
+// Deliberately simple (JSON.stringify equality, not a general deep-equal
+// dependency): every value compared here is either read back verbatim from
+// disk or constructed by krylOwnedEntryFor()'s own single, stable code
+// path, so key order is always self-consistent -- no need for order-
+// independent comparison.
+function sameJson(a, b) {
+  return JSON.stringify(a) === JSON.stringify(b);
+}
+
+// A live entry whose command references this file's own launcher, for this
+// exact event, is an unambiguous KRYLO fingerprint -- nothing else would
+// ever write that specific project-relative command string. Used below to
+// recover from a lost/corrupted sidecar (adopt instead of duplicate) and
+// is safe: it can only ever narrow a would-be "absent" append into a
+// "krylo-owned" replace, never override a genuine "ambiguous" refusal.
+function findSelfReferencingEntry(liveArray, event) {
+  const arg = EVENT_LAUNCHER_ARG[event];
+  const marker = LAUNCHER_REL_PATH.split(path.sep).join('/');
+  return liveArray.findIndex((entry) => {
+    const cmd = entry?.hooks?.[0]?.command;
+    return typeof cmd === 'string' && cmd.includes(marker) && cmd.trim().endsWith(arg);
+  });
+}
+
+function classifyEventOwnership({ liveHooksJson, sidecar, event }) {
+  const sidecarEntry = sidecar?.ownedEntries?.[event];
+  const liveArray = Array.isArray(liveHooksJson?.[event]) ? liveHooksJson[event] : [];
+
+  if (sidecarEntry) {
+    const foundIndex = liveArray.findIndex((entry) => sameJson(entry, sidecarEntry));
+    if (foundIndex !== -1) return { state: 'krylo-owned', index: foundIndex };
+    if (liveArray.length === 0) return { state: 'absent' }; // hooks.json itself was deleted/recreated -- nothing left to conflict with, safe to reinstall
+    return { state: 'ambiguous' }; // something is there, but it isn't what the sidecar recorded -- refuse rather than guess
+  }
+
+  // No sidecar record at all for this event (fresh install, or the sidecar
+  // itself was lost/corrupted). Recover by adopting an already-present
+  // self-referencing entry instead of blindly appending a duplicate.
+  const selfIndex = findSelfReferencingEntry(liveArray, event);
+  if (selfIndex !== -1) return { state: 'krylo-owned', index: selfIndex };
+  return { state: 'absent' };
+}
+
+function classifyLauncherOwnership(launcherFile) {
+  if (!fs.existsSync(launcherFile)) return 'absent';
+  const content = fs.readFileSync(launcherFile, 'utf8');
+  return /krylo-hook-launcher-version:/.test(content) ? 'krylo-owned' : 'foreign';
+}
+
+function gitTrackedState(projectDir, relFile) {
+  try {
+    execFileSync('git', ['-C', projectDir, 'ls-files', '--error-unmatch', '--', relFile], { stdio: 'ignore' });
+    return 'tracked';
+  } catch {
+    return 'untracked-or-not-a-git-repo';
+  }
+}
+
+function planHooksInstall(apply, projectDir) {
+  const codexDir = path.join(projectDir, '.codex');
+  const hooksFile = path.join(codexDir, 'hooks.json');
+  const sidecarFile = path.join(codexDir, 'krylo-hooks-meta.json');
+  const launcherDestFile = path.join(projectDir, LAUNCHER_REL_PATH);
+  const launcherSrcFile = path.join(pluginRoot(), 'codex', 'project-hooks', 'codex-project-hook-launcher.mjs');
+
+  const launcherOwnership = classifyLauncherOwnership(launcherDestFile);
+  if (launcherOwnership === 'foreign') {
+    return {
+      ok: false,
+      target: 'hooks',
+      error: 'foreign-launcher-file',
+      message: `A file already exists at ${launcherDestFile} and is not owned by KRYLO. It will NOT be overwritten. Remove or rename it manually first.`,
+    };
+  }
+
+  const liveRead = readJsonFileSafe(hooksFile);
+  if (!liveRead.ok) {
+    return { ok: false, target: 'hooks', error: 'malformed-hooks-json', message: `${hooksFile} exists but is not valid JSON. Fix or remove it manually before running setup.` };
+  }
+  const liveHooksJson = liveRead.value ?? {};
+  if (typeof liveHooksJson !== 'object' || liveHooksJson === null || Array.isArray(liveHooksJson)) {
+    return { ok: false, target: 'hooks', error: 'malformed-hooks-json', message: `${hooksFile} exists but its top level is not a JSON object.` };
+  }
+
+  const sidecarRead = readJsonFileSafe(sidecarFile);
+  const sidecar = sidecarRead.ok ? sidecarRead.value : null;
+
+  const perEvent = {};
+  for (const event of HOOK_EVENTS) perEvent[event] = classifyEventOwnership({ liveHooksJson, sidecar, event });
+
+  const ambiguousEvents = HOOK_EVENTS.filter((e) => perEvent[e].state === 'ambiguous');
+  if (ambiguousEvents.length > 0) {
+    return {
+      ok: false,
+      target: 'hooks',
+      error: 'ambiguous-ownership',
+      message: `${hooksFile} was previously set up by KRYLO for [${ambiguousEvents.join(', ')}], but the recorded entry no longer matches what is actually there (hand-edited or partially removed?). Refusing to touch ${ambiguousEvents.join(', ')} automatically -- resolve manually, then re-run setup.`,
+      ambiguousEvents,
+    };
+  }
+
+  const needsBackup = HOOK_EVENTS.some((e) => perEvent[e].state === 'krylo-owned');
+  const backupPath = needsBackup && fs.existsSync(hooksFile) ? `${hooksFile}.backup-${Date.now()}` : null;
+
+  const nextHooksJson = { ...liveHooksJson };
+  const newOwnedEntries = {};
+  for (const event of HOOK_EVENTS) {
+    const entry = krylOwnedEntryFor(event);
+    newOwnedEntries[event] = entry;
+    const currentArray = Array.isArray(nextHooksJson[event]) ? [...nextHooksJson[event]] : [];
+    if (perEvent[event].state === 'krylo-owned') {
+      currentArray[perEvent[event].index] = entry;
+    } else {
+      currentArray.push(entry);
+    }
+    nextHooksJson[event] = currentArray;
+  }
+
+  const gitStatus = gitTrackedState(projectDir, path.relative(projectDir, hooksFile).split(path.sep).join('/'));
+
+  const plan = {
+    ok: true,
+    target: 'hooks',
+    destination: hooksFile,
+    sidecar: sidecarFile,
+    launcher: launcherDestFile,
+    perEvent: Object.fromEntries(HOOK_EVENTS.map((e) => [e, perEvent[e].state])),
+    backup: backupPath,
+    gitStatus,
+    trustNote: "Project-local hooks only take effect once Codex's own project-trust layer for this .codex directory is reviewed and trusted (the /hooks flow) -- this script does not and cannot bypass that.",
+    rollback: backupPath
+      ? `restore ${backupPath} over ${hooksFile}`
+      : `remove the KRYLO entries with --target hooks --remove --apply, or delete ${hooksFile} entirely if it contains only KRYLO's own entries`,
+    actions: [
+      ...(backupPath ? [`copy ${hooksFile} -> ${backupPath}`] : []),
+      `write ${hooksFile}`,
+      `write ${sidecarFile}`,
+      `copy ${launcherSrcFile} -> ${launcherDestFile}`,
+    ],
+  };
+
+  if (apply) {
+    fs.mkdirSync(codexDir, { recursive: true });
+    if (backupPath) fs.copyFileSync(hooksFile, backupPath);
+    fs.writeFileSync(hooksFile, `${JSON.stringify(nextHooksJson, null, 2)}\n`, 'utf8');
+    fs.writeFileSync(sidecarFile, `${JSON.stringify({ version: HOOKS_VERSION, installedAt: new Date().toISOString(), ownedEntries: newOwnedEntries }, null, 2)}\n`, 'utf8');
+    fs.mkdirSync(path.dirname(launcherDestFile), { recursive: true });
+    fs.copyFileSync(launcherSrcFile, launcherDestFile);
+    plan.applied = true;
+  }
+  return plan;
+}
+
+function removeHooks(apply, projectDir) {
+  const codexDir = path.join(projectDir, '.codex');
+  const hooksFile = path.join(codexDir, 'hooks.json');
+  const sidecarFile = path.join(codexDir, 'krylo-hooks-meta.json');
+  const launcherDestFile = path.join(projectDir, LAUNCHER_REL_PATH);
+
+  // The sidecar (not hooks.json's own existence) is the sole source of
+  // truth for "does KRYLO have anything tracked to remove here": hooks.json
+  // itself legitimately survives a successful removal (unrelated content
+  // remains), so requiring BOTH files absent would make a second --remove
+  // call after a real one wrongly fall through to "no ownership record"
+  // below instead of the correct, idempotent "already absent".
+  if (!fs.existsSync(sidecarFile)) {
+    return { ok: true, target: 'hooks', state: 'absent', actions: [] };
+  }
+
+  const liveRead = readJsonFileSafe(hooksFile);
+  if (!liveRead.ok) {
+    return { ok: false, target: 'hooks', error: 'malformed-hooks-json', message: `${hooksFile} exists but is not valid JSON; refusing to touch it automatically.` };
+  }
+  const liveHooksJson = liveRead.value ?? {};
+  const sidecarRead = readJsonFileSafe(sidecarFile);
+  const sidecar = sidecarRead.ok ? sidecarRead.value : null;
+  if (!sidecar) {
+    return { ok: false, target: 'hooks', error: 'no-ownership-record', message: `${sidecarFile} exists but is not valid JSON; refusing to guess which entries in ${hooksFile} are KRYLO's own.` };
+  }
+
+  const perEvent = {};
+  for (const event of HOOK_EVENTS) perEvent[event] = classifyEventOwnership({ liveHooksJson, sidecar, event });
+  const ambiguousEvents = HOOK_EVENTS.filter((e) => perEvent[e].state === 'ambiguous');
+  if (ambiguousEvents.length > 0) {
+    return { ok: false, target: 'hooks', error: 'ambiguous-ownership', message: `Recorded KRYLO entries for [${ambiguousEvents.join(', ')}] no longer match what is live in ${hooksFile}; refusing to remove automatically.`, ambiguousEvents };
+  }
+
+  const backupPath = `${hooksFile}.backup-${Date.now()}`;
+  const nextHooksJson = { ...liveHooksJson };
+  for (const event of HOOK_EVENTS) {
+    if (perEvent[event].state !== 'krylo-owned') continue;
+    const arr = [...nextHooksJson[event]];
+    arr.splice(perEvent[event].index, 1);
+    if (arr.length > 0) nextHooksJson[event] = arr;
+    else delete nextHooksJson[event];
+  }
+
+  const plan = {
+    ok: true,
+    target: 'hooks',
+    backup: backupPath,
+    actions: [
+      `copy ${hooksFile} -> ${backupPath}`,
+      Object.keys(nextHooksJson).length > 0 ? `write ${hooksFile}` : `remove ${hooksFile} (no entries remain)`,
+      `remove ${sidecarFile}`,
+      `remove ${launcherDestFile}`,
+    ],
+  };
+
+  if (apply) {
+    fs.copyFileSync(hooksFile, backupPath);
+    if (Object.keys(nextHooksJson).length > 0) {
+      fs.writeFileSync(hooksFile, `${JSON.stringify(nextHooksJson, null, 2)}\n`, 'utf8');
+    } else {
+      fs.rmSync(hooksFile, { force: true });
+    }
+    fs.rmSync(sidecarFile, { force: true });
+    fs.rmSync(launcherDestFile, { force: true });
+    try { fs.rmdirSync(path.dirname(launcherDestFile)); } catch { /* not empty, or already gone -- fine, never force-remove unrelated content */ }
+    plan.applied = true;
+  }
+  return plan;
+}
+
 const KNOWN_FLAGS = new Set(['--apply', '--remove', '--target', '--project-dir', '--codex-binary']);
-const VALID_TARGETS = new Set(['skill', 'rules', 'all']);
+const VALID_TARGETS = new Set(['skill', 'rules', 'hooks', 'all']);
 
 /**
  * Reject before any mutation, not after: an unknown/missing --target value
@@ -418,9 +714,11 @@ function main() {
   if (remove) {
     if (target === 'skill' || target === 'all') results.skill = removeSkill(apply);
     if (target === 'rules' || target === 'all') results.rules = removeRules(apply, projectDir);
+    if (target === 'hooks' || target === 'all') results.hooks = removeHooks(apply, projectDir);
   } else {
     if (target === 'skill' || target === 'all') results.skill = planSkillInstall(apply);
     if (target === 'rules' || target === 'all') results.rules = planRulesInstall(apply, projectDir, codexBinary);
+    if (target === 'hooks' || target === 'all') results.hooks = planHooksInstall(apply, projectDir);
   }
 
   const overallOk = Object.values(results).every((r) => r.ok);

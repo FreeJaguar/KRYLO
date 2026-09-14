@@ -1263,6 +1263,63 @@ test('shared risk policy denies a PowerShell command directly invoking a KRYLO H
   assert.equal(result.category, 'hook-entrypoint-protection');
 });
 
+// Regression (Critical, found by a fresh independent Security Reviewer
+// against docs/adr/0032-codex-project-scoped-hook-enforcement.md): the
+// project-scoped Codex hook enforcement files (<project>/.codex/hooks.json,
+// the ownership sidecar, and the launcher directory) had NO Write/Edit/
+// NotebookEdit/apply_patch protection at all -- only Bash/PowerShell
+// EXECUTION of the launcher was denied (hook-entrypoint-protection above).
+// Reproduced directly: a model could Write a no-op replacement over the
+// launcher, or Write {} over hooks.json, both classified `pass`, silently
+// disabling every subsequent Codex PreToolUse enforcement for the rest of
+// the session (a PreToolUse hook that fails to emit valid output is
+// confirmed to fail OPEN on the current stable Codex release -- see
+// docs/codex-capability-matrix.md).
+test('shared risk policy denies Write/Edit/NotebookEdit/apply_patch targeting the Codex project-scoped hook files (hooks.json, the ownership sidecar, or anything under .codex/krylo/)', () => {
+  const dataRoot = tempDataRoot();
+  const targets = [
+    '.codex/hooks.json',
+    '.codex\\hooks.json',
+    '.codex/krylo-hooks-meta.json',
+    '.codex/krylo/codex-project-hook-launcher.mjs',
+    '.codex\\krylo\\codex-project-hook-launcher.mjs',
+    'subdir/../.codex/hooks.json',
+  ];
+  for (const target of targets) {
+    for (const toolName of ['Write', 'Edit', 'NotebookEdit']) {
+      const result = classifyRiskAction({ toolName, toolInput: { file_path: target }, cwd: process.cwd(), dataRoot });
+      assert.equal(result.action, 'deny', `expected deny for ${toolName} -> ${target}`);
+      assert.equal(result.category, 'security-config-protection');
+    }
+  }
+});
+
+test('shared risk policy denies an apply_patch call targeting .codex/hooks.json or the launcher directory', () => {
+  const dataRoot = tempDataRoot();
+  for (const target of ['.codex/hooks.json', '.codex/krylo/codex-project-hook-launcher.mjs']) {
+    const patch = `*** Begin Patch\n*** Update File: ${target}\n@@\n-old\n+new\n*** End Patch\n`;
+    const result = classifyRiskAction({ toolName: 'apply_patch', toolInput: { patch }, cwd: process.cwd(), dataRoot });
+    assert.equal(result.action, 'deny', `expected deny for apply_patch -> ${target}`);
+    assert.equal(result.category, 'security-config-protection');
+  }
+});
+
+test('shared risk policy denies a Bash/PowerShell command that textually references .codex/hooks.json or the launcher path (not just direct launcher execution)', () => {
+  const dataRoot = tempDataRoot();
+  const commands = [
+    'echo "{}" > .codex/hooks.json',
+    'rm .codex/krylo-hooks-meta.json',
+    'Remove-Item .codex\\hooks.json',
+  ];
+  for (const command of commands) {
+    for (const toolName of ['Bash', 'PowerShell']) {
+      const result = classifyRiskAction({ toolName, toolInput: { command }, cwd: process.cwd(), dataRoot });
+      assert.equal(result.action, 'deny', `expected deny for ${toolName}: ${command}`);
+      assert.equal(result.category, 'security-config-protection');
+    }
+  }
+});
+
 test('shared risk policy denies a Bash command directly invoking any Codex Hook entrypoint (regression found by a fresh independent Security Reviewer: distinct Codex filenames were silently uncovered by the Claude-only entrypoint list)', () => {
   const dataRoot = tempDataRoot();
   const codexEntrypoints = [
@@ -1270,6 +1327,10 @@ test('shared risk policy denies a Bash command directly invoking any Codex Hook 
     'scripts/security/risk-gate-codex.mjs',
     'scripts/security/permission-request-codex.mjs',
     'scripts/runtime/posttool-telemetry-codex.mjs',
+    // Project-scoped hook launcher (docs/adr/0032): a model could otherwise
+    // route around every filename above by invoking it through this
+    // redirector instead of the real script directly.
+    '.codex/krylo/codex-project-hook-launcher.mjs',
   ];
   for (const entrypoint of codexEntrypoints) {
     const result = classifyRiskAction({
