@@ -19,9 +19,16 @@ function makeFixtureRepo({ testedVersion = '0.120.0', mentionInAdr = true, hookE
     mentionInAdr ? `verified against codex-cli ${testedVersion}` : 'no version stated',
   );
 
-  const hooksJson = {};
-  for (const e of hookEvents) hooksJson[e] = [{ hooks: [{ type: 'command', command: 'x' }] }];
-  fs.writeFileSync(path.join(dir, 'plugins', 'krylo', 'hooks', 'codex-hooks.json'), JSON.stringify(hooksJson));
+  // Events nest under `hooks` -- the shape real Codex builds accept, and the
+  // one the checker must read (docs/adr/0035-codex-live-hook-verification.md).
+  // This fixture previously wrote the flat shape, which is why the suite did
+  // not catch the checker still reading the top level after the shape change.
+  const eventMap = {};
+  for (const e of hookEvents) eventMap[e] = [{ hooks: [{ type: 'command', command: 'x' }] }];
+  fs.writeFileSync(
+    path.join(dir, 'plugins', 'krylo', 'hooks', 'codex-hooks.json'),
+    JSON.stringify({ description: 'fixture', hooks: eventMap }),
+  );
 
   return dir;
 }

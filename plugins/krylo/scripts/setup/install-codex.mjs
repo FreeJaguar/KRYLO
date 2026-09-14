@@ -404,35 +404,52 @@ function krylOwnedEntryFor(event) {
 //   "warning: failed to parse hooks config ...\.codex\hooks.json: unknown
 //    field `UserPromptSubmit`, expected `description` or `hooks`"
 // -- and a rejected config is dropped IN FULL, silently, so every KRYLO
-// project-scoped hook (the PreToolUse risk gate included) simply never
-// ran. Both helpers below deliberately preserve every OTHER top-level key
-// the document carries (a project's own `description`, or anything a
-// future build adds), exactly as the per-event merge already preserves
-// unrelated entries within an event array.
+// project-scoped hook (the PreToolUse risk gate included) simply never ran.
+//
+// An independent Security Reviewer found, and reproduced, that the first
+// version of these helpers drew exactly the wrong conclusion from that
+// evidence: it "preserved every other top-level key" the document carried.
+// But the observed rejection is on ANY unrecognized top-level key, not only
+// on a flat event map -- so preserving one means writing a document Codex
+// still discards in full, while reporting `ok: true`. That reintroduced the
+// very fail-open this checkpoint exists to close, through the write path.
+// The accepted top-level key set is therefore treated as a hard allowlist,
+// in both directions: a document that violates it is refused up front
+// (never silently rewritten -- KRYLO does not restructure a file it does
+// not own), and a document KRYLO writes can only ever contain these keys.
+const ACCEPTED_HOOKS_TOP_LEVEL_KEYS = new Set(['description', 'hooks']);
+
 function eventMapOf(doc) {
   return doc?.hooks && typeof doc.hooks === 'object' && !Array.isArray(doc.hooks) ? doc.hooks : {};
 }
 
-// Hook event names Codex itself recognizes, INCLUDING ones KRYLO never
-// manages -- used only to recognize a legacy flat-shaped document (one
-// whose events sit at the top level instead of under `hooks`), so setup can
-// refuse with a precise explanation instead of silently leaving a hybrid
-// file that current builds reject in full.
-const KNOWN_CODEX_HOOK_EVENTS = new Set([
-  'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SessionStart', 'SessionEnd',
-  'PreCompact', 'PostCompact', 'SubagentStart', 'SubagentStop', 'PermissionRequest',
-]);
-
-function looksLegacyFlat(doc) {
-  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return false;
-  if ('hooks' in doc) return false;
-  return Object.keys(doc).some((key) => KNOWN_CODEX_HOOK_EVENTS.has(key));
+/**
+ * Why a pre-existing hooks.json cannot be used as-is, or null when it can.
+ * Ordered most-specific first so the message names the real problem.
+ */
+function unusableHooksDocReason(doc) {
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return 'its top level is not a JSON object';
+  const foreignKeys = Object.keys(doc).filter((key) => !ACCEPTED_HOOKS_TOP_LEVEL_KEYS.has(key));
+  if (foreignKeys.length > 0) {
+    return `it declares top-level key(s) [${foreignKeys.join(', ')}]; current Codex builds accept only "description" and "hooks" there (hook events nest UNDER "hooks"), and reject the whole file otherwise`;
+  }
+  if ('hooks' in doc && (typeof doc.hooks !== 'object' || doc.hooks === null || Array.isArray(doc.hooks))) {
+    return 'its "hooks" value is not a JSON object';
+  }
+  for (const [event, entries] of Object.entries(eventMapOf(doc))) {
+    if (!Array.isArray(entries)) return `its "hooks.${event}" value is not an array`;
+  }
+  return null;
 }
 
 function withEventMap(doc, events) {
-  const next = { ...doc };
+  // Only ever emits keys from the accepted allowlist: a `description` the
+  // document already carried is kept, everything else is impossible by
+  // construction because a document carrying anything else was refused
+  // before reaching here.
+  const next = {};
+  if (typeof doc?.description === 'string') next.description = doc.description;
   if (Object.keys(events).length > 0) next.hooks = events;
-  else delete next.hooks;
   return next;
 }
 
@@ -525,15 +542,13 @@ function planHooksInstall(apply, projectDir) {
     return { ok: false, target: 'hooks', error: 'malformed-hooks-json', message: `${hooksFile} exists but is not valid JSON. Fix or remove it manually before running setup.` };
   }
   const liveDoc = liveRead.value ?? {};
-  if (typeof liveDoc !== 'object' || liveDoc === null || Array.isArray(liveDoc)) {
-    return { ok: false, target: 'hooks', error: 'malformed-hooks-json', message: `${hooksFile} exists but its top level is not a JSON object.` };
-  }
-  if (looksLegacyFlat(liveDoc)) {
+  const unusableReason = unusableHooksDocReason(liveDoc);
+  if (unusableReason) {
     return {
       ok: false,
       target: 'hooks',
-      error: 'legacy-flat-hooks-json',
-      message: `${hooksFile} declares hook events at the top level instead of under a "hooks" key. Current Codex builds reject that shape outright ("unknown field ..., expected \`description\` or \`hooks\`") and silently drop the WHOLE file, so those hooks are already not running. KRYLO will not rewrite a file it does not own: move the event map under a top-level "hooks" key yourself (or remove the file), then re-run setup.`,
+      error: 'unusable-hooks-json',
+      message: `${hooksFile} cannot be extended safely: ${unusableReason}. A file current Codex builds reject is dropped IN FULL -- every hook in it, KRYLO's and the project's own alike, silently stops running -- so writing KRYLO's entries into it would report success while changing nothing. KRYLO will not restructure a file it does not own: fix the shape yourself (or remove the file), then re-run setup.`,
     };
   }
   const liveHooksJson = eventMapOf(liveDoc);
@@ -639,7 +654,20 @@ function removeHooks(apply, projectDir) {
     return { ok: false, target: 'hooks', error: 'malformed-hooks-json', message: `${hooksFile} exists but is not valid JSON; refusing to touch it automatically.` };
   }
   const liveDoc = liveRead.value ?? {};
-  const liveHooksJson = eventMapOf(liveDoc);
+  // Removal, unlike installation, must also work on a file written by a
+  // PRE-FIX version of this installer -- a flat top-level event map. An
+  // independent Security Reviewer reproduced the alternative: reading only
+  // the nested map there found nothing, so every event classified `absent`,
+  // KRYLO's six entries were left orphaned pointing at a launcher that had
+  // just been deleted, the ownership sidecar that could have cleaned them up
+  // later was removed, and the command still reported success. Removing
+  // KRYLO's own entries from whichever shape actually holds them is safe and
+  // correct -- it takes content out, and writes the document back in the
+  // same shape it was found, so it is never the structural rewrite of a
+  // foreign file that the INSTALL path rightly refuses to perform.
+  const isLegacyFlatDoc = !('hooks' in liveDoc)
+    && HOOK_EVENTS.some((event) => Array.isArray(liveDoc[event]));
+  const liveHooksJson = isLegacyFlatDoc ? liveDoc : eventMapOf(liveDoc);
   const sidecarRead = readJsonFileSafe(sidecarFile);
   const sidecar = sidecarRead.ok ? sidecarRead.value : null;
   if (!sidecar) {
@@ -667,10 +695,12 @@ function removeHooks(apply, projectDir) {
     if (arr.length > 0) nextEvents[event] = arr;
     else delete nextEvents[event];
   }
-  // `nextHooksJson` keeps every unrelated top-level key the document had;
-  // "nothing remains" therefore means the document is empty ONCE KRYLO's
-  // own entries are gone, not merely that the event map is.
-  const nextHooksJson = withEventMap(liveDoc, nextEvents);
+  // Written back in the SHAPE IT WAS FOUND IN: a legacy flat document stays
+  // flat (minus KRYLO's entries), a nested one stays nested. Removal never
+  // migrates a document's structure -- that is the install path's refusal to
+  // make, not a side effect of an uninstall. "Nothing remains" therefore
+  // means the document is empty once KRYLO's own entries are gone.
+  const nextHooksJson = isLegacyFlatDoc ? nextEvents : withEventMap(liveDoc, nextEvents);
 
   const plan = {
     ok: true,

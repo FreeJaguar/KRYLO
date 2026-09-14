@@ -10,7 +10,9 @@ Every Codex checkpoint so far (ADR-0029, ADR-0032, ADR-0033, ADR-0034) disclosed
 
 That test has now run. An authenticated Codex CLI became available on the development machine (`codex login status` → "Logged in using ChatGPT"), and this checkpoint ran the deferred smoke test against a real session.
 
-It found that **KRYLO's Codex host had never actually worked** — on any build, on Windows — for two independent reasons, both of which silently disabled the entire hook set including the `PreToolUse` risk gate. Both are fixed here, and both are now proven fixed by a real session.
+It found that **KRYLO's Codex host does not work on Windows on the build tested here (`codex-cli 0.154.0`)**, for two independent reasons, each of which silently disabled the entire hook set including the `PreToolUse` risk gate. Both are fixed here, and both are proven fixed by a real session.
+
+Scope of that claim, stated precisely because an independent reviewer flagged an earlier draft for overreaching: both defects are build-behaviour-dependent and were observed only against `0.154.0`. Whether either also affects `0.153.4` (the other CLI installed on this machine) or `0.120.0` (the only version in KRYLO's reviewed compatibility contract) was not tested, and no claim is made about them.
 
 ## Method (what was actually run, and where)
 

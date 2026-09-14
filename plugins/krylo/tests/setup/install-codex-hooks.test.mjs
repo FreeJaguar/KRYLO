@@ -137,24 +137,95 @@ test('install-codex hooks: preserves unrelated pre-existing events and unrelated
 // precisely rather than silently producing a hybrid document (its own
 // entries nested, the project's own still stranded at the top level, the
 // file still rejected in full).
-test('install-codex hooks: a legacy flat-shaped hooks.json is refused with a precise explanation, never silently half-migrated', () => {
+// A hooks.json Codex would reject is dropped IN FULL -- so writing KRYLO's
+// entries into one would report success while changing nothing that runs.
+// An independent Security Reviewer reproduced exactly that against the first
+// version of this fix, which refused only a *flat event map* while happily
+// preserving any other unrecognized top-level key. The accepted key set is a
+// hard allowlist; every one of these documents must be refused untouched.
+for (const [label, doc] of [
+  ['a legacy flat event map', { PreToolUse: [{ matcher: 'SomeOtherTool', hooks: [{ type: 'command', command: 'echo legacy' }] }] }],
+  ['a stray $comment key alongside a valid hooks map', { $comment: 'notes', hooks: { PreCompact: [{ hooks: [{ type: 'command', command: 'echo x' }] }] } }],
+  ['an unrecognized top-level key alongside a valid hooks map', { version: 3, hooks: { PreCompact: [{ hooks: [{ type: 'command', command: 'echo x' }] }] } }],
+  ['a hybrid document (events at top level AND under hooks)', { PreToolUse: [{ hooks: [{ type: 'command', command: 'echo legacy' }] }], hooks: { PreCompact: [{ hooks: [{ type: 'command', command: 'echo x' }] }] } }],
+  ['a non-object hooks value', { hooks: ['not', 'an', 'object'] }],
+  ['a non-array event value', { hooks: { PreToolUse: { matcher: 'x' } } }],
+]) {
+  test(`install-codex hooks: ${label} is refused untouched, never written into (a config Codex rejects is dropped in full)`, () => {
+    const home = mkHome();
+    const project = mkProject();
+    try {
+      fs.mkdirSync(path.join(project, '.codex'), { recursive: true });
+      const original = `${JSON.stringify(doc, null, 2)}`;
+      fs.writeFileSync(hooksFileOf(project), original, 'utf8');
+
+      const res = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
+      assert.equal(res.status, 1, 'must not report success');
+      assert.equal(res.json.hooks.ok, false);
+      assert.equal(res.json.hooks.error, 'unusable-hooks-json');
+
+      assert.equal(fs.readFileSync(hooksFileOf(project), 'utf8'), original, 'the project\'s own file must be left byte-for-byte untouched');
+      assert.ok(!fs.existsSync(sidecarFileOf(project)), 'no ownership sidecar may be written for a refused install');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+      fs.rmSync(project, { recursive: true, force: true });
+    }
+  });
+}
+
+// The tests above pin what KRYLO REFUSES to read; this pins what it WRITES.
+// That was the missing half: the shipped plugin config was asserted, but
+// nothing checked the installer's own output, which is how a document Codex
+// rejects could be produced while every existing test still passed.
+test('install-codex hooks: the document KRYLO writes only ever carries the top-level keys Codex accepts', () => {
   const home = mkHome();
   const project = mkProject();
   try {
     fs.mkdirSync(path.join(project, '.codex'), { recursive: true });
     fs.writeFileSync(hooksFileOf(project), JSON.stringify({
-      PreToolUse: [{ matcher: 'SomeOtherTool', hooks: [{ type: 'command', command: 'echo legacy' }] }],
+      description: 'a project\'s own description',
+      hooks: { PreCompact: [{ hooks: [{ type: 'command', command: 'echo unrelated' }] }] },
     }, null, 2), 'utf8');
 
     const res = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
-    assert.equal(res.status, 1, 'a legacy-shaped file must not report success');
-    assert.equal(res.json.hooks.ok, false);
-    assert.equal(res.json.hooks.error, 'legacy-flat-hooks-json');
-    assert.match(res.json.hooks.message, /hooks/, 'the message must explain the required shape');
+    assert.equal(res.json.hooks.applied, true);
 
-    const after = readJson(hooksFileOf(project));
-    assert.deepEqual(Object.keys(after), ['PreToolUse'], 'the project\'s own file must be left byte-for-byte untouched');
-    assert.ok(!fs.existsSync(sidecarFileOf(project)), 'no ownership sidecar may be written for a refused install');
+    const written = readJson(hooksFileOf(project));
+    for (const key of Object.keys(written)) {
+      assert.ok(['description', 'hooks'].includes(key), `KRYLO wrote top-level key "${key}", which current Codex builds reject -- dropping the WHOLE file, KRYLO's own hooks included`);
+    }
+    assert.equal(written.description, 'a project\'s own description', 'an existing description must survive');
+    assert.ok(written.hooks.PreCompact, 'unrelated events must survive');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+// Removal must still clean up an install written by a PRE-FIX version of
+// this installer (a flat event map), rather than leaving KRYLO's entries
+// orphaned while deleting the sidecar that could have identified them later
+// -- reproduced by an independent Security Reviewer.
+test('install-codex hooks: --remove cleans up a legacy flat-shaped KRYLO install instead of orphaning its entries', () => {
+  const home = mkHome();
+  const project = mkProject();
+  try {
+    const install = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
+    assert.equal(install.json.hooks.applied, true);
+
+    // Rewrite the freshly-installed (nested) document into the legacy flat
+    // shape a pre-fix KRYLO would have produced, sidecar left intact.
+    const events = readHookEvents(project);
+    fs.writeFileSync(hooksFileOf(project), JSON.stringify(events, null, 2), 'utf8');
+
+    const res = run(['--target', 'hooks', '--remove', '--apply', '--project-dir', project], home, project);
+    assert.equal(res.status, 0, JSON.stringify(res.json));
+    assert.equal(res.json.hooks.applied, true);
+
+    const remaining = fs.existsSync(hooksFileOf(project)) ? fs.readFileSync(hooksFileOf(project), 'utf8') : '';
+    assert.doesNotMatch(remaining, /codex-project-hook-launcher/, 'no KRYLO entry may survive a successful removal');
+    assert.ok(!fs.existsSync(sidecarFileOf(project)));
+    assert.ok(!fs.existsSync(launcherFileOf(project)));
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(project, { recursive: true, force: true });

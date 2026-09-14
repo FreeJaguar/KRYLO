@@ -72,7 +72,19 @@ export async function runCodexCompatChecks({ repoRoot, offline, upstream }) {
   if (codexHooksText) {
     try {
       const parsed = JSON.parse(codexHooksText);
-      declaredEvents = Object.keys(parsed).filter((k) => !k.startsWith('$'));
+      // Events nest under a top-level `hooks` key -- the only shape current
+      // Codex builds accept (docs/adr/0035-codex-live-hook-verification.md).
+      // Reading the top level directly, as this check did before that ADR,
+      // made it report the literal keys "description" and "hooks" as if they
+      // were hook events: a permanent false `high`, AND -- far worse -- it
+      // stopped looking at the real event names entirely, so the one thing
+      // this check exists to catch (a registration for an event the build
+      // does not recognize) would have passed unnoticed. Found by an
+      // independent Security Reviewer.
+      const eventMap = parsed?.hooks && typeof parsed.hooks === 'object' && !Array.isArray(parsed.hooks)
+        ? parsed.hooks
+        : {};
+      declaredEvents = Object.keys(eventMap);
     } catch {
       declaredEvents = [];
     }
