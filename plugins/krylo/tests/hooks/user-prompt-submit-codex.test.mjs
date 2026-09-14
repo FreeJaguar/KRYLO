@@ -26,8 +26,21 @@ function payload({ prompt, sessionId = 'codex-session-A', turnId = 'turn-1', cwd
   };
 }
 
-function run(p, dataDir) {
-  return runHookCodexOnly(HOOK, p, dataDir);
+// Every test using this helper cares about the bootstrap/session/marker
+// behavior downstream of the Codex Runtime Compatibility Gate
+// (docs/adr/0034-codex-runtime-compatibility-gate.md), not the gate's own
+// verdict -- so it always runs against the fixture's one reviewed/supported
+// version, deterministically, regardless of whatever real Codex CLI happens
+// to be installed on the machine running this suite (an unreviewed real
+// installed version would otherwise make the gate itself correctly
+// SAFE_BLOCK the run, breaking every test below that never meant to
+// exercise the gate at all). Tests that specifically exercise the gate's
+// own verdict call runHookCodexOnly() directly with their own
+// KRYLO_CODEX_CLI_PATH/FAKE_CODEX_VERSION_OUTPUT.
+function run(p, dataDir, { env } = {}) {
+  return runHookCodexOnly(HOOK, p, dataDir, {
+    env: { KRYLO_CODEX_COMPAT_TEST_MODE: '1', KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 0.120.0', ...env },
+  });
 }
 
 function additionalContext(res) {

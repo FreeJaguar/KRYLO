@@ -10,6 +10,15 @@ import { SCRIPTS_ROOT } from './helpers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LAUNCHER = path.resolve(__dirname, '..', '..', 'codex', 'project-hooks', 'codex-project-hook-launcher.mjs');
+// docs/adr/0034-codex-runtime-compatibility-gate.md: the real
+// user-prompt-submit-codex.mjs this launcher delegates to now probes the
+// actual `codex` on PATH before bootstrapping a full autonomous run. This
+// test cares about the launcher's own delegation/activation plumbing, not
+// the gate's verdict, so it must run against the fixture's one reviewed/
+// supported version deterministically, regardless of whatever real Codex
+// CLI happens to be installed on the machine running this suite.
+const FAKE_CLI = path.resolve(__dirname, '..', 'fixtures', 'codex-runtime-compat', os.platform() === 'win32' ? 'fake-codex-cli.cmd' : 'fake-codex-cli.sh');
+const COMPAT_SUPPORTED_ENV = { KRYLO_CODEX_COMPAT_TEST_MODE: '1', KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 0.120.0' };
 
 function mkStandaloneRoot() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-standalone-root-'));
@@ -144,7 +153,7 @@ test('launcher: a genuine $krylo-run prompt creates a real, active Codex run thr
   try {
     copyRealRuntimeInto(root);
     const sessionId = 'launcher-activation-session';
-    const res = run('user-prompt-submit', { session_id: sessionId, cwd: process.cwd(), prompt: '$krylo-run add a widget' }, root, { KRYLO_DATA_ROOT: dataRoot });
+    const res = run('user-prompt-submit', { session_id: sessionId, cwd: process.cwd(), prompt: '$krylo-run add a widget' }, root, { KRYLO_DATA_ROOT: dataRoot, ...COMPAT_SUPPORTED_ENV });
     assert.equal(res.status, 0);
     assert.match(res.json?.hookSpecificOutput?.additionalContext ?? '', /now active/i);
 
