@@ -111,8 +111,8 @@
     },
     {
       "path": "ARCHITECTURE.md",
-      "bytes": 7829,
-      "sha256": "f3ab1133886177396ad8a606f82f3abc299ce11b255b36104817aa5a6083153c"
+      "bytes": 8114,
+      "sha256": "17b0042a4e2752b21b255609394d5a526159c9b42683bfe4d0712f6e86647cab"
     },
     {
       "path": "BLUEPRINT_MANIFEST.json",
@@ -121,8 +121,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 31796,
-      "sha256": "37b3fe9328f1f5e8e4aa262816c1db49e0c8c55a669b67575f652719e8261d3e"
+      "bytes": 31919,
+      "sha256": "6090045d8de604d771812bb5ee6c8f037eb8c92d4416e8b1fe4c376a856a1512"
     },
     {
       "path": "CLAUDE.md",
@@ -661,8 +661,8 @@
     },
     {
       "path": "docs/adr/0032-codex-project-scoped-hook-enforcement.md",
-      "bytes": 14921,
-      "sha256": "14929d2d3667a1dd05a88534a2cb4e893d3affc7b618b925ab2855e321de0463"
+      "bytes": 15077,
+      "sha256": "ea24828ec7f4404cc628454dcb6202374a8311051abf4ad20b91b0067c728479"
     },
     {
       "path": "docs/adr/0033-codex-lifecycle-enforcement.md",
@@ -676,8 +676,8 @@
     },
     {
       "path": "docs/adr/0035-codex-live-hook-verification.md",
-      "bytes": 11029,
-      "sha256": "8158878320f66c4b2127d3b377003b36e8c7814230a79a040a392780223e476b"
+      "bytes": 11442,
+      "sha256": "dd7683e26e20fc242bd94aa35c0a9ea3d3a8ea50e9884263ebc8a01039e0c854"
     },
     {
       "path": "docs/adr/README.md",
@@ -691,8 +691,8 @@
     },
     {
       "path": "docs/codex-capability-matrix.md",
-      "bytes": 34396,
-      "sha256": "630f2a4a68ac99e9f8c46f147ea61ef97c30d8ff45ff099b703c58a5178b4097"
+      "bytes": 36430,
+      "sha256": "a17966f5b11805db9549f4947b856c9b979ee91ce8db3260bbf2996b643fce2f"
     },
     {
       "path": "docs/external-adapter-audit-2026-07-27.md",
@@ -711,8 +711,8 @@
     },
     {
       "path": "docs/process/CODEX_LIFECYCLE_ENFORCEMENT_IMPLEMENTATION_PLAN.md",
-      "bytes": 6884,
-      "sha256": "f449c180349d198a182fe5eb98cb30db6e73bc2e63279148a9be146f64e64588"
+      "bytes": 7289,
+      "sha256": "392009fec1ca268eb9bd5aff7ee9a6649eaf35978d74e3dfd3b0be241bea48de"
     },
     {
       "path": "docs/process/CODEX_PROJECT_HOOKS_IMPLEMENTATION_PLAN.md",
@@ -1266,8 +1266,8 @@
     },
     {
       "path": "plugins/krylo/scripts/maintenance/checks/codex-compat.mjs",
-      "bytes": 6117,
-      "sha256": "9e2f5566dd3d219ebc4f2580260327a7cb9a73679612e67d11e1e88afcd7de9a"
+      "bytes": 6873,
+      "sha256": "9016b3b24a328e4602e4fea6b0704873a639708005a6f6bd85d9e6c488919503"
     },
     {
       "path": "plugins/krylo/scripts/maintenance/checks/dependencies.mjs",
@@ -1411,8 +1411,8 @@
     },
     {
       "path": "plugins/krylo/scripts/setup/install-codex.mjs",
-      "bytes": 40418,
-      "sha256": "1801e1337c5e49f91ac852ea79f9d771540cf029d73ea95725846258c29a55b5"
+      "bytes": 42501,
+      "sha256": "d097223e7381c70e03a11db336ee9768f39e53141cf8a268d8c486ca8ea14a09"
     },
     {
       "path": "plugins/krylo/scripts/setup/remove-alias.mjs",
@@ -1651,8 +1651,8 @@
     },
     {
       "path": "plugins/krylo/tests/maintenance/codex-compat.test.mjs",
-      "bytes": 4600,
-      "sha256": "e3f6b0c37e98793d0bf05faff2ac78aa4d28951fda62aa32b27b53999cfe4cb5"
+      "bytes": 4960,
+      "sha256": "07447b9b76dda570d2a8566c7be0df687a2ec921c75ff94ddbdae1b9a347ba0a"
     },
     {
       "path": "plugins/krylo/tests/maintenance/dependencies.test.mjs",
@@ -1731,8 +1731,8 @@
     },
     {
       "path": "plugins/krylo/tests/setup/install-codex-hooks.test.mjs",
-      "bytes": 21925,
-      "sha256": "385dfac78794a276902a18d9fa551a8375d497fd8636af388a4fd80313e50f92"
+      "bytes": 26151,
+      "sha256": "a560ef588f9dddd8292a5a33591b03a6d8f9f4abbe0e4554883e60c5871f1d22"
     },
     {
       "path": "plugins/krylo/tests/setup/install-codex.test.mjs",
