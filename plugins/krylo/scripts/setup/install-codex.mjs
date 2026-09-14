@@ -20,8 +20,8 @@
 // renames it over the destination, so a mid-write crash can never leave a
 // truncated rules file in place.
 //
-// Two independent, separately-scoped targets (run one, or both, via
-// --target skill|rules|all):
+// Three independent, separately-scoped targets (run one, or several, via
+// --target skill|rules|hooks|all):
 //
 // --target skill: installs the krylo-run Skill (this repository's own
 //   plugins/krylo/codex/skills/krylo-run/, verbatim -- never a second copy of
@@ -42,6 +42,12 @@
 //   for an ordinary (non-KRYLO) session in this project, at the operator's
 //   discretion -- KRYLO's gate denies require-approval actions regardless
 //   of whether this file is installed.
+//
+// --target hooks: installs <project>/.codex/hooks.json project-scoped hook
+//   enforcement (docs/adr/0032-codex-project-scoped-hook-enforcement.md) --
+//   the mechanism that actually closes the "--target skill alone provides
+//   no enforcement" gap noted above, required because the Codex IDE
+//   extension does not support plugins at all. See planHooksInstall() below.
 
 import fs from 'node:fs';
 import os from 'node:os';
@@ -543,8 +549,18 @@ function planHooksInstall(apply, projectDir) {
   if (apply) {
     fs.mkdirSync(codexDir, { recursive: true });
     if (backupPath) fs.copyFileSync(hooksFile, backupPath);
-    fs.writeFileSync(hooksFile, `${JSON.stringify(nextHooksJson, null, 2)}\n`, 'utf8');
-    fs.writeFileSync(sidecarFile, `${JSON.stringify({ version: HOOKS_VERSION, installedAt: new Date().toISOString(), ownedEntries: newOwnedEntries }, null, 2)}\n`, 'utf8');
+    // Write-then-rename (same directory, same volume), the same pattern
+    // planRulesInstall() above already established: a crash mid-write can
+    // never leave a truncated hooks.json in place -- unlike a corrupted
+    // Skill/.rules file, a truncated hooks.json fails Codex's own JSON
+    // parsing and disables EVERY hook this project has registered, KRYLO's
+    // own PreToolUse gate included, a fail-open outcome worth closing here.
+    const hooksTemp = `${hooksFile}.new-${process.pid}-${Date.now()}`;
+    fs.writeFileSync(hooksTemp, `${JSON.stringify(nextHooksJson, null, 2)}\n`, 'utf8');
+    fs.renameSync(hooksTemp, hooksFile);
+    const sidecarTemp = `${sidecarFile}.new-${process.pid}-${Date.now()}`;
+    fs.writeFileSync(sidecarTemp, `${JSON.stringify({ version: HOOKS_VERSION, installedAt: new Date().toISOString(), ownedEntries: newOwnedEntries }, null, 2)}\n`, 'utf8');
+    fs.renameSync(sidecarTemp, sidecarFile);
     fs.mkdirSync(path.dirname(launcherDestFile), { recursive: true });
     fs.copyFileSync(launcherSrcFile, launcherDestFile);
     plan.applied = true;
@@ -586,7 +602,12 @@ function removeHooks(apply, projectDir) {
     return { ok: false, target: 'hooks', error: 'ambiguous-ownership', message: `Recorded KRYLO entries for [${ambiguousEvents.join(', ')}] no longer match what is live in ${hooksFile}; refusing to remove automatically.`, ambiguousEvents };
   }
 
-  const backupPath = `${hooksFile}.backup-${Date.now()}`;
+  // The sidecar can outlive hooks.json itself (a user may delete hooks.json
+  // by hand while leaving the sidecar behind) -- classifyEventOwnership()
+  // already treats that as "absent" for every event (an empty liveArray),
+  // so a backup is only ever meaningful, and only ever attempted, when
+  // hooks.json genuinely still exists.
+  const backupPath = fs.existsSync(hooksFile) ? `${hooksFile}.backup-${Date.now()}` : null;
   const nextHooksJson = { ...liveHooksJson };
   for (const event of HOOK_EVENTS) {
     if (perEvent[event].state !== 'krylo-owned') continue;
@@ -601,7 +622,7 @@ function removeHooks(apply, projectDir) {
     target: 'hooks',
     backup: backupPath,
     actions: [
-      `copy ${hooksFile} -> ${backupPath}`,
+      ...(backupPath ? [`copy ${hooksFile} -> ${backupPath}`] : []),
       Object.keys(nextHooksJson).length > 0 ? `write ${hooksFile}` : `remove ${hooksFile} (no entries remain)`,
       `remove ${sidecarFile}`,
       `remove ${launcherDestFile}`,
@@ -609,9 +630,11 @@ function removeHooks(apply, projectDir) {
   };
 
   if (apply) {
-    fs.copyFileSync(hooksFile, backupPath);
+    if (backupPath) fs.copyFileSync(hooksFile, backupPath);
     if (Object.keys(nextHooksJson).length > 0) {
-      fs.writeFileSync(hooksFile, `${JSON.stringify(nextHooksJson, null, 2)}\n`, 'utf8');
+      const hooksTemp = `${hooksFile}.new-${process.pid}-${Date.now()}`;
+      fs.writeFileSync(hooksTemp, `${JSON.stringify(nextHooksJson, null, 2)}\n`, 'utf8');
+      fs.renameSync(hooksTemp, hooksFile);
     } else {
       fs.rmSync(hooksFile, { force: true });
     }
@@ -703,12 +726,12 @@ function main() {
 
   const targetFlag = readFlagValue(argv, '--target');
   if (targetFlag.missing) {
-    process.stdout.write(JSON.stringify({ ok: false, error: 'missing-target-value', message: '--target requires a value: skill, rules, or all.' }, null, 2));
+    process.stdout.write(JSON.stringify({ ok: false, error: 'missing-target-value', message: '--target requires a value: skill, rules, hooks, or all.' }, null, 2));
     process.exit(1);
   }
   const target = targetFlag.present ? targetFlag.value : 'all';
   if (!VALID_TARGETS.has(target)) {
-    process.stdout.write(JSON.stringify({ ok: false, error: 'unknown-target', message: `--target must be one of: skill, rules, all (got ${JSON.stringify(target)}).` }, null, 2));
+    process.stdout.write(JSON.stringify({ ok: false, error: 'unknown-target', message: `--target must be one of: skill, rules, hooks, all (got ${JSON.stringify(target)}).` }, null, 2));
     process.exit(1);
   }
 

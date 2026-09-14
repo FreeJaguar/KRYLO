@@ -281,22 +281,41 @@ async function main() {
     state.terminalState = 'SAFE_BLOCKED';
     state.phase = 'BLOCKED';
 
-    // Independent review found the original version of this block called
-    // allowSilently() here when the audit record itself failed to persist
-    // -- inverting the fail-safe direction: a hard compatibility block was
-    // silently downgraded to total silence (no additionalContext at all),
-    // which the model could easily read as "no run exists, proceed as
-    // normal" rather than "a full autonomous run was refused." Emitting the
-    // warning costs nothing and is strictly safer regardless of whether the
-    // audit record itself could be written -- additionalContext is
-    // coordination text, never an authorization gate, so persistence
-    // failure here must never change what the model is told.
-    const blockedSaveResult = saveState(state);
+    // A fresh independent review round (Reviewer + Security Reviewer,
+    // dispatched separately) found two fail-safe gaps in this block, both
+    // reachable together: main's bootstrap-failure-marker mechanism
+    // (writeBootstrapFailureMarker, used a few lines above in
+    // denyBootstrapFailure()) did not exist yet when this compatibility
+    // gate was built on its own branch, so a SAFE_BLOCKED verdict wrote no
+    // marker at all -- risk-gate-codex.mjs's PreToolUse hook sees
+    // `!run.active`, finds no marker, and silently ALLOWS every subsequent
+    // tool call, exactly the "indistinguishable from an ordinary session"
+    // gap this file's own header comment says must never happen. Second,
+    // `saveState()` can both return {ok:false} AND throw (see the comment
+    // a few lines below this block, for the normal-path save) -- the
+    // unguarded call here meant a throw (e.g. an unwritable data root)
+    // escaped silently to main().catch() below, so the case that most
+    // needed a loud warning (an UNREVIEWED runtime, on a broken data root)
+    // produced none at all, while the same failure on a REVIEWED runtime
+    // still warned correctly via denyBootstrapFailure() -- an inversion in
+    // exactly the wrong direction. Both are fixed the same way
+    // denyBootstrapFailure() already establishes: write the marker
+    // regardless of whether the state save below succeeds (the marker is
+    // the actual PreToolUse-level enforcement; additionalContext is
+    // coordination text only), and never let a save exception bypass the
+    // warning that follows.
+    writeBootstrapFailureMarker({ projectRootHash, host: 'codex', hostSessionId: sessionId, reason: compatibility.reason });
+    let blockedSaveResult;
+    try {
+      blockedSaveResult = saveState(state);
+    } catch {
+      blockedSaveResult = { ok: false };
+    }
     emitAdditionalContext(
       `KRYLO Codex run ${runId} could not start autonomously: ${compatibility.reason} `
       + (blockedSaveResult.ok
-        ? 'This run has been recorded as SAFE_BLOCKED for audit purposes only -- do not attempt the task autonomously; report this limitation to the user.'
-        : 'The block record itself could not be persisted -- do not attempt the task autonomously regardless; report this limitation to the user.'),
+        ? 'This run has been recorded as SAFE_BLOCKED for audit purposes only -- do not attempt the task autonomously; report this limitation to the user. KRYLO will deny risk-gated actions in this session until this is resolved and $krylo-run is invoked again successfully.'
+        : 'The block record itself could not be persisted -- do not attempt the task autonomously regardless; report this limitation to the user. KRYLO will deny risk-gated actions in this session until this is resolved and $krylo-run is invoked again successfully.'),
     );
     return;
   }

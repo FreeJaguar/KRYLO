@@ -309,6 +309,34 @@ test('install-codex hooks: --remove uninstalls only the KRYLO-owned entries and 
   }
 });
 
+test('install-codex hooks: --remove when hooks.json was deleted by hand but the sidecar survives cleans up safely, never a raw ENOENT crash (regression found by independent Reviewer + Security Reviewer)', () => {
+  const home = mkHome();
+  const project = mkProject();
+  try {
+    const install = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
+    assert.equal(install.json.hooks.applied, true);
+
+    // Simulate a user hand-deleting hooks.json while leaving the sidecar
+    // (and launcher) in place -- classifyEventOwnership() already treats
+    // this as "absent" for every event, but the apply path's backup step
+    // previously called fs.copyFileSync(hooksFile, backupPath)
+    // unconditionally, throwing an uncaught ENOENT instead of the clean
+    // {ok:false}/{ok:true, state:'absent'} shape every other path here
+    // returns.
+    fs.rmSync(hooksFileOf(project), { force: true });
+    assert.ok(fs.existsSync(sidecarFileOf(project)), 'fixture precondition: sidecar must still exist');
+
+    const applyRemove = run(['--target', 'hooks', '--remove', '--apply', '--project-dir', project], home, project);
+    assert.equal(applyRemove.status, 0, 'must never crash with a raw exception, even when hooks.json is missing');
+    assert.equal(applyRemove.json.hooks.ok, true);
+    assert.ok(!fs.existsSync(sidecarFileOf(project)), 'the now-meaningless sidecar must still be cleaned up');
+    assert.ok(!fs.existsSync(launcherFileOf(project)));
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
 test('install-codex hooks: works correctly when the project directory path contains spaces', () => {
   const home = mkHome();
   const project = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo codex hooks proj '));

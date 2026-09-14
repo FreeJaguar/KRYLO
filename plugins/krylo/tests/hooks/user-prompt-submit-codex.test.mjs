@@ -500,6 +500,79 @@ test('user-prompt-submit-codex: an UNVERIFIED Codex runtime never bootstraps an 
   }
 });
 
+// Regression (fresh independent Reviewer + Security Reviewer, dispatched
+// separately, both found this): the compatibility gate above was built on
+// its own branch before writeBootstrapFailureMarker existed, so a
+// SAFE_BLOCKED verdict left NO marker behind -- risk-gate-codex.mjs's
+// PreToolUse hook sees no active run AND no marker, and silently ALLOWS
+// every subsequent tool call, exactly the "indistinguishable from an
+// ordinary session" gap this file's own header comment says must never
+// happen. Proves the fix end to end: not just that a marker is written,
+// but that a REAL subsequent PreToolUse call in the same session actually
+// denies.
+test('user-prompt-submit-codex: a SAFE_BLOCKED (unreviewed) Codex runtime still writes a bootstrap-failure marker, so a later PreToolUse call denies instead of silently allowing (regression)', () => {
+  const dataDir = mkTempDataDir('krylo-ups-');
+  const projectDir = mkTempDataDir('krylo-ups-project-');
+  try {
+    const sessionId = 'codex-session-marker';
+    const res = run(payload({ prompt: '$krylo-run fix the failing tests', sessionId, cwd: projectDir }), dataDir, {
+      env: { FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 99.0.0' },
+    });
+    assert.equal(res.status, 0);
+    assert.match(additionalContext(res) ?? '', /SAFE_BLOCKED|could not start/i);
+
+    // readBootstrapFailureMarker() itself resolves against this PROCESS's
+    // own KRYLO_DATA_ROOT, which is not set here (the marker was written by
+    // the hook SUBPROCESS, whose env pointed KRYLO_DATA_ROOT at dataDir) --
+    // so, like readState() above, check the marker file directly on disk.
+    const projectRootHash = computeProjectRootHash(projectDir);
+    const markerPath = path.join(dataDir, 'bootstrap-failures', projectRootHash, 'codex', `${sessionId}.json`);
+    assert.ok(fs.existsSync(markerPath), 'a SAFE_BLOCKED verdict must leave a bootstrap-failure marker behind, exactly like every other recognized-but-failed invocation');
+
+    const preToolUseRes = runHookCodexOnly('security/risk-gate-codex.mjs', {
+      hook_event_name: 'PreToolUse',
+      session_id: sessionId,
+      cwd: projectDir,
+      tool_name: 'Bash',
+      tool_input: { command: 'echo hi' },
+      permission_mode: 'default',
+    }, dataDir);
+    assert.equal(preToolUseRes.json?.hookSpecificOutput?.permissionDecision, 'deny', 'a SAFE_BLOCKED session must deny subsequent tool calls, never silently allow them');
+  } finally {
+    cleanup(dataDir);
+    cleanup(projectDir);
+  }
+});
+
+// Regression (Security Reviewer, reproduced live): saveState() can both
+// return {ok:false} AND throw (an unwritable data root is the realistic
+// case) -- the SAFE_BLOCKED block's own save call was unguarded, so a
+// throw there escaped silently to main()'s top-level catch, meaning the
+// MORE dangerous case (an unreviewed runtime, on top of a broken data
+// root) produced no warning at all, while the same data-root failure on a
+// REVIEWED runtime still warned correctly via denyBootstrapFailure() --
+// an inversion in exactly the wrong direction.
+test('user-prompt-submit-codex: a SAFE_BLOCKED verdict still warns even when persisting the block record itself throws (regression)', () => {
+  const dataDir = mkTempDataDir('krylo-ups-');
+  const projectDir = mkTempDataDir('krylo-ups-project-');
+  try {
+    // Same "a file exists where a directory is needed" technique the
+    // save/lock-failure test above uses to force saveState() to throw.
+    const blockedDataDir = path.join(dataDir, 'blocked');
+    fs.writeFileSync(blockedDataDir, 'not a directory', 'utf8');
+    const res = run(payload({ prompt: '$krylo-run fix the failing tests', cwd: projectDir }), blockedDataDir, {
+      env: { FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 99.0.0' },
+    });
+    assert.equal(res.status, 0, 'a broken data root must still exit 0, never crash the hook');
+    assert.notEqual(res.stdout, '', 'a SAFE_BLOCKED verdict must never go fully silent, even when its own audit record cannot be persisted');
+    assert.match(additionalContext(res) ?? '', /could not start autonomously/i);
+    assert.match(additionalContext(res) ?? '', /could not be persisted/i, 'must disclose that the block record itself failed to persist, not claim a clean audit record');
+  } finally {
+    cleanup(dataDir);
+    cleanup(projectDir);
+  }
+});
+
 test('user-prompt-submit-codex: a BLOCKED Codex runtime (explicit contract entry) also never bootstraps an active run', () => {
   const dataDir = mkTempDataDir('krylo-ups-');
   const projectDir = mkTempDataDir('krylo-ups-project-');
