@@ -62,7 +62,7 @@ test('install-codex hooks: fresh --apply writes hooks.json, the sidecar, and the
     assert.equal(res.status, 0);
     assert.equal(res.json.hooks.applied, true);
     const hooks = readJson(hooksFileOf(project));
-    for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse']) {
+    for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SessionStart', 'SessionEnd']) {
       assert.ok(Array.isArray(hooks[event]) && hooks[event].length === 1, `${event} must have exactly one KRYLO entry`);
       const hookDef = hooks[event][0].hooks[0];
       assert.match(hookDef.command, /codex-project-hook-launcher\.mjs/);
@@ -71,6 +71,10 @@ test('install-codex hooks: fresh --apply writes hooks.json, the sidecar, and the
       assert.ok(!path.isAbsolute(hookDef.command.replace(/^node\s+/, '')), 'command must be a project-relative path, never a machine-specific absolute one');
     }
     assert.match(hooks.PreToolUse[0].matcher, /Bash/);
+    // SessionEnd's real platform timeout budget is confirmed ~1-3 seconds
+    // (docs/adr/0033-codex-lifecycle-enforcement.md) -- registering a
+    // larger value risks the platform simply killing it mid-execution.
+    assert.ok(hooks.SessionEnd[0].hooks[0].timeout <= 3, 'SessionEnd timeout must respect the confirmed platform ceiling');
     assert.ok(fs.existsSync(sidecarFileOf(project)));
     assert.ok(fs.existsSync(launcherFileOf(project)));
     const launcherContent = fs.readFileSync(launcherFileOf(project), 'utf8');
@@ -87,7 +91,10 @@ test('install-codex hooks: preserves unrelated pre-existing events and unrelated
   try {
     fs.mkdirSync(path.join(project, '.codex'), { recursive: true });
     const foreignHooks = {
-      SessionStart: [{ hooks: [{ type: 'command', command: 'echo unrelated-session-start' }] }],
+      // PreCompact is genuinely out of scope for KRYLO (docs/adr/0033
+      // explicitly defers it) -- a real event KRYLO never manages, unlike
+      // SessionStart/SessionEnd/Stop, which this checkpoint now owns.
+      PreCompact: [{ hooks: [{ type: 'command', command: 'echo unrelated-precompact' }] }],
       PreToolUse: [{ matcher: 'SomeOtherTool', hooks: [{ type: 'command', command: 'echo unrelated-pretooluse' }] }],
     };
     fs.writeFileSync(hooksFileOf(project), JSON.stringify(foreignHooks, null, 2), 'utf8');
@@ -95,8 +102,8 @@ test('install-codex hooks: preserves unrelated pre-existing events and unrelated
     const res = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
     assert.equal(res.status, 0, JSON.stringify(res.json));
     const hooks = readJson(hooksFileOf(project));
-    assert.equal(hooks.SessionStart.length, 1);
-    assert.equal(hooks.SessionStart[0].hooks[0].command, 'echo unrelated-session-start', 'unrelated event must be byte-for-byte untouched');
+    assert.equal(hooks.PreCompact.length, 1);
+    assert.equal(hooks.PreCompact[0].hooks[0].command, 'echo unrelated-precompact', 'an event KRYLO does not manage at all must be byte-for-byte untouched');
     assert.equal(hooks.PreToolUse.length, 2, 'KRYLO must append alongside the existing foreign PreToolUse entry, never replace it');
     const foreignEntry = hooks.PreToolUse.find((e) => e.matcher === 'SomeOtherTool');
     assert.ok(foreignEntry, 'the foreign PreToolUse entry must still be present');
@@ -160,7 +167,7 @@ test('install-codex hooks: idempotent -- applying twice in a row never errors an
       assert.equal(res.status, 0, `apply #${i + 1} must succeed`);
     }
     const hooks = readJson(hooksFileOf(project));
-    for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse']) {
+    for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SessionStart', 'SessionEnd']) {
       assert.equal(hooks[event].length, 1, `${event} must have exactly one entry after two applies`);
     }
   } finally {
@@ -182,7 +189,7 @@ test('install-codex hooks: a lost/deleted sidecar recovers by adopting the exist
     assert.equal(second.status, 0, JSON.stringify(second.json));
     assert.equal(second.json.hooks.perEvent.PreToolUse, 'krylo-owned', 'a live launcher-referencing entry must be adopted, not treated as absent');
     const hooks = readJson(hooksFileOf(project));
-    for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse']) {
+    for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SessionStart', 'SessionEnd']) {
       assert.equal(hooks[event].length, 1, `${event} must still have exactly one entry, never duplicated`);
     }
   } finally {
@@ -203,7 +210,7 @@ test('install-codex hooks: hooks.json deleted while the sidecar survives recover
     const second = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
     assert.equal(second.status, 0, JSON.stringify(second.json));
     const hooks = readJson(hooksFileOf(project));
-    for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse']) {
+    for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SessionStart', 'SessionEnd']) {
       assert.equal(hooks[event].length, 1, `${event} must be freshly (re)installed, not stuck ambiguous`);
     }
   } finally {

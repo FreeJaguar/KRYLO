@@ -183,6 +183,128 @@ test('launcher: require-approval (git push) fails closed through the launcher un
   }
 });
 
+test('launcher: a real crash in the delegated script still propagates a nonzero exit code for user-prompt-submit/post-tool-use (regression found by a fresh independent Reviewer: an earlier version silently swallowed this to exit 0 for every non-pre-tool-use event, including these two pre-existing ones outside this checkpoint\'s own scope, hiding a corrupted install with no signal at all)', () => {
+  const root = mkStandaloneRoot();
+  try {
+    copyRealRuntimeInto(root);
+    for (const [event, scriptRelPosix] of [['user-prompt-submit', 'security/user-prompt-submit-codex.mjs'], ['post-tool-use', 'runtime/posttool-telemetry-codex.mjs']]) {
+      const scriptPath = path.join(root, 'scripts', ...scriptRelPosix.split('/'));
+      fs.rmSync(scriptPath, { force: true });
+      fs.mkdirSync(scriptPath, { recursive: true }); // same "not really a script" fixture used for pre-tool-use's own crash test
+      const res = run(event, { session_id: 's1', cwd: process.cwd() }, root);
+      assert.notEqual(res.status, 0, `${event} must still surface a real crash, not silently exit 0`);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Regression coverage (Reviewer Finding 3): the crash-propagation test
+// above only covers user-prompt-submit/post-tool-use. Nothing previously
+// asserted that a GENUINE crash (as opposed to a merely missing runtime,
+// already covered by the "missing standalone runtime allows silently"
+// tests below) still exits 0/no-output for stop/session-start/session-end
+// -- exactly the fail-toward-ending property ADR-0033 depends on for Stop.
+test('launcher: a real crash in the delegated script still exits 0 with no stdout for stop/session-start/session-end (the fail-toward-ending property these three events depend on, distinct from the missing-runtime case)', () => {
+  const root = mkStandaloneRoot();
+  try {
+    copyRealRuntimeInto(root);
+    for (const [event, scriptRelPosix] of [
+      ['stop', 'orbit/stop-gate-codex.mjs'],
+      ['session-start', 'security/session-start-codex.mjs'],
+      ['session-end', 'status/session-end-codex.mjs'],
+    ]) {
+      const scriptPath = path.join(root, 'scripts', ...scriptRelPosix.split('/'));
+      fs.rmSync(scriptPath, { force: true });
+      fs.mkdirSync(scriptPath, { recursive: true }); // same "not really a script" fixture used above
+      const res = run(event, { session_id: 's1', cwd: process.cwd(), turn_id: 't1', model: 'gpt-test', permission_mode: 'default', reason: 'other' }, root);
+      assert.equal(res.status, 0, `${event} must still exit 0 on a genuine crash`);
+      assert.equal(res.stdout, '', `${event} must produce no stdout on a genuine crash`);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('launcher: stop event with a missing standalone runtime allows silently (Stop\'s safe fail-direction is letting the session end, never blocking it -- opposite of pre-tool-use)', () => {
+  const root = mkStandaloneRoot();
+  try {
+    const res = run('stop', { session_id: 's1', cwd: process.cwd(), turn_id: 't1', model: 'gpt-test', permission_mode: 'default', stop_hook_active: false, last_assistant_message: null, transcript_path: null }, root);
+    assert.equal(res.status, 0);
+    assert.equal(res.stdout, '', 'a missing runtime must never trap the stop hook into blocking termination');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('launcher: session-start and session-end with a missing standalone runtime no-op silently (non-security-boundary events)', () => {
+  const root = mkStandaloneRoot();
+  try {
+    for (const event of ['session-start', 'session-end']) {
+      const res = run(event, { session_id: 's1', cwd: process.cwd() }, root);
+      assert.equal(res.status, 0, `${event} must exit 0`);
+      assert.equal(res.stdout, '', `${event} must produce no stdout when runtime is missing`);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('launcher: stop delegates to the real stop-gate-codex.mjs once the standalone runtime is present, blocking a run with unmet criteria', () => {
+  const root = mkStandaloneRoot();
+  const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-standalone-data-'));
+  try {
+    copyRealRuntimeInto(root);
+    const sessionId = 'launcher-stop-session';
+    const init = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, 'runtime', 'init-run.mjs'), '--goal', 'launcher fixture run', '--session', sessionId, '--project-dir', process.cwd(), '--lane', 'PATCH', '--risk', 'low'], {
+      encoding: 'utf8',
+      env: { ...process.env, KRYLO_DATA_ROOT: dataRoot, KRYLO_HOST: 'codex' },
+    });
+    assert.equal(init.status, 0, init.stderr);
+    const addCriterion = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, 'runtime', 'update-state.mjs'), '--add-criterion', 'never proven'], {
+      encoding: 'utf8',
+      env: { ...process.env, KRYLO_DATA_ROOT: dataRoot, KRYLO_HOST: 'codex' },
+      cwd: process.cwd(),
+    });
+    assert.equal(addCriterion.status, 0, addCriterion.stderr);
+
+    const res = run('stop', { session_id: sessionId, cwd: process.cwd(), turn_id: 't1', model: 'gpt-test', permission_mode: 'default', stop_hook_active: false, last_assistant_message: null, transcript_path: null }, root, { KRYLO_DATA_ROOT: dataRoot });
+    assert.equal(res.status, 0);
+    assert.equal(res.json?.decision, 'block', 'unmet criteria on a real active run must still block through the launcher');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('launcher: session-start delegates to the real session-start-codex.mjs once the standalone runtime is present (ordinary session stays inert)', () => {
+  const root = mkStandaloneRoot();
+  const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-standalone-data-'));
+  try {
+    copyRealRuntimeInto(root);
+    const res = run('session-start', { session_id: 's-ordinary', cwd: process.cwd(), model: 'gpt-test', permission_mode: 'default', source: 'startup', transcript_path: null }, root, { KRYLO_DATA_ROOT: dataRoot });
+    assert.equal(res.status, 0);
+    assert.equal(res.stdout, '', 'an ordinary session with no active run must stay inert through the launcher');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
+test('launcher: session-end delegates to the real session-end-codex.mjs once the standalone runtime is present (no active run -> no-op)', () => {
+  const root = mkStandaloneRoot();
+  const dataRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-standalone-data-'));
+  try {
+    copyRealRuntimeInto(root);
+    const res = run('session-end', { session_id: 's-ordinary', cwd: process.cwd(), reason: 'other', transcript_path: null }, root, { KRYLO_DATA_ROOT: dataRoot });
+    assert.equal(res.status, 0);
+    assert.equal(res.stdout, '');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(dataRoot, { recursive: true, force: true });
+  }
+});
+
 test('launcher: a $krylo-runner prefix collision stays inert through the launcher, exactly as invoking the real hook directly', () => {
   const root = mkStandaloneRoot();
   try {

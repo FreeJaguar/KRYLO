@@ -58,6 +58,12 @@ docs/adr/0032-codex-project-scoped-hook-enforcement.md  # accepted: closes the V
                                                        # enforcement gap disclosed by ADR-0029
 docs/process/CODEX_PROJECT_HOOKS_IMPLEMENTATION_PLAN.md  # implemented: task breakdown + current-stable-
                                                        # Codex re-verification (rust-v0.152.1)
+docs/adr/0033-codex-lifecycle-enforcement.md          # accepted: Stop/SessionStart/SessionEnd, closing
+                                                       # the three remaining docs/codex-capability-matrix.md
+                                                       # deferred rows
+docs/process/CODEX_LIFECYCLE_ENFORCEMENT_DESIGN.md    # design: per-event decision tables, edge-case
+                                                       # behavior definitions
+docs/process/CODEX_LIFECYCLE_ENFORCEMENT_IMPLEMENTATION_PLAN.md  # implemented: task breakdown
 ```
 
 ## Plugin root
@@ -84,6 +90,12 @@ plugins/krylo/scripts/security/risk-policy.mjs               # implemented (shar
                                                                # risk-gate.mjs and risk-gate-codex.mjs)
 plugins/krylo/scripts/security/permission-request-codex.mjs # implemented (Codex PermissionRequest hook)
 plugins/krylo/scripts/runtime/posttool-telemetry-codex.mjs  # implemented (Codex PostToolUse telemetry)
+plugins/krylo/scripts/orbit/stop-gate-codex.mjs              # implemented (Codex Stop gate, docs/adr/0033;
+                                                               # reuses scripts/orbit/stop-policy.mjs)
+plugins/krylo/scripts/orbit/stop-policy.mjs                  # implemented (host-neutral Stop decision
+                                                               # helpers shared by Claude + Codex gates)
+plugins/krylo/scripts/security/session-start-codex.mjs       # implemented (Codex SessionStart, docs/adr/0033)
+plugins/krylo/scripts/status/session-end-codex.mjs           # implemented (Codex SessionEnd, docs/adr/0033)
 plugins/krylo/scripts/setup/install-codex.mjs                # implemented (standalone-Skill install, now
                                                                # bundling a real runtime; execpolicy rules
                                                                # generation; project-scoped hooks install

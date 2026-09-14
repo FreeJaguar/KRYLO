@@ -78,7 +78,18 @@ export function withFileLock(lockPath, fn) {
     try {
       fs.rmSync(lockPath, { force: true });
     } catch {
-      // best-effort: a stale lock file is harmless (next acquire recreates it)
+      // This module has NO staleness/PID/mtime recovery: if this cleanup
+      // removal itself fails (or this process is killed before reaching
+      // here at all), the lock file is left behind, and every LATER
+      // fs.openSync(lockPath, 'wx') above will keep hitting EEXIST until
+      // the full LOCK_RETRY_ATTEMPTS budget is exhausted and throws
+      // lock-timeout -- not a harmless "recreate on next acquire" (an
+      // earlier version of this comment claimed that; it was wrong, and a
+      // fresh independent Security Reviewer live-reproduced the real
+      // consequence: a subsequent caller blocked for the full ~6s retry
+      // window and then failed). This is an accepted, disclosed residual
+      // for this specific narrow best-effort cleanup path, not a claim
+      // that an orphaned lock is safe.
     }
   }
 }

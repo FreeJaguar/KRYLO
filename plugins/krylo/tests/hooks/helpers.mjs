@@ -30,8 +30,11 @@ export function runCli(scriptRelPath, args, dataDir) {
     // derived from it and overwritten to the SAME dataDir); KRYLO_DATA_ROOT
     // is also set directly so an entrypoint that has not yet been wired to
     // the Claude adapter still resolves to this isolated temp dir instead of
-    // falling back to a real, non-isolated data root.
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, KRYLO_DATA_ROOT: dataDir },
+    // falling back to a real, non-isolated data root. KRYLO_LOCAL_TELEMETRY
+    // is forced 'true' so a test asserting telemetry was recorded is never
+    // environment-dependent on whatever the outer shell happens to have set
+    // (regression found by a fresh independent Reviewer).
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, KRYLO_DATA_ROOT: dataDir, KRYLO_LOCAL_TELEMETRY: 'true' },
   });
   let json;
   try {
@@ -57,9 +60,9 @@ export function runHook(scriptRelPath, payload, dataDir, { rawInput, env } = {})
   const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, scriptRelPath)], {
     encoding: 'utf8',
     input,
-    // See runCli() above for why CLAUDE_PLUGIN_DATA/KRYLO_DATA_ROOT are both
-    // set to the same isolated temp dataDir.
-    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, KRYLO_DATA_ROOT: dataDir, CLAUDE_SESSION_ID: 'hook-session', ...env },
+    // See runCli() above for why CLAUDE_PLUGIN_DATA/KRYLO_DATA_ROOT/
+    // KRYLO_LOCAL_TELEMETRY are all set explicitly here.
+    env: { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, KRYLO_DATA_ROOT: dataDir, CLAUDE_SESSION_ID: 'hook-session', KRYLO_LOCAL_TELEMETRY: 'true', ...env },
   });
   let json = null;
   try {
@@ -101,7 +104,7 @@ export function createActiveRun(dataDir, { projectDir = dataDir, goal = 'hook fi
  * bootstrap instead of a directly-set host-neutral override.
  */
 function claudeOnlyEnv(dataDir, extra = {}) {
-  const env = { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, ...extra };
+  const env = { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, KRYLO_LOCAL_TELEMETRY: 'true', ...extra };
   delete env.KRYLO_DATA_ROOT;
   return env;
 }
@@ -170,7 +173,7 @@ export function createActiveRunClaudeOnly(dataDir, { projectDir = dataDir, goal 
  * take effect.
  */
 function codexOnlyEnv(dataDir, extra = {}) {
-  const env = { ...process.env, PLUGIN_DATA: dataDir, PLUGIN_ROOT: dataDir, KRYLO_HOST: 'codex' };
+  const env = { ...process.env, PLUGIN_DATA: dataDir, PLUGIN_ROOT: dataDir, KRYLO_HOST: 'codex', KRYLO_LOCAL_TELEMETRY: 'true' };
   delete env.KRYLO_DATA_ROOT;
   delete env.CLAUDE_PLUGIN_DATA;
   delete env.CLAUDE_PLUGIN_ROOT;
