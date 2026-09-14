@@ -1,0 +1,13 @@
+{
+  "contractSchemaVersion": 1,
+  "reviewedAt": "2026-09-02",
+  "supported": [
+    {
+      "version": "0.120.0",
+      "evidence": "Locally passed: `codex --version` and `codex execpolicy check` run against the real installed binary; PreToolUse/PostToolUse/UserPromptSubmit hook scripts exercised via real subprocess invocation against realistic payloads matching this binary's own embedded schema (docs/adr/0029-codex-host-packaging-and-approval-boundary.md). Direct byte inspection of the installed binary's own embedded ASCII strings, independently re-confirmed docs/adr/0034-codex-runtime-compatibility-gate.md.",
+      "confirmedHookEvents": ["PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit", "Stop"],
+      "notes": "SessionEnd and PermissionRequest are NOT confirmed present in this exact binary's own embedded strings (independently re-verified docs/adr/0034-codex-runtime-compatibility-gate.md; corroborated by the pre-existing, unmodified Ecosystem Maintenance codex-hook-event-names-recognized check, which independently flags this at ATTENTION/high severity). plugins/krylo/hooks/codex-hooks.json registers SessionEnd anyway, sourced only from rust-v0.152.1 SOURCE inspection (docs/adr/0033-codex-lifecycle-enforcement.md), never from running this binary -- a disclosed, unresolved capability gap for this specific version, not silently assumed proven."
+    }
+  ],
+  "blocked": []
+}

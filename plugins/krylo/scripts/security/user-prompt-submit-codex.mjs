@@ -65,6 +65,7 @@ import {
   clearBootstrapFailureMarker,
 } from '../lib/state.mjs';
 import { bootstrapCodexRuntimeEnvironment, bootstrapCodexStorageEnvironment } from '../host/codex/context.mjs';
+import { evaluateCodexRuntimeCompatibility } from '../host/codex/runtime-compat.mjs';
 
 // Exactly `$krylo-run` as the first non-whitespace token, followed by
 // whitespace or end-of-string -- never a substring match, so
@@ -230,6 +231,75 @@ async function main() {
     kryloVersion: process.env.KRYLO_VERSION || 'unknown',
     runId,
   });
+
+  // Codex Runtime Compatibility Gate (docs/adr/0034-codex-runtime-compatibility-gate.md):
+  // admission control for a FULL AUTONOMOUS run, evaluated once per fresh
+  // bootstrap attempt (never for the idempotent reuse above, and never for
+  // an ordinary, non-$krylo-run prompt, which returns long before this
+  // point). Overridable ONLY when KRYLO_CODEX_COMPAT_TEST_MODE=1 is ALSO
+  // set -- a fresh independent Reviewer found the earlier, unconditional
+  // version of cliPath/contractPath genuinely reachable in a production
+  // invocation, meaning anything that could smuggle an env-var assignment
+  // ahead of this hook process (e.g. a malicious project config injecting
+  // KRYLO_CODEX_COMPAT_CONTRACT_PATH into the Codex-spawned hook
+  // environment) could point the gate at an attacker-authored contract
+  // claiming any version "supported", routing entirely around the real,
+  // reviewed one -- exactly the write-protection risk-policy.test.mjs's
+  // own regression case for that file exists to prevent, just reached a
+  // different way. Requiring a SECOND, distinctly-named sentinel mirrors
+  // cross-harness-run.mjs's own identical fix for the identical class of
+  // finding (KRYLO_CROSS_HARNESS_TEST_MODE) -- disclosed honestly as
+  // defense-in-depth, not a strong guarantee on its own: neither override
+  // is ever read from `payload`/prompt content, so the model still has no
+  // direct channel to influence the verdict; this hardens the separate,
+  // narrower question of what a compromised/malicious hook ENVIRONMENT
+  // could do. tests/hooks/user-prompt-submit-codex.test.mjs sets
+  // KRYLO_CODEX_COMPAT_TEST_MODE=1 explicitly for every fixture-driven test.
+  const compatTestModeEnabled = process.env.KRYLO_CODEX_COMPAT_TEST_MODE === '1';
+  const cliPathOverride = compatTestModeEnabled ? process.env.KRYLO_CODEX_CLI_PATH : undefined;
+  const contractPathOverride = compatTestModeEnabled ? process.env.KRYLO_CODEX_COMPAT_CONTRACT_PATH : undefined;
+  const compatibility = evaluateCodexRuntimeCompatibility({
+    cliPath: typeof cliPathOverride === 'string' && cliPathOverride.trim() !== '' ? cliPathOverride.trim() : 'codex',
+    env: process.env,
+    ...(typeof contractPathOverride === 'string' && contractPathOverride.trim() !== '' ? { contractPath: contractPathOverride.trim() } : {}),
+  });
+
+  if (!compatibility.trusted) {
+    // Include the resolved executable identity as audit evidence when the
+    // probe reached that far (a contract-malformed/probe-failed result may
+    // have none) -- summary stays within the schema's 300-char cap.
+    const findingSummary = compatibility.executablePath
+      ? `${compatibility.reason} (resolved executable: ${compatibility.executablePath})`.slice(0, 300)
+      : compatibility.reason.slice(0, 300);
+    state.findings.push({
+      id: 'finding-1',
+      severity: 'high',
+      status: 'open',
+      summary: findingSummary,
+      source: 'codex-runtime-compat',
+    });
+    state.terminalState = 'SAFE_BLOCKED';
+    state.phase = 'BLOCKED';
+
+    // Independent review found the original version of this block called
+    // allowSilently() here when the audit record itself failed to persist
+    // -- inverting the fail-safe direction: a hard compatibility block was
+    // silently downgraded to total silence (no additionalContext at all),
+    // which the model could easily read as "no run exists, proceed as
+    // normal" rather than "a full autonomous run was refused." Emitting the
+    // warning costs nothing and is strictly safer regardless of whether the
+    // audit record itself could be written -- additionalContext is
+    // coordination text, never an authorization gate, so persistence
+    // failure here must never change what the model is told.
+    const blockedSaveResult = saveState(state);
+    emitAdditionalContext(
+      `KRYLO Codex run ${runId} could not start autonomously: ${compatibility.reason} `
+      + (blockedSaveResult.ok
+        ? 'This run has been recorded as SAFE_BLOCKED for audit purposes only -- do not attempt the task autonomously; report this limitation to the user.'
+        : 'The block record itself could not be persisted -- do not attempt the task autonomously regardless; report this limitation to the user.'),
+    );
+    return;
+  }
 
   // saveState() can both return {ok:false} (schema validation, or a failed
   // pre-migration backup write) AND throw (its own final writeJsonAtomic

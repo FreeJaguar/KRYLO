@@ -150,9 +150,10 @@ function pathDirectorySet() {
  * DIRECTORY before PATH -- confirmed directly: `where codex`, run from a
  * directory containing an attacker-planted `codex.cmd`, lists that file
  * FIRST, ahead of the real PATH-installed one. For a Cross-Harness worker
- * launch (docs/adr/0030-cross-harness-advisory-workers.md), that cwd is the
- * untrusted project root -- writable by the model through KRYLO's own
- * ordinary, risk-gate-permitted Write tool. An earlier version
+ * launch (docs/adr/0030-cross-harness-advisory-workers.md) or a
+ * project-scoped hook launcher (docs/adr/0032-codex-project-scoped-hook-enforcement.md),
+ * that cwd is the untrusted project root -- writable by the model through
+ * KRYLO's own ordinary, risk-gate-permitted Write tool. An earlier version
  * of this fix pinned `where`'s own cwd to `os.tmpdir()`; a SECOND
  * independent Security Reviewer, re-checking that exact fix, reproduced
  * that this only RELOCATED the vulnerability rather than closing it: (a)
