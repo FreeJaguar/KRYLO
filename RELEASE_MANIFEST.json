@@ -1551,8 +1551,8 @@
     },
     {
       "path": "plugins/krylo/tests/hooks/codex-project-hook-launcher.test.mjs",
-      "bytes": 17946,
-      "sha256": "2eef0a4923141868df14beab54812931f621cd930da225a26e9bb7ceaff32ca7"
+      "bytes": 18776,
+      "sha256": "b9bd3cc76cc083aec9a26f8004976f891126ef255e9430891d5c4b679043b50a"
     },
     {
       "path": "plugins/krylo/tests/hooks/concurrent-mutation.test.mjs",
@@ -1631,8 +1631,8 @@
     },
     {
       "path": "plugins/krylo/tests/hooks/user-prompt-submit-codex.test.mjs",
-      "bytes": 34091,
-      "sha256": "793324987bf51fcbe6775c4a81af8d9987dc299ea7b361da0a5cbb88ff245d4d"
+      "bytes": 35011,
+      "sha256": "622d79b4ed5f3690c3fc3b3ca8a8f666bf2e280505e74e663dcf5e673c10c3f9"
     },
     {
       "path": "plugins/krylo/tests/maintenance/actions-pins.test.mjs",
