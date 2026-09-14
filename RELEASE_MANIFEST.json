@@ -671,8 +671,8 @@
     },
     {
       "path": "docs/adr/0034-codex-runtime-compatibility-gate.md",
-      "bytes": 22261,
-      "sha256": "ab4225c94c434bd4045de93dd863e31a787ab0478ebbf7ac78490477cc7602c0"
+      "bytes": 26094,
+      "sha256": "d89c05b2cf7852291c7ce32928e2d89dff8458d2b61cda0b35c007cba0c4523b"
     },
     {
       "path": "docs/adr/README.md",
@@ -686,8 +686,8 @@
     },
     {
       "path": "docs/codex-capability-matrix.md",
-      "bytes": 31565,
-      "sha256": "4a45bf1070e2064c98bc98db1233d6350cf06ccb10cc05b21496bb42fa75c7b6"
+      "bytes": 32326,
+      "sha256": "96ca3ac0f407aedb5449552194af4c395675aed706ff902f841ccb65eaedec23"
     },
     {
       "path": "docs/external-adapter-audit-2026-07-27.md",
@@ -1391,8 +1391,8 @@
     },
     {
       "path": "plugins/krylo/scripts/security/user-prompt-submit-codex.mjs",
-      "bytes": 18094,
-      "sha256": "23bc852af1ef9a6ac7c7edccf5d8356762966a8a9642133a9de8c28e58fe9bab"
+      "bytes": 19439,
+      "sha256": "2848a6bf37b4fac56e25c651a5c3b08e7bd0cf11019850f2228ef246c2f23e3a"
     },
     {
       "path": "plugins/krylo/scripts/setup/doctor.mjs",
@@ -1406,8 +1406,8 @@
     },
     {
       "path": "plugins/krylo/scripts/setup/install-codex.mjs",
-      "bytes": 35897,
-      "sha256": "5525255f8a493abae7b13f243baa274b9a3bfcb9cf6e1f58ba53100187b826cf"
+      "bytes": 37508,
+      "sha256": "a69027e61e3127b7c0b03131ec44d719b07a05c7b8d008df9bd22203ed03b5f5"
     },
     {
       "path": "plugins/krylo/scripts/setup/remove-alias.mjs",
@@ -1631,8 +1631,8 @@
     },
     {
       "path": "plugins/krylo/tests/hooks/user-prompt-submit-codex.test.mjs",
-      "bytes": 35011,
-      "sha256": "622d79b4ed5f3690c3fc3b3ca8a8f666bf2e280505e74e663dcf5e673c10c3f9"
+      "bytes": 39329,
+      "sha256": "94c366bbfa6c7f24017fcc01d274b96dfdaa8f116a312d0732fa4b0bfdf7082c"
     },
     {
       "path": "plugins/krylo/tests/maintenance/actions-pins.test.mjs",
@@ -1726,8 +1726,8 @@
     },
     {
       "path": "plugins/krylo/tests/setup/install-codex-hooks.test.mjs",
-      "bytes": 17895,
-      "sha256": "c85b5b0581276fd84a99dcdac019cbf8dd6f2c78a4e08bb5901b65fdd8b1acf4"
+      "bytes": 19516,
+      "sha256": "6ae8ecdddc8aa653afce86e3fc392e39ea17241c4be3e2bdc75ae63d7a797e23"
     },
     {
       "path": "plugins/krylo/tests/setup/install-codex.test.mjs",
