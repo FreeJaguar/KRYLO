@@ -2,7 +2,7 @@
   "name": "krylo-release",
   "version": "0.2.0",
   "note": "Per-file SHA-256 of every git-tracked file at HEAD (excluding this manifest itself). Hashed from the committed git blob content, not the working tree, so this is reproducible from a clean clone of the same commit. Deterministic: regenerating from an unchanged HEAD produces byte-identical output (no timestamp or other nondeterministic field is embedded). BLUEPRINT_MANIFEST.json remains the separate, immutable record of blueprint 0.1.2 as delivered in the baseline commit.",
-  "fileCount": 367,
+  "fileCount": 368,
   "files": [
     {
       "path": ".claude-plugin/marketplace.json",
@@ -121,8 +121,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 30160,
-      "sha256": "b31a30e1ec7c1587b59d2f8ebadae74385354bd42ba1fa881c2a107fc2b1c9c1"
+      "bytes": 31796,
+      "sha256": "37b3fe9328f1f5e8e4aa262816c1db49e0c8c55a669b67575f652719e8261d3e"
     },
     {
       "path": "CLAUDE.md",
@@ -675,6 +675,11 @@
       "sha256": "d89c05b2cf7852291c7ce32928e2d89dff8458d2b61cda0b35c007cba0c4523b"
     },
     {
+      "path": "docs/adr/0035-codex-live-hook-verification.md",
+      "bytes": 10438,
+      "sha256": "337af5278c811dea7701e756d83b94502685531d46e218488f1ff6eb65f86d2e"
+    },
+    {
       "path": "docs/adr/README.md",
       "bytes": 451,
       "sha256": "8da79a6ef78e8f2cda90a7cc8e9109b5b4592cc68b2e42751b2b5b026de7a207"
@@ -686,8 +691,8 @@
     },
     {
       "path": "docs/codex-capability-matrix.md",
-      "bytes": 32326,
-      "sha256": "96ca3ac0f407aedb5449552194af4c395675aed706ff902f841ccb65eaedec23"
+      "bytes": 34396,
+      "sha256": "630f2a4a68ac99e9f8c46f147ea61ef97c30d8ff45ff099b703c58a5178b4097"
     },
     {
       "path": "docs/external-adapter-audit-2026-07-27.md",
@@ -1006,8 +1011,8 @@
     },
     {
       "path": "plugins/krylo/hooks/codex-hooks.json",
-      "bytes": 4754,
-      "sha256": "5c3b9d9393775bf58706aa2f17fe207ed2edcc3af93ff714cfd63454bea7920d"
+      "bytes": 4926,
+      "sha256": "584979035f5deb22e52f5d6fd19aa294e425fd1ec9cebdc8f5dd8ebb78c56837"
     },
     {
       "path": "plugins/krylo/hooks/hooks.json",
@@ -1396,8 +1401,8 @@
     },
     {
       "path": "plugins/krylo/scripts/setup/doctor.mjs",
-      "bytes": 19052,
-      "sha256": "d677759112efc200b7f432eaaada5978db7bbff2711e08abdbdc7cd71c0c89ff"
+      "bytes": 19442,
+      "sha256": "a1fc0abe376cba9944bc67c929262b161d819b2648cc9238ca62089810cd0a56"
     },
     {
       "path": "plugins/krylo/scripts/setup/install-alias.mjs",
@@ -1406,8 +1411,8 @@
     },
     {
       "path": "plugins/krylo/scripts/setup/install-codex.mjs",
-      "bytes": 37508,
-      "sha256": "a69027e61e3127b7c0b03131ec44d719b07a05c7b8d008df9bd22203ed03b5f5"
+      "bytes": 40418,
+      "sha256": "1801e1337c5e49f91ac852ea79f9d771540cf029d73ea95725846258c29a55b5"
     },
     {
       "path": "plugins/krylo/scripts/setup/remove-alias.mjs",
@@ -1516,8 +1521,8 @@
     },
     {
       "path": "plugins/krylo/tests/governance/hook-scoping.test.mjs",
-      "bytes": 14423,
-      "sha256": "66c3fda6370ddbc462e2c866dbb4abe4656aca8a6e37396b56de68df9b7a60d4"
+      "bytes": 17020,
+      "sha256": "d75a7e8a9ed63fce0c4b547368b2112cf5ff375051e4b64a95e97ddc522e86f9"
     },
     {
       "path": "plugins/krylo/tests/governance/policy-consistency.test.mjs",
@@ -1726,8 +1731,8 @@
     },
     {
       "path": "plugins/krylo/tests/setup/install-codex-hooks.test.mjs",
-      "bytes": 19516,
-      "sha256": "6ae8ecdddc8aa653afce86e3fc392e39ea17241c4be3e2bdc75ae63d7a797e23"
+      "bytes": 21925,
+      "sha256": "385dfac78794a276902a18d9fa551a8375d497fd8636af388a4fd80313e50f92"
     },
     {
       "path": "plugins/krylo/tests/setup/install-codex.test.mjs",
