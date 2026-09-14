@@ -6,6 +6,10 @@ The project follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Documentation correction: `codex plugin` CLI installation now confirmed working.** `docs/adr/0029-codex-host-packaging-and-approval-boundary.md`, `README.md`, and `docs/codex-capability-matrix.md` claimed no native `codex plugin` CLI install path existed, verified against `codex-cli 0.120.0` (2026-08-26). Re-verified 2026-09-14 against `codex-cli 0.153.4`: `codex plugin marketplace add`/`codex plugin add` now exist and successfully installed KRYLO's plugin (`plugins/krylo/.codex-plugin/plugin.json` auto-discovered, `enabled: true`), first in an isolated `CODEX_HOME`, then against a real `~/.codex` at the user's explicit request. The `require-approval` deny-by-default boundary, PreToolUse matcher, and `UserPromptSubmit` session-bootstrap design are unaffected; only the previously-recorded installation-mechanism fact changes. Live, authenticated hook-firing through this install path remains unverified and is disclosed as such, not claimed.
+
 ## [0.2.0] - 2026-09-10
 
 KRYLO becomes a genuine multi-host product: Shared Core, the released Claude Code host, and a shipped (not yet published) Codex CLI host, plus two new optional capabilities built on the same Core -- Cross-Harness and Ecosystem Maintenance. See `docs/adr/0023-multi-host-product-and-shared-core.md` onward for the full accepted-ADR trail this release represents.
