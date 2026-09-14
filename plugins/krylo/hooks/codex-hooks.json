@@ -1,76 +1,78 @@
 {
-  "$comment": "KRYLO's Codex hook set (docs/adr/0029-codex-host-packaging-and-approval-boundary.md, extended by docs/adr/0033-codex-lifecycle-enforcement.md for Stop/SessionStart/SessionEnd). Unlike Claude (ADR-0021, hooks scoped to the run Skill's own frontmatter), Codex plugin-bundled hooks have no Skill-scoped lifecycle and fire for every ordinary Codex session -- every entrypoint below implements the inactive-run no-op path (resolve identity, check for an active KRYLO run, exit 0 with no output and no state mutation if none) so a session that never invokes $krylo-run pays only the measured no-op latency budget. Referenced explicitly via .codex-plugin/plugin.json's own \"hooks\" field, not auto-discovered, so this never collides with Claude's separate (deliberately empty) hooks/hooks.json. Matcher includes \"Bash\" first: a real installed codex-cli 0.120.0 binary's own embedded PreToolUse JSON schema constrains tool_name to the literal const \"Bash\" for every command hook invocation (independently confirmed by direct byte inspection of codex.exe, not merely documentation); re-verified against the current stable rust-v0.152.1 release (docs/adr/0032, docs/adr/0033) that tool_name is now a genuinely differentiated string on that build -- the other matcher alternatives, kept as forward-compatible matches, now cover that case too, so no matcher change was needed. PermissionRequest is deliberately NOT registered here: \"PermissionRequest\" is absent from the installed 0.120.0 build's own embedded HookEventNameWire enum -- registering an event that build does not recognize risks the whole file failing to parse and silently dropping every other registration with it, an unacceptably fail-open risk for a security-relevant file. scripts/security/permission-request-codex.mjs remains implemented and ready to wire in once a build confirmed to support the event is verified. UserPromptSubmit (scripts/security/user-prompt-submit-codex.mjs) is the ONLY place a KRYLO Codex run is ever created -- host-authoritative bootstrap using the real session_id from that event. It has no matcher: UserPromptSubmit fires once per user prompt with no tool_name to match against. PreToolUse (scripts/security/risk-gate-codex.mjs) and Stop (scripts/orbit/stop-gate-codex.mjs) hold real enforcement boundaries (require-approval/hard-deny, and Orbit-budget continuation respectively); PostToolUse, SessionStart, and SessionEnd are lifecycle/telemetry-only and are never a security boundary -- SessionStart can at most add an informational additionalContext when a run is already active, never create one, and SessionEnd can at most record a best-effort telemetry marker (confirmed ~1-3 second platform timeout, no output schema exists for this event at all on the current stable release).",
-  "UserPromptSubmit": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "node \"${PLUGIN_ROOT}/scripts/security/user-prompt-submit-codex.mjs\"",
-          "commandWindows": "node \"%PLUGIN_ROOT%/scripts/security/user-prompt-submit-codex.mjs\"",
-          "timeout": 15
-        }
-      ]
-    }
-  ],
-  "PreToolUse": [
-    {
-      "matcher": "Bash|shell|exec_command|apply_patch|mcp__.*",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "node \"${PLUGIN_ROOT}/scripts/security/risk-gate-codex.mjs\"",
-          "commandWindows": "node \"%PLUGIN_ROOT%/scripts/security/risk-gate-codex.mjs\"",
-          "timeout": 30
-        }
-      ]
-    }
-  ],
-  "PostToolUse": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "node \"${PLUGIN_ROOT}/scripts/runtime/posttool-telemetry-codex.mjs\"",
-          "commandWindows": "node \"%PLUGIN_ROOT%/scripts/runtime/posttool-telemetry-codex.mjs\"",
-          "timeout": 15
-        }
-      ]
-    }
-  ],
-  "Stop": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "node \"${PLUGIN_ROOT}/scripts/orbit/stop-gate-codex.mjs\"",
-          "commandWindows": "node \"%PLUGIN_ROOT%/scripts/orbit/stop-gate-codex.mjs\"",
-          "timeout": 60
-        }
-      ]
-    }
-  ],
-  "SessionStart": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "node \"${PLUGIN_ROOT}/scripts/security/session-start-codex.mjs\"",
-          "commandWindows": "node \"%PLUGIN_ROOT%/scripts/security/session-start-codex.mjs\"",
-          "timeout": 15
-        }
-      ]
-    }
-  ],
-  "SessionEnd": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "node \"${PLUGIN_ROOT}/scripts/status/session-end-codex.mjs\"",
-          "commandWindows": "node \"%PLUGIN_ROOT%/scripts/status/session-end-codex.mjs\"",
-          "timeout": 3
-        }
-      ]
-    }
-  ]
+  "description": "KRYLO's Codex hook set (docs/adr/0029-codex-host-packaging-and-approval-boundary.md, extended by docs/adr/0033-codex-lifecycle-enforcement.md for Stop/SessionStart/SessionEnd). Unlike Claude (ADR-0021, hooks scoped to the run Skill's own frontmatter), Codex plugin-bundled hooks have no Skill-scoped lifecycle and fire for every ordinary Codex session -- every entrypoint below implements the inactive-run no-op path (resolve identity, check for an active KRYLO run, exit 0 with no output and no state mutation if none) so a session that never invokes $krylo-run pays only the measured no-op latency budget. Referenced explicitly via .codex-plugin/plugin.json's own \"hooks\" field, not auto-discovered, so this never collides with Claude's separate (deliberately empty) hooks/hooks.json. Matcher includes \"Bash\" first: a real installed codex-cli 0.120.0 binary's own embedded PreToolUse JSON schema constrains tool_name to the literal const \"Bash\" for every command hook invocation (independently confirmed by direct byte inspection of codex.exe, not merely documentation); re-verified against the current stable rust-v0.152.1 release (docs/adr/0032, docs/adr/0033) that tool_name is now a genuinely differentiated string on that build -- the other matcher alternatives, kept as forward-compatible matches, now cover that case too, so no matcher change was needed. PermissionRequest is deliberately NOT registered here: \"PermissionRequest\" is absent from the installed 0.120.0 build's own embedded HookEventNameWire enum -- registering an event that build does not recognize risks the whole file failing to parse and silently dropping every other registration with it, an unacceptably fail-open risk for a security-relevant file. scripts/security/permission-request-codex.mjs remains implemented and ready to wire in once a build confirmed to support the event is verified. UserPromptSubmit (scripts/security/user-prompt-submit-codex.mjs) is the ONLY place a KRYLO Codex run is ever created -- host-authoritative bootstrap using the real session_id from that event. It has no matcher: UserPromptSubmit fires once per user prompt with no tool_name to match against. PreToolUse (scripts/security/risk-gate-codex.mjs) and Stop (scripts/orbit/stop-gate-codex.mjs) hold real enforcement boundaries (require-approval/hard-deny, and Orbit-budget continuation respectively); PostToolUse, SessionStart, and SessionEnd are lifecycle/telemetry-only and are never a security boundary -- SessionStart can at most add an informational additionalContext when a run is already active, never create one, and SessionEnd can at most record a best-effort telemetry marker (confirmed ~1-3 second platform timeout, no output schema exists for this event at all on the current stable release).",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/security/user-prompt-submit-codex.mjs\"",
+            "commandWindows": "node \"${PLUGIN_ROOT}/scripts/security/user-prompt-submit-codex.mjs\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash|shell|exec_command|apply_patch|mcp__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/security/risk-gate-codex.mjs\"",
+            "commandWindows": "node \"${PLUGIN_ROOT}/scripts/security/risk-gate-codex.mjs\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/runtime/posttool-telemetry-codex.mjs\"",
+            "commandWindows": "node \"${PLUGIN_ROOT}/scripts/runtime/posttool-telemetry-codex.mjs\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/orbit/stop-gate-codex.mjs\"",
+            "commandWindows": "node \"${PLUGIN_ROOT}/scripts/orbit/stop-gate-codex.mjs\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/security/session-start-codex.mjs\"",
+            "commandWindows": "node \"${PLUGIN_ROOT}/scripts/security/session-start-codex.mjs\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${PLUGIN_ROOT}/scripts/status/session-end-codex.mjs\"",
+            "commandWindows": "node \"${PLUGIN_ROOT}/scripts/status/session-end-codex.mjs\"",
+            "timeout": 3
+          }
+        ]
+      }
+    ]
+  }
 }

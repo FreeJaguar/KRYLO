@@ -396,6 +396,46 @@ function krylOwnedEntryFor(event) {
     : { hooks: [hookDef] };
 }
 
+// Codex's hooks config -- the plugin-bundled one AND this project-scoped
+// one -- nests its event map under a top-level `hooks` key. A live smoke
+// test against a real authenticated codex-cli 0.154.0 session
+// (docs/adr/0035-codex-live-hook-verification.md) observed the flat
+// event-map shape this installer used to write being rejected outright:
+//   "warning: failed to parse hooks config ...\.codex\hooks.json: unknown
+//    field `UserPromptSubmit`, expected `description` or `hooks`"
+// -- and a rejected config is dropped IN FULL, silently, so every KRYLO
+// project-scoped hook (the PreToolUse risk gate included) simply never
+// ran. Both helpers below deliberately preserve every OTHER top-level key
+// the document carries (a project's own `description`, or anything a
+// future build adds), exactly as the per-event merge already preserves
+// unrelated entries within an event array.
+function eventMapOf(doc) {
+  return doc?.hooks && typeof doc.hooks === 'object' && !Array.isArray(doc.hooks) ? doc.hooks : {};
+}
+
+// Hook event names Codex itself recognizes, INCLUDING ones KRYLO never
+// manages -- used only to recognize a legacy flat-shaped document (one
+// whose events sit at the top level instead of under `hooks`), so setup can
+// refuse with a precise explanation instead of silently leaving a hybrid
+// file that current builds reject in full.
+const KNOWN_CODEX_HOOK_EVENTS = new Set([
+  'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SessionStart', 'SessionEnd',
+  'PreCompact', 'PostCompact', 'SubagentStart', 'SubagentStop', 'PermissionRequest',
+]);
+
+function looksLegacyFlat(doc) {
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) return false;
+  if ('hooks' in doc) return false;
+  return Object.keys(doc).some((key) => KNOWN_CODEX_HOOK_EVENTS.has(key));
+}
+
+function withEventMap(doc, events) {
+  const next = { ...doc };
+  if (Object.keys(events).length > 0) next.hooks = events;
+  else delete next.hooks;
+  return next;
+}
+
 function readJsonFileSafe(file) {
   if (!fs.existsSync(file)) return { ok: true, value: null };
   try {
@@ -484,10 +524,19 @@ function planHooksInstall(apply, projectDir) {
   if (!liveRead.ok) {
     return { ok: false, target: 'hooks', error: 'malformed-hooks-json', message: `${hooksFile} exists but is not valid JSON. Fix or remove it manually before running setup.` };
   }
-  const liveHooksJson = liveRead.value ?? {};
-  if (typeof liveHooksJson !== 'object' || liveHooksJson === null || Array.isArray(liveHooksJson)) {
+  const liveDoc = liveRead.value ?? {};
+  if (typeof liveDoc !== 'object' || liveDoc === null || Array.isArray(liveDoc)) {
     return { ok: false, target: 'hooks', error: 'malformed-hooks-json', message: `${hooksFile} exists but its top level is not a JSON object.` };
   }
+  if (looksLegacyFlat(liveDoc)) {
+    return {
+      ok: false,
+      target: 'hooks',
+      error: 'legacy-flat-hooks-json',
+      message: `${hooksFile} declares hook events at the top level instead of under a "hooks" key. Current Codex builds reject that shape outright ("unknown field ..., expected \`description\` or \`hooks\`") and silently drop the WHOLE file, so those hooks are already not running. KRYLO will not rewrite a file it does not own: move the event map under a top-level "hooks" key yourself (or remove the file), then re-run setup.`,
+    };
+  }
+  const liveHooksJson = eventMapOf(liveDoc);
 
   const sidecarRead = readJsonFileSafe(sidecarFile);
   const sidecar = sidecarRead.ok ? sidecarRead.value : null;
@@ -509,19 +558,20 @@ function planHooksInstall(apply, projectDir) {
   const needsBackup = HOOK_EVENTS.some((e) => perEvent[e].state === 'krylo-owned');
   const backupPath = needsBackup && fs.existsSync(hooksFile) ? `${hooksFile}.backup-${Date.now()}` : null;
 
-  const nextHooksJson = { ...liveHooksJson };
+  const nextEvents = { ...liveHooksJson };
   const newOwnedEntries = {};
   for (const event of HOOK_EVENTS) {
     const entry = krylOwnedEntryFor(event);
     newOwnedEntries[event] = entry;
-    const currentArray = Array.isArray(nextHooksJson[event]) ? [...nextHooksJson[event]] : [];
+    const currentArray = Array.isArray(nextEvents[event]) ? [...nextEvents[event]] : [];
     if (perEvent[event].state === 'krylo-owned') {
       currentArray[perEvent[event].index] = entry;
     } else {
       currentArray.push(entry);
     }
-    nextHooksJson[event] = currentArray;
+    nextEvents[event] = currentArray;
   }
+  const nextHooksJson = withEventMap(liveDoc, nextEvents);
 
   const gitStatus = gitTrackedState(projectDir, path.relative(projectDir, hooksFile).split(path.sep).join('/'));
 
@@ -588,7 +638,8 @@ function removeHooks(apply, projectDir) {
   if (!liveRead.ok) {
     return { ok: false, target: 'hooks', error: 'malformed-hooks-json', message: `${hooksFile} exists but is not valid JSON; refusing to touch it automatically.` };
   }
-  const liveHooksJson = liveRead.value ?? {};
+  const liveDoc = liveRead.value ?? {};
+  const liveHooksJson = eventMapOf(liveDoc);
   const sidecarRead = readJsonFileSafe(sidecarFile);
   const sidecar = sidecarRead.ok ? sidecarRead.value : null;
   if (!sidecar) {
@@ -608,14 +659,18 @@ function removeHooks(apply, projectDir) {
   // so a backup is only ever meaningful, and only ever attempted, when
   // hooks.json genuinely still exists.
   const backupPath = fs.existsSync(hooksFile) ? `${hooksFile}.backup-${Date.now()}` : null;
-  const nextHooksJson = { ...liveHooksJson };
+  const nextEvents = { ...liveHooksJson };
   for (const event of HOOK_EVENTS) {
     if (perEvent[event].state !== 'krylo-owned') continue;
-    const arr = [...nextHooksJson[event]];
+    const arr = [...nextEvents[event]];
     arr.splice(perEvent[event].index, 1);
-    if (arr.length > 0) nextHooksJson[event] = arr;
-    else delete nextHooksJson[event];
+    if (arr.length > 0) nextEvents[event] = arr;
+    else delete nextEvents[event];
   }
+  // `nextHooksJson` keeps every unrelated top-level key the document had;
+  // "nothing remains" therefore means the document is empty ONCE KRYLO's
+  // own entries are gone, not merely that the event map is.
+  const nextHooksJson = withEventMap(liveDoc, nextEvents);
 
   const plan = {
     ok: true,

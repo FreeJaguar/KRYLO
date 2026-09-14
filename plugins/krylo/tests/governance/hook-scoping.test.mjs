@@ -176,9 +176,58 @@ test('Codex host adapter is isolated from the Claude Skill-scoped hook design (A
 // HookEventNameWire enum entirely -- registering an event a build does not
 // recognize risks the whole hooks file failing to parse, silently dropping
 // PreToolUse/PostToolUse with it.
-test('codex-hooks.json matches the real installed binary\'s confirmed PreToolUse schema (tool_name const "Bash") and never registers an unconfirmed hook event', () => {
+function readCodexHooks() {
   const codexHooksPath = path.join(PLUGIN_ROOT, 'hooks', 'codex-hooks.json');
-  const codexHooks = JSON.parse(fs.readFileSync(codexHooksPath, 'utf8'));
+  const raw = JSON.parse(fs.readFileSync(codexHooksPath, 'utf8'));
+  return { raw, events: raw.hooks };
+}
+
+// Live smoke test against a real authenticated codex-cli 0.154.0 session
+// (docs/adr/0035-codex-live-hook-verification.md) found this file's previous
+// top-level shape was rejected outright by the current build:
+//   "failed to parse plugin hooks config ...: unknown field `$comment`,
+//    expected `description` or `hooks`"
+// A rejected config is silently dropped IN FULL -- every registration,
+// PreToolUse's risk gate included -- which is the exact fail-open outcome
+// this file's own description warns about. Asserted structurally here so a
+// future edit cannot reintroduce an unaccepted top-level key.
+test('codex-hooks.json uses the top-level shape the real installed build accepts (description + hooks), never a flat event map or a $comment key', () => {
+  const { raw } = readCodexHooks();
+  assert.deepEqual(
+    Object.keys(raw).sort(),
+    ['description', 'hooks'],
+    'codex-cli 0.154.0 accepts exactly `description` and `hooks` at the top level; any other key makes the WHOLE file fail to parse and every hook silently vanish',
+  );
+  assert.equal(typeof raw.description, 'string');
+  assert.ok(raw.hooks && typeof raw.hooks === 'object' && !Array.isArray(raw.hooks), 'events must nest under the `hooks` key');
+});
+
+// Same live smoke test, second confirmed defect: Codex performs its OWN
+// ${PLUGIN_ROOT} templating and never invokes a shell, so the cmd.exe-style
+// %PLUGIN_ROOT% form is passed through as a literal string. Windows prefers
+// commandWindows when present, so every KRYLO hook resolved to a path
+// literally named "%PLUGIN_ROOT%\..." and FAILED ("hook: UserPromptSubmit
+// Failed" observed live) -- meaning KRYLO's Codex host had never actually
+// run on Windows at all. Proven fix, verified live: use ${PLUGIN_ROOT} in
+// commandWindows too.
+test('codex-hooks.json never uses the cmd-style %PLUGIN_ROOT% form, which the real build passes through literally instead of expanding', () => {
+  const { raw } = readCodexHooks();
+  const serialized = JSON.stringify(raw);
+  assert.doesNotMatch(serialized, /%PLUGIN_ROOT%/, 'Codex expands ${PLUGIN_ROOT} itself and never runs a shell -- %PLUGIN_ROOT% stays literal and every hook using it fails to launch');
+  for (const [event, entries] of Object.entries(raw.hooks)) {
+    for (const entry of entries) {
+      for (const hook of entry.hooks) {
+        for (const field of ['command', 'commandWindows']) {
+          if (typeof hook[field] !== 'string') continue;
+          assert.match(hook[field], /\$\{PLUGIN_ROOT\}/, `${event}.${field} must locate its script through the \${PLUGIN_ROOT} placeholder the build actually expands`);
+        }
+      }
+    }
+  }
+});
+
+test('codex-hooks.json matches the real installed binary\'s confirmed PreToolUse schema (tool_name const "Bash") and never registers an unconfirmed hook event', () => {
+  const { events: codexHooks } = readCodexHooks();
   assert.match(codexHooks.PreToolUse[0].matcher, /(^|\|)Bash(\||$)/, 'the PreToolUse matcher must match the literal "Bash" tool_name real Codex builds send, not only speculative alternatives');
   assert.ok(!('PermissionRequest' in codexHooks), 'PermissionRequest must not be registered until a build confirmed to support that hook event is verified (absent from the installed 0.120.0 build\'s own HookEventNameWire enum)');
   // SessionEnd added to the confirmed set by docs/adr/0033-codex-lifecycle-enforcement.md:
@@ -190,7 +239,6 @@ test('codex-hooks.json matches the real installed binary\'s confirmed PreToolUse
   // session-end-codex.mjs never attempts to emit one.
   const confirmedEvents = ['PreToolUse', 'PostToolUse', 'SessionStart', 'SessionEnd', 'UserPromptSubmit', 'Stop'];
   for (const registeredEvent of Object.keys(codexHooks)) {
-    if (registeredEvent.startsWith('$')) continue; // $comment
     assert.ok(confirmedEvents.includes(registeredEvent), `${registeredEvent} is not in the installed build's own confirmed HookEventNameWire enum`);
   }
 });
@@ -202,8 +250,7 @@ test('codex-hooks.json matches the real installed binary\'s confirmed PreToolUse
 // rust-v0.120.0 source calls dispatcher::select_handlers with
 // matcher_input=None for this event -- no tool_name concept applies here).
 test('codex-hooks.json registers the UserPromptSubmit host-authoritative session bootstrap with no matcher', () => {
-  const codexHooksPath = path.join(PLUGIN_ROOT, 'hooks', 'codex-hooks.json');
-  const codexHooks = JSON.parse(fs.readFileSync(codexHooksPath, 'utf8'));
+  const { events: codexHooks } = readCodexHooks();
   assert.ok(Array.isArray(codexHooks.UserPromptSubmit) && codexHooks.UserPromptSubmit.length > 0, 'UserPromptSubmit must be registered');
   const entry = codexHooks.UserPromptSubmit[0];
   assert.ok(!('matcher' in entry), 'UserPromptSubmit has no tool_name to match against and must not declare a matcher');

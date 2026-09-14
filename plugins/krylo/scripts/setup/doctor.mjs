@@ -141,9 +141,16 @@ function checkCodexComponents(problems) {
     if (typeof hooksField !== 'string' || hooksField.trim() === '') throw new Error('plugin.json has no hooks field');
     const hooksPath = path.join(PLUGIN_ROOT, ...hooksField.replace(/^\.\//, '').split('/'));
     const hooksManifest = JSON.parse(fs.readFileSync(hooksPath, 'utf8'));
+    // The event map nests under `hooks` (the only shape the real installed
+    // build accepts -- a flat top-level event map, or any extra top-level
+    // key, makes Codex reject the whole file; see
+    // docs/adr/0035-codex-live-hook-verification.md).
+    const eventMap = hooksManifest?.hooks && typeof hooksManifest.hooks === 'object' && !Array.isArray(hooksManifest.hooks)
+      ? hooksManifest.hooks
+      : {};
     let sawAny = false;
-    for (const [key, matchers] of Object.entries(hooksManifest)) {
-      if (key.startsWith('$') || !Array.isArray(matchers)) continue;
+    for (const [, matchers] of Object.entries(eventMap)) {
+      if (!Array.isArray(matchers)) continue;
       for (const matcher of matchers) {
         for (const hook of matcher?.hooks ?? []) {
           const match = /\$\{PLUGIN_ROOT\}\/([^"'\s]+\.mjs)/.exec(hook?.command ?? '');

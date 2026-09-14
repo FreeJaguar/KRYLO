@@ -37,6 +37,16 @@ function readJson(file) {
   return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 
+// Codex nests the event map under a top-level `hooks` key -- the ONLY shape
+// the real installed build accepts (a flat event map is rejected outright
+// with "unknown field `UserPromptSubmit`, expected `description` or
+// `hooks`", and a rejected config is dropped in full, silently). Verified
+// live against codex-cli 0.154.0; see
+// docs/adr/0035-codex-live-hook-verification.md.
+function readHookEvents(project) {
+  return readJson(hooksFileOf(project)).hooks;
+}
+
 test('install-codex hooks: default (no --apply) is a dry run that changes nothing on disk', () => {
   const home = mkHome();
   const project = mkProject();
@@ -61,7 +71,7 @@ test('install-codex hooks: fresh --apply writes hooks.json, the sidecar, and the
     const res = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
     assert.equal(res.status, 0);
     assert.equal(res.json.hooks.applied, true);
-    const hooks = readJson(hooksFileOf(project));
+    const hooks = readHookEvents(project);
     for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SessionStart', 'SessionEnd']) {
       assert.ok(Array.isArray(hooks[event]) && hooks[event].length === 1, `${event} must have exactly one KRYLO entry`);
       const hookDef = hooks[event][0].hooks[0];
@@ -91,17 +101,20 @@ test('install-codex hooks: preserves unrelated pre-existing events and unrelated
   try {
     fs.mkdirSync(path.join(project, '.codex'), { recursive: true });
     const foreignHooks = {
-      // PreCompact is genuinely out of scope for KRYLO (docs/adr/0033
-      // explicitly defers it) -- a real event KRYLO never manages, unlike
-      // SessionStart/SessionEnd/Stop, which this checkpoint now owns.
-      PreCompact: [{ hooks: [{ type: 'command', command: 'echo unrelated-precompact' }] }],
-      PreToolUse: [{ matcher: 'SomeOtherTool', hooks: [{ type: 'command', command: 'echo unrelated-pretooluse' }] }],
+      description: 'a project\'s own hooks, not KRYLO\'s',
+      hooks: {
+        // PreCompact is genuinely out of scope for KRYLO (docs/adr/0033
+        // explicitly defers it) -- a real event KRYLO never manages, unlike
+        // SessionStart/SessionEnd/Stop, which this checkpoint now owns.
+        PreCompact: [{ hooks: [{ type: 'command', command: 'echo unrelated-precompact' }] }],
+        PreToolUse: [{ matcher: 'SomeOtherTool', hooks: [{ type: 'command', command: 'echo unrelated-pretooluse' }] }],
+      },
     };
     fs.writeFileSync(hooksFileOf(project), JSON.stringify(foreignHooks, null, 2), 'utf8');
 
     const res = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
     assert.equal(res.status, 0, JSON.stringify(res.json));
-    const hooks = readJson(hooksFileOf(project));
+    const hooks = readHookEvents(project);
     assert.equal(hooks.PreCompact.length, 1);
     assert.equal(hooks.PreCompact[0].hooks[0].command, 'echo unrelated-precompact', 'an event KRYLO does not manage at all must be byte-for-byte untouched');
     assert.equal(hooks.PreToolUse.length, 2, 'KRYLO must append alongside the existing foreign PreToolUse entry, never replace it');
@@ -110,6 +123,38 @@ test('install-codex hooks: preserves unrelated pre-existing events and unrelated
     assert.equal(foreignEntry.hooks[0].command, 'echo unrelated-pretooluse');
     const krylOwnedEntry = hooks.PreToolUse.find((e) => e.matcher !== 'SomeOtherTool');
     assert.match(krylOwnedEntry.hooks[0].command, /codex-project-hook-launcher\.mjs/);
+    assert.equal(readJson(hooksFileOf(project)).description, 'a project\'s own hooks, not KRYLO\'s', 'unrelated top-level keys must survive untouched');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(project, { recursive: true, force: true });
+  }
+});
+
+// A hooks.json written in the LEGACY flat shape (events at the top level)
+// is already non-functional on current Codex builds -- verified live: the
+// build rejects it with "unknown field `UserPromptSubmit`, expected
+// `description` or `hooks`" and drops the whole file. KRYLO must say so
+// precisely rather than silently producing a hybrid document (its own
+// entries nested, the project's own still stranded at the top level, the
+// file still rejected in full).
+test('install-codex hooks: a legacy flat-shaped hooks.json is refused with a precise explanation, never silently half-migrated', () => {
+  const home = mkHome();
+  const project = mkProject();
+  try {
+    fs.mkdirSync(path.join(project, '.codex'), { recursive: true });
+    fs.writeFileSync(hooksFileOf(project), JSON.stringify({
+      PreToolUse: [{ matcher: 'SomeOtherTool', hooks: [{ type: 'command', command: 'echo legacy' }] }],
+    }, null, 2), 'utf8');
+
+    const res = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
+    assert.equal(res.status, 1, 'a legacy-shaped file must not report success');
+    assert.equal(res.json.hooks.ok, false);
+    assert.equal(res.json.hooks.error, 'legacy-flat-hooks-json');
+    assert.match(res.json.hooks.message, /hooks/, 'the message must explain the required shape');
+
+    const after = readJson(hooksFileOf(project));
+    assert.deepEqual(Object.keys(after), ['PreToolUse'], 'the project\'s own file must be left byte-for-byte untouched');
+    assert.ok(!fs.existsSync(sidecarFileOf(project)), 'no ownership sidecar may be written for a refused install');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(project, { recursive: true, force: true });
@@ -128,7 +173,7 @@ test('install-codex hooks: re-applying over a KRYLO-owned install backs up hooks
     assert.equal(second.json.hooks.perEvent.PreToolUse, 'krylo-owned');
     assert.ok(second.json.hooks.backup, 'a backup path must be recorded for an upgrade');
     assert.ok(fs.existsSync(second.json.hooks.backup), 'the backup file must actually exist on disk');
-    const hooks = readJson(hooksFileOf(project));
+    const hooks = readHookEvents(project);
     assert.equal(hooks.PreToolUse.length, 1, 'the upgrade must replace in place, never duplicate');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
@@ -166,7 +211,7 @@ test('install-codex hooks: idempotent -- applying twice in a row never errors an
       const res = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
       assert.equal(res.status, 0, `apply #${i + 1} must succeed`);
     }
-    const hooks = readJson(hooksFileOf(project));
+    const hooks = readHookEvents(project);
     for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SessionStart', 'SessionEnd']) {
       assert.equal(hooks[event].length, 1, `${event} must have exactly one entry after two applies`);
     }
@@ -188,7 +233,7 @@ test('install-codex hooks: a lost/deleted sidecar recovers by adopting the exist
     const second = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
     assert.equal(second.status, 0, JSON.stringify(second.json));
     assert.equal(second.json.hooks.perEvent.PreToolUse, 'krylo-owned', 'a live launcher-referencing entry must be adopted, not treated as absent');
-    const hooks = readJson(hooksFileOf(project));
+    const hooks = readHookEvents(project);
     for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SessionStart', 'SessionEnd']) {
       assert.equal(hooks[event].length, 1, `${event} must still have exactly one entry, never duplicated`);
     }
@@ -209,7 +254,7 @@ test('install-codex hooks: hooks.json deleted while the sidecar survives recover
 
     const second = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
     assert.equal(second.status, 0, JSON.stringify(second.json));
-    const hooks = readJson(hooksFileOf(project));
+    const hooks = readHookEvents(project);
     for (const event of ['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop', 'SessionStart', 'SessionEnd']) {
       assert.equal(hooks[event].length, 1, `${event} must be freshly (re)installed, not stuck ambiguous`);
     }
@@ -245,15 +290,15 @@ test('install-codex hooks: ambiguous ownership (sidecar says KRYLO installed som
     assert.equal(first.json.hooks.applied, true);
 
     // Hand-edit the KRYLO-owned PreToolUse entry so it no longer matches the sidecar record.
-    const hooks = readJson(hooksFileOf(project));
+    const hooks = readHookEvents(project);
     hooks.PreToolUse[0].hooks[0].timeout = 999;
-    fs.writeFileSync(hooksFileOf(project), JSON.stringify(hooks, null, 2), 'utf8');
+    fs.writeFileSync(hooksFileOf(project), JSON.stringify({ hooks }, null, 2), 'utf8');
 
     const second = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
     assert.equal(second.json.hooks.ok, false);
     assert.equal(second.json.hooks.error, 'ambiguous-ownership');
     assert.ok(second.json.hooks.ambiguousEvents.includes('PreToolUse'));
-    const unchangedHooks = readJson(hooksFileOf(project));
+    const unchangedHooks = readHookEvents(project);
     assert.equal(unchangedHooks.PreToolUse[0].hooks[0].timeout, 999, 'the hand-edited entry must remain untouched, never silently overwritten');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
@@ -282,7 +327,7 @@ test('install-codex hooks: --remove uninstalls only the KRYLO-owned entries and 
   const project = mkProject();
   try {
     fs.mkdirSync(path.join(project, '.codex'), { recursive: true });
-    fs.writeFileSync(hooksFileOf(project), JSON.stringify({ SessionStart: [{ hooks: [{ type: 'command', command: 'echo unrelated' }] }] }, null, 2), 'utf8');
+    fs.writeFileSync(hooksFileOf(project), JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'echo unrelated' }] }] } }, null, 2), 'utf8');
 
     const install = run(['--target', 'hooks', '--apply', '--project-dir', project], home, project);
     assert.equal(install.json.hooks.applied, true);
@@ -294,7 +339,7 @@ test('install-codex hooks: --remove uninstalls only the KRYLO-owned entries and 
 
     const applyRemove = run(['--target', 'hooks', '--remove', '--apply', '--project-dir', project], home, project);
     assert.equal(applyRemove.json.hooks.applied, true);
-    const hooks = readJson(hooksFileOf(project));
+    const hooks = readHookEvents(project);
     assert.equal(hooks.UserPromptSubmit, undefined, 'KRYLO event with nothing else in it must be removed entirely');
     assert.equal(hooks.SessionStart[0].hooks[0].command, 'echo unrelated', 'unrelated content must survive removal');
     assert.ok(!fs.existsSync(sidecarFileOf(project)));
