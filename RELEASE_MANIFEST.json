@@ -2,7 +2,7 @@
   "name": "krylo-release",
   "version": "0.2.0",
   "note": "Per-file SHA-256 of every git-tracked file at HEAD (excluding this manifest itself). Hashed from the committed git blob content, not the working tree, so this is reproducible from a clean clone of the same commit. Deterministic: regenerating from an unchanged HEAD produces byte-identical output (no timestamp or other nondeterministic field is embedded). BLUEPRINT_MANIFEST.json remains the separate, immutable record of blueprint 0.1.2 as delivered in the baseline commit.",
-  "fileCount": 368,
+  "fileCount": 375,
   "files": [
     {
       "path": ".claude-plugin/marketplace.json",
@@ -100,6 +100,11 @@
       "sha256": "7c628a4a1be82727375f17e521c10c4bd2bbb99f217c4597113828f8f7cb5868"
     },
     {
+      "path": ".github/workflows/upstream-watch.yml",
+      "bytes": 2218,
+      "sha256": "b8593fd6797cd68633bc10bc7f57528fb15ab20927034a4aa4e9d6718ab49f0a"
+    },
+    {
       "path": ".github/workflows/validate-plugin.yml",
       "bytes": 2102,
       "sha256": "1f75d0055682f8bef0300314a12b11b2be8d5a92621e920c292b8ad67b805a4c"
@@ -121,8 +126,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 31919,
-      "sha256": "6090045d8de604d771812bb5ee6c8f037eb8c92d4416e8b1fe4c376a856a1512"
+      "bytes": 33459,
+      "sha256": "06eb3df1f73e730ea3a7bac6b52b88d2f2fbd452b7bc5168497f94fcbf4b69e7"
     },
     {
       "path": "CLAUDE.md",
@@ -680,6 +685,11 @@
       "sha256": "dd7683e26e20fc242bd94aa35c0a9ea3d3a8ea50e9884263ebc8a01039e0c854"
     },
     {
+      "path": "docs/adr/0036-weekly-upstream-watch.md",
+      "bytes": 8377,
+      "sha256": "8f35f7c5b0e756bea16d6e6a11fe33aa06a58076a4a25e14c002daa0e8816ead"
+    },
+    {
       "path": "docs/adr/README.md",
       "bytes": 451,
       "sha256": "8da79a6ef78e8f2cda90a7cc8e9109b5b4592cc68b2e42751b2b5b026de7a207"
@@ -741,8 +751,8 @@
     },
     {
       "path": "docs/process/FILE_MANIFEST.md",
-      "bytes": 18606,
-      "sha256": "de8a6ab912310b0f34a8fedf902f4c63847a6c946a597f11657e4772433037c4"
+      "bytes": 20007,
+      "sha256": "eb37304461a530bd62110d0112f1b8998fc1e68adea31fd942915cc3e59431a5"
     },
     {
       "path": "docs/process/IMPLEMENTATION_PLAN.md",
@@ -983,6 +993,11 @@
       "path": "plugins/krylo/catalog/trust-policy.json",
       "bytes": 1374,
       "sha256": "e5aa8ad54291629b3f2b82d66771c3a9f307908f3edff849bb95cfca5aad6347"
+    },
+    {
+      "path": "plugins/krylo/catalog/upstream-watch.json",
+      "bytes": 2643,
+      "sha256": "b7e7fc3edd1da8b82694ed6564554936d287ba213202c095b0588b2c0d0bd544"
     },
     {
       "path": "plugins/krylo/codex/project-hooks/codex-project-hook-launcher.mjs",
@@ -1241,8 +1256,8 @@
     },
     {
       "path": "plugins/krylo/scripts/lib/upstream-client.mjs",
-      "bytes": 8470,
-      "sha256": "24159f25cdac049a6932ea9d46d6016a411450cb6a297da410119b9ce0940c36"
+      "bytes": 9343,
+      "sha256": "b11d14c8f874c2bca3d4acea5cb0c9fad16281f65503413b032d1dcc79304ccd"
     },
     {
       "path": "plugins/krylo/scripts/lib/version-compare.mjs",
@@ -1253,6 +1268,11 @@
       "path": "plugins/krylo/scripts/maintenance/check-ecosystem.mjs",
       "bytes": 3937,
       "sha256": "802cd76d3cc927f3565dbbd6eb91a3c685a52d5579051bc01eb091adef2b60c4"
+    },
+    {
+      "path": "plugins/krylo/scripts/maintenance/check-upstream-watch.mjs",
+      "bytes": 3008,
+      "sha256": "5cc24e3fbea3d77c68c54cedc00086e0f65fc662bf6dc204e25b2ef96dad1389"
     },
     {
       "path": "plugins/krylo/scripts/maintenance/checks/actions-pins.mjs",
@@ -1283,6 +1303,11 @@
       "path": "plugins/krylo/scripts/maintenance/checks/node-runtime.mjs",
       "bytes": 6826,
       "sha256": "c80d78101c61207a7eac13ba02146587e7ea5526f6db7e608531dac3243eabd3"
+    },
+    {
+      "path": "plugins/krylo/scripts/maintenance/checks/upstream-watch.mjs",
+      "bytes": 14081,
+      "sha256": "7dab2edcd398294e1fa0bf53bedc4769f4e43452595b6085a5d617989bf4c681"
     },
     {
       "path": "plugins/krylo/scripts/orbit/fingerprint.mjs",
@@ -1550,6 +1575,11 @@
       "sha256": "4f53b7e56c83e9e7f190f04b9c55df47ef5852047520d65dd308722972e50221"
     },
     {
+      "path": "plugins/krylo/tests/governance/upstream-watch-workflow.test.mjs",
+      "bytes": 5143,
+      "sha256": "16f99ebd0c27b1149ae593382425fad9a096419fe48e8aa095223cfc47daf2ac"
+    },
+    {
       "path": "plugins/krylo/tests/hooks/claude-data-root-isolation.test.mjs",
       "bytes": 6041,
       "sha256": "d204c45a074dcab4bd0a037563de2e78ce388a83ac1563be9ba631e21e4fd5a2"
@@ -1683,6 +1713,11 @@
       "path": "plugins/krylo/tests/maintenance/upstream-client.test.mjs",
       "bytes": 11374,
       "sha256": "066220f50dbeaa7842421b5e8b841b23d4df4fea8436960cbad68e507e1c5d45"
+    },
+    {
+      "path": "plugins/krylo/tests/maintenance/upstream-watch.test.mjs",
+      "bytes": 13945,
+      "sha256": "d113437f0db9bae1847f7f0a414cc1c74ac9a84dd63250c5b570ced6d1f6bfc0"
     },
     {
       "path": "plugins/krylo/tests/maintenance/version-compare.test.mjs",
