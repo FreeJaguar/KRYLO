@@ -98,7 +98,7 @@ String presence is weaker evidence than observed firing, and is reported as such
 
 ## What remains unverified, stated plainly
 
-- **`SessionEnd` never fired** in roughly eight live `codex exec` sessions, although the binary recognizes the name. Non-interactive `exec` may simply not emit it. Recognized ≠ observed.
+- ~~**`SessionEnd` never fired**~~ **Corrected the same day (see the addendum below): it does fire.**
 - **The bootstrap-failure marker's PreToolUse deny was not exercised live.** The marker is confirmed written to disk on a real `SAFE_BLOCKED` session, but the deny path needs the model to *attempt* a tool call, and the model complied with the advisory text every time — including when explicitly instructed to attempt the call anyway. That is a good result for the coordination layer and a gap in the evidence for the enforcement fallback, which remains covered by fixture tests only. KRYLO's own design says enforcement must not depend on model cooperation; that property is still unproven live.
 - **`PermissionRequest`, `SubagentStart`/`SubagentStop`, `PreCompact`** are recognized by the build but unregistered and unexercised.
 - Hook trust and project trust were bypassed/preconfigured for the sandbox rather than exercised through their real review flows.
@@ -116,3 +116,17 @@ None. Extends `docs/adr/0035-codex-live-hook-verification.md`, closing the post-
 ## Superseded by
 
 None.
+
+## Addendum: the `SessionEnd` finding above was wrong, and is corrected here
+
+While verifying the follow-on contract change (`docs/adr/0038-codex-0154-supported.md`), a run with a genuinely **active** KRYLO run wrote this telemetry line:
+
+```json
+{"event":"session-end","cycle":0,"ts":"..."}
+```
+
+Only `scripts/status/session-end-codex.mjs` emits that, so `SessionEnd` **does** fire on `codex-cli 0.154.0`.
+
+The earlier conclusion was a misread of silence. That script's very first action is `if (!run.active) allowCodexSilently()` — by design it no-ops, with no output and no telemetry, whenever the run is terminal or absent. Every session in the original round above ended `SAFE_BLOCKED`, i.e. terminal, so the hook could fire and still leave no trace. Absence of evidence was recorded as evidence of absence; it was not.
+
+Left standing as originally written: the marker-deny path is still unexercised live, and `PermissionRequest`/`SubagentStart`/`SubagentStop`/`PreCompact` remain unregistered.
