@@ -8,7 +8,7 @@
 
 KRYLO is an autonomous, evidence-driven software-development workflow, built on one Shared Core with two first-class hosts: the Claude Code plugin, and an OpenAI Codex CLI plugin. One explicit command turns a task into a controlled run: acceptance criteria, a minimal agent team, deterministic verification, independent review, a bounded correction loop (Orbit), and an evidence-backed final report.
 
-Current release: `0.2.0`. Not yet submitted to the official Claude Code marketplace; install directly from this repository (below). The Claude Code host is released; the Codex host is implemented and shipped in this repository but not yet published through any Codex distribution mechanism (Codex's own CLI has no `plugin install` subcommand on the currently tested build -- see "Codex" below for the real, current install path).
+Current release: `0.2.0`. Not yet submitted to any official/curated marketplace on either host; install directly from this repository (below). The Claude Code host is released; the Codex host is implemented and shipped in this repository but not yet submitted to a curated Codex marketplace. A native `codex plugin` CLI install path (`marketplace add` + `add`, confirmed on `codex-cli 0.153.4`; absent on the originally-tested `0.120.0`) is now available -- see "Codex" below.
 
 ## Installation (Claude Code)
 
@@ -36,16 +36,34 @@ claude plugin uninstall krylo@krylo-marketplace
 
 ## Installation (Codex)
 
-KRYLO's Codex host reuses the same Shared Core as the Claude plugin (`docs/adr/0029-codex-host-packaging-and-approval-boundary.md`). The Codex CLI's own `codex plugin` management subcommand does not exist on the currently tested build (`codex-cli 0.120.0`), so installation currently goes through KRYLO's own setup script from a clone of this repository, not a Codex-native package manager:
+KRYLO's Codex host reuses the same Shared Core as the Claude plugin (`docs/adr/0029-codex-host-packaging-and-approval-boundary.md`). Two independent install paths exist, for two different Codex surfaces:
+
+### CLI/plugin-browser (full plugin: `PLUGIN_ROOT`, hooks, `$krylo-run` enforcement)
+
+Confirmed working on `codex-cli 0.153.4` (the `codex plugin` CLI management subcommand was absent on the originally-tested `0.120.0` -- see `docs/adr/0029-codex-host-packaging-and-approval-boundary.md`'s "Correction" section for the verified command transcript). Check `codex --help` for a `plugin` entry before relying on this path; if it is missing, use the standalone Skill path below instead.
+
+```bash
+git clone https://github.com/FreeJaguar/KRYLO
+codex plugin marketplace add ./KRYLO           # or an absolute path to your clone
+codex plugin add krylo@krylo-marketplace
+```
+
+Live end-to-end firing of the plugin's hooks (host-authoritative session bootstrap at `UserPromptSubmit`, the PreToolUse risk gate) has not been confirmed against an authenticated Codex session as of this writing -- installation succeeding does not by itself prove the hook wiring fires; see `docs/codex-capability-matrix.md`. Remove with `codex plugin remove krylo@krylo-marketplace`.
+
+### Standalone Skill + rules (VS Code / no plugin support)
+
+The Codex IDE extension does not support plugins at all. For that surface, KRYLO's own setup script installs a user-level Skill and optional project rules instead:
 
 ```bash
 git clone https://github.com/FreeJaguar/KRYLO
 cd KRYLO
-node plugins/krylo/scripts/setup/install-codex.mjs          # dry run -- shows what would happen, changes nothing
-node plugins/krylo/scripts/setup/install-codex.mjs --apply  # installs the $krylo-run Skill (opt-in, explicit invocation only)
+node plugins/krylo/scripts/setup/install-codex.mjs --target skill          # dry run: standalone Skill + runtime
+node plugins/krylo/scripts/setup/install-codex.mjs --target skill --apply  # installs $krylo-run + its runtime
+node plugins/krylo/scripts/setup/install-codex.mjs --target hooks --project-dir <your-project>          # dry run
+node plugins/krylo/scripts/setup/install-codex.mjs --target hooks --project-dir <your-project> --apply  # project-scoped hook enforcement
 ```
 
-This installs the `krylo-run` Skill so `$krylo-run <task>` is discoverable; it does not on its own add project-scoped Hook enforcement (the Codex IDE extension does not support plugins at all, and full enforcement requires a separate, explicit trusted-rules setup step -- see `docs/codex-capability-matrix.md`). Until that additional step is completed, treat a Codex `$krylo-run` session as read-only/diagnostic rather than a fully enforced autonomous run. Uninstall by removing the installed Skill directory the script reports.
+`--target skill` installs the `krylo-run` Skill and a real, functional runtime so `$krylo-run <task>` is both discoverable and runnable standalone. `--target hooks` (run once per project, `docs/adr/0032-codex-project-scoped-hook-enforcement.md`) additionally installs `<project>/.codex/hooks.json` project-scoped enforcement -- required because the Codex IDE extension does not support plugins at all. Until `--target hooks` is applied AND trusted through Codex's own `/hooks` review flow, treat a standalone Codex `$krylo-run` session as read-only/diagnostic rather than a fully enforced autonomous run. Uninstall either target by re-running with `--remove --apply`.
 
 ### Rollback
 
@@ -110,7 +128,7 @@ The Risk Gate is **defense in depth, not an operating-system sandbox**: it is a 
 ## Known limitations
 
 - **Codex `require-approval` denies deterministically instead of prompting.** Current official Codex `PreToolUse` output does not support a native `ask` decision on the currently tested build, so an action KRYLO classifies as requiring human approval is denied outright on Codex rather than pausing for a real human decision the way it does on Claude. This is a documented, capability-driven asymmetry, not an oversight (`docs/codex-capability-matrix.md`).
-- **Codex plugin installation has no native CLI path yet.** `codex plugin` management subcommands are absent on the currently tested build; installation goes through KRYLO's own setup script (see "Installation (Codex)" above), and full Hook enforcement in VS Code additionally requires a separate, not-yet-automated trusted-rules setup step.
+- **Codex plugin CLI installation works on newer builds; live hook firing is still unconfirmed on either install path.** `codex plugin marketplace add`/`add` are confirmed working on `codex-cli 0.153.4` (absent on the originally-tested `0.120.0`) and successfully install KRYLO's plugin, but no authenticated Codex session has yet confirmed the plugin's hooks (session bootstrap, PreToolUse gate) actually fire end to end -- see "Installation (Codex)" above and `docs/codex-capability-matrix.md`. Full VS Code Hook enforcement is separately implemented (`--target hooks`, `docs/adr/0032-codex-project-scoped-hook-enforcement.md`) for the standalone Skill path, additionally requiring Codex's own `/hooks` trust review; live firing through a real authenticated Codex session remains unverified there too.
 - **Cross-Harness is optional, advisory, and depth-1.** It never gives the opposite-provider worker write access, and its findings can never themselves prove a criterion, resolve an approval, or set run completion. It requires the opposite provider's CLI to be installed and authenticated; when unavailable, KRYLO falls back to native-only verification/review.
 - **Ecosystem Maintenance is detection-only.** It never edits a repository file, updates a dependency/pin automatically, or opens a PR/issue -- a detected drift is evidence for a separate, human-approved change.
 - MCP/external-tool classification (`plugins/krylo/scripts/security/mcp-classifier.mjs`) matches server and operation names against policy patterns; it is not a semantic analysis of what an operation actually does. Unknown MCP servers are always gated for every operation, but a known server's operation whose name does not match any configured write pattern passes through ungated.
@@ -122,7 +140,6 @@ The Risk Gate is **defense in depth, not an operating-system sandbox**: it is a 
 
 ## Roadmap (beyond 0.2, indicative)
 
-- Full VS Code project-scoped Hook enforcement setup for Codex (dry-run/backup/rollback), completing the standalone-Skill install already shipped.
 - Plugin `settings.json` with `subagentStatusLine` once the minimum supported Claude Code CLI reaches 2.1.207+.
 - User-configurable risk-approval TTL.
 - Broaden MCP operation classification beyond name/pattern matching where the platform exposes richer tool metadata.

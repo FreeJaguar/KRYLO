@@ -32,7 +32,7 @@ On the Codex host, the explicit invocation is:
 $krylo-run <task>
 ```
 
-Implemented per `docs/adr/0029-codex-host-packaging-and-approval-boundary.md` and `docs/process/CODEX_HOST_IMPLEMENTATION_PLAN.md`: a real Codex CLI plugin, explicit-only (implicit invocation disabled), reusing the same Shared Core as the Claude host. `docs/codex-capability-matrix.md` records exactly which capabilities are confirmed live versus statically inspected versus deferred, including the narrower `require-approval` guarantee on Codex (deterministic deny rather than a native approval prompt) and the still-pending full VS Code project-hook enforcement setup.
+Implemented per `docs/adr/0029-codex-host-packaging-and-approval-boundary.md` and `docs/process/CODEX_HOST_IMPLEMENTATION_PLAN.md`: a real Codex CLI plugin, explicit-only (implicit invocation disabled), reusing the same Shared Core as the Claude host. Full VS Code project-scoped hook enforcement (`<repo>/.codex/hooks.json`) is implemented per `docs/adr/0032-codex-project-scoped-hook-enforcement.md`. `docs/codex-capability-matrix.md` records exactly which capabilities are confirmed live versus statically inspected versus deferred, including the narrower `require-approval` guarantee on Codex (deterministic deny rather than a native approval prompt).
 
 ## Product goals
 
@@ -84,7 +84,8 @@ KRYLO v0.1.0 will not:
 - Ship a real Codex CLI plugin (`.codex-plugin/plugin.json`, explicit-only `krylo-run` Skill, Codex Hook transport) reusing Shared Core, per `docs/adr/0029-codex-host-packaging-and-approval-boundary.md`.
 - Preserve every Claude host guarantee unchanged (regression-proven, `docs/codex-capability-matrix.md` and the full test suite).
 - Document every Codex capability gap with an explicit safe fallback rather than overclaim parity with Claude -- most notably, `require-approval` denies deterministically on Codex instead of using a native approval prompt, since current Codex `PreToolUse` output does not support one.
-- Full VS Code project-scoped hook enforcement setup (`<repo>/.codex/hooks.json` with dry-run/backup/rollback) remains explicitly out of scope for this checkpoint and is tracked as separate, later work; the standalone-Skill install path ships now. Scheduled Ecosystem Maintenance and the `0.2.0` version bump are implemented in this same release line (see `docs/adr/0031-ecosystem-maintenance-drift-checker.md` and CHANGELOG's `[0.2.0]` entry).
+- Full VS Code project-scoped hook enforcement (`<repo>/.codex/hooks.json`, `install-codex.mjs --target hooks`) is implemented per `docs/adr/0032-codex-project-scoped-hook-enforcement.md`.
+- Scheduled Ecosystem Maintenance and the `0.2.0` version bump are implemented in this same release line (see `docs/adr/0031-ecosystem-maintenance-drift-checker.md` and CHANGELOG's `[0.2.0]` entry).
 
 ## Goals for 0.2 (Cross-Harness)
 

@@ -19,6 +19,8 @@
     "test:governance": "node --test \"plugins/krylo/tests/governance/*.test.mjs\"",
     "test:maintenance": "node --test \"plugins/krylo/tests/maintenance/*.test.mjs\"",
     "syntax": "node plugins/krylo/scripts/validation/validate-runtime.mjs --syntax-only",
-    "validate:runtime": "node plugins/krylo/scripts/validation/validate-runtime.mjs"
+    "validate:runtime": "node plugins/krylo/scripts/validation/validate-runtime.mjs",
+    "manifest": "node plugins/krylo/scripts/release/generate-release-manifest.mjs --write",
+    "manifest:verify": "node plugins/krylo/scripts/release/verify-release-manifest.mjs"
   }
 }

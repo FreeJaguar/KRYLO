@@ -98,6 +98,29 @@ Both fixes were verified against the full regression suite (`npm test`, 443+ pas
 
 One further, low-severity note from the same round: `hook-transport.mjs`'s `normalizeCodexHookPayload()` degraded-identity path (used when a PreToolUse-shaped payload lacks a usable `session_id`) now binds directly to `CODEX_THREAD_ID` instead of falling through to `hostSessionId: undefined`, whenever that variable happens to be present in the Hook process's own environment -- an improvement if so, but whether Codex actually sets `CODEX_THREAD_ID` in a Hook's own spawned process (as opposed to the model's own later shell execution environment, which `codex-rs/core/src/exec_env.rs` does confirm) is unverified and untested; treat this path as unverified, not regressed.
 
+## Correction: native `codex plugin add`/`marketplace add` now confirmed on a newer installed build (codex-cli 0.153.4)
+
+Every capability claim above and in `docs/codex-capability-matrix.md` about plugin installation ("`codex plugin` CLI management commands ... Not available on installed 0.120.0") was verified against `codex-cli 0.120.0` on 2026-08-26. Re-verified 2026-09-14 against a newer installed build, `codex-cli 0.153.4`: `codex plugin` is no longer just a documented-but-missing subcommand -- `codex --help` now lists `plugin` ("Manage Codex plugins") with working `marketplace add`, `add`, `list`, `remove` subcommands.
+
+Empirically confirmed, first in an isolated `CODEX_HOME` (never the real `~/.codex`), then intentionally repeated against the real environment at the user's explicit request:
+
+```text
+codex plugin marketplace add C:\Projects\krylo --json
+  -> {"marketplaceName":"krylo-marketplace","installedRoot":"C:\\Projects\\krylo","alreadyAdded":false}
+
+codex plugin list --marketplace krylo-marketplace --available --json
+  -> discovers plugins/krylo/.codex-plugin/plugin.json automatically (name "krylo", version "0.2.0",
+     source.path "C:\\Projects\\krylo\\plugins\\krylo") -- no separate marketplace manifest file required;
+     a local marketplace source is scanned for plugin manifests directly.
+
+codex plugin add krylo@krylo-marketplace --json
+  -> installed, "enabled": true, both in the isolated sandbox and, subsequently, in the real ~/.codex.
+```
+
+This corrects, not supersedes, the packaging/approval-boundary Decision above: nothing about the `require-approval` deny-by-default boundary, the PreToolUse matcher, or the `UserPromptSubmit` session-bootstrap design changes. Only the previously-recorded installation-mechanism fact changes: a native `codex plugin` CLI path now exists on a real, currently-installed build, alongside (not replacing) the `install-codex.mjs`-driven standalone-Skill-plus-rules path this ADR's Decision section already documents for the VS Code/no-plugin-support case.
+
+**What remains unverified, disclosed rather than assumed:** this correction confirms plugin *installation* (`enabled: true`) on 0.153.4, not live hook *firing*. No authenticated Codex session was run against either the sandbox or the real install as part of this correction -- whether `PLUGIN_ROOT`/`PLUGIN_DATA` are actually injected into a real `$krylo-run` invocation, whether the `UserPromptSubmit` hook fires and binds a run, and whether the PreToolUse matcher (`"Bash"` literal, verified only against 0.120.0's embedded schema) still matches 0.153.4's own schema are all still open questions for a live, authenticated smoke test -- not claimed as resolved by this correction. `docs/codex-capability-matrix.md` is updated to reflect exactly this: installation confirmed, live firing still capability-matrix-open.
+
 ## Supersedes
 
 None. Extends ADR-0023 exactly as that ADR anticipated ("Codex receives its own explicit host invocation in a later ADR"). Does not modify ADR-0021 (Claude-only Skill-scoped Hooks), ADR-0025/ADR-0027 (Claude native-approval design, unchanged), or ADR-0028 (Foundation glob-closure, unrelated).

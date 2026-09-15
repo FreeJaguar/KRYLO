@@ -172,3 +172,18 @@ export async function getGithubReleaseByTag(owner, repo, tag) {
 export async function getGithubCommitForRef(owner, repo, ref) {
   return fetchUpstreamJson(`https://api.github.com/repos/${encodeRepoSegment(owner)}/${encodeRepoSegment(repo)}/commits/${encodeURIComponent(ref)}`);
 }
+
+/**
+ * GET /repos/{owner}/{repo}/compare/{base}...{head} -- the changed-FILE LIST
+ * between a reviewed ref and an observed one (Weekly Upstream Watch,
+ * docs/adr/0036-weekly-upstream-watch.md). Only `files[].filename`/`status`
+ * and the commit count are ever consumed: the response also carries patch
+ * text and commit messages, which are upstream-authored untrusted content
+ * and are deliberately never read, let alone executed. The `...` between the
+ * two refs is GitHub's own three-dot compare syntax and must NOT be
+ * percent-encoded, so each ref is encoded separately around it.
+ */
+export async function getGithubCompare(owner, repo, base, head) {
+  const range = `${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
+  return fetchUpstreamJson(`https://api.github.com/repos/${encodeRepoSegment(owner)}/${encodeRepoSegment(repo)}/compare/${range}`);
+}

@@ -12,65 +12,12 @@
 
 import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
 import { normalizeClaudeHookPayload, emitClaudeStopBlock, allowClaudeSilently } from '../host/claude/hook-transport.mjs';
-import { loadState, saveState, clearActiveRunPointerForState, completionEval } from '../lib/state.mjs';
+import { loadState, saveState, completionEval } from '../lib/state.mjs';
 import { withFileLock } from '../lib/lock.mjs';
 import { runLockPath } from '../lib/paths.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { assessStagnation } from './stagnation.mjs';
-
-function buildDelta(state, evalResult) {
-  const parts = [];
-
-  const unmet = state.acceptanceCriteria.filter((c) => !['proven', 'not-applicable'].includes(c.status));
-  if (unmet.length > 0) {
-    parts.push(`Unmet acceptance criteria: ${unmet.map((c) => `${c.id} (${c.status}) ${c.description}`).join('; ')}.`);
-  } else if (!evalResult.complete) {
-    parts.push(`Completion gate not satisfied: ${evalResult.reasons.join('; ')}.`);
-  }
-
-  const openFindings = state.findings.filter(
-    (f) => (f.severity === 'critical' || f.severity === 'high') && f.status === 'open',
-  );
-  if (openFindings.length > 0) {
-    parts.push(`Open critical/high findings: ${openFindings.length}.`);
-  }
-
-  const repeated = state.orbit.fingerprints.filter((f) => f.count >= 2);
-  if (repeated.length > 0) {
-    parts.push(
-      `Repeated failure fingerprints: ${repeated.map((f) => `${f.hash} (x${f.count}, ${f.category})`).join(', ')}. ` +
-      'Change strategy - do not repeat the failed approach.',
-    );
-  }
-
-  const remaining = Math.max(0, state.orbit.budget - state.orbit.cycle);
-  parts.push(`Remaining Orbit budget: ${remaining} of ${state.orbit.budget}.`);
-  parts.push(
-    'Record evidence with update-state.mjs --add-evidence, mark criteria with --set-criterion AC-n=proven --evidence EV-n, ' +
-    'or finish with an explicit terminal state (--terminal SAFE_BLOCKED | USER_DECISION_REQUIRED | RISK_APPROVAL_REQUIRED | CANCELLED_BY_USER).',
-  );
-
-  return parts.join(' ');
-}
-
-/**
- * Persist a terminal state. Only clears the active-run pointer and records
- * the "terminal" telemetry event if the save actually succeeded -- a failed
- * save (e.g. a pre-migration backup write failure, scripts/lib/state.mjs's
- * saveState()) must never be followed by clearing the pointer or reporting
- * a terminal event for a state.json that still says the run is active.
- * Doing so would leave the run with no persisted terminal state while
- * resolveActiveRun() (and therefore every other gate) now treats it as
- * gone, silently disabling KRYLO enforcement for the rest of the session.
- */
-function finalize(state, terminalState, phase) {
-  state.terminalState = terminalState;
-  state.phase = phase;
-  const saved = saveState(state);
-  if (!saved.ok) return;
-  clearActiveRunPointerForState(saved.value);
-  recordEvent(saved.value.runId, { event: 'terminal', terminalState, cycle: saved.value.orbit.cycle });
-}
+import { buildStopDelta, finalizeStopTerminal } from './stop-policy.mjs';
 
 async function main() {
   const input = await readStdinJson();
@@ -120,13 +67,13 @@ async function main() {
 
       // Budget exhaustion: deterministic terminal state, allow the stop.
       if (state.orbit.cycle >= state.orbit.budget || state.orbit.stopBlocks >= state.orbit.budget) {
-        finalize(state, 'ITERATION_LIMIT_REACHED', 'ITERATION_LIMIT');
+        finalizeStopTerminal(state, 'ITERATION_LIMIT_REACHED', 'ITERATION_LIMIT');
         return;
       }
 
       // Stagnation: no useful action remains — stop safely.
       if (assessStagnation(state).recommendation === 'isolate-or-stop') {
-        finalize(state, 'SAFE_BLOCKED', 'BLOCKED');
+        finalizeStopTerminal(state, 'SAFE_BLOCKED', 'BLOCKED');
         return;
       }
 
@@ -137,7 +84,7 @@ async function main() {
       const saved = saveState(state);
       if (!saved.ok) return;
       recordEvent(runId, { event: 'stop-block', cycle: saved.value.orbit.cycle });
-      outcome = { kind: 'block', delta: buildDelta(saved.value, evalResult) };
+      outcome = { kind: 'block', delta: buildStopDelta(saved.value, evalResult) };
     });
   } catch {
     // Fail safe for completion claims, but never trap the user: any
