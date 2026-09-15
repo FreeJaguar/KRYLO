@@ -69,6 +69,41 @@ function pluginRoot() {
   return path.resolve(HERE, '..', '..');
 }
 
+/**
+ * Rename, retrying the transient Windows failures that a rename of a
+ * just-created directory tree genuinely hits.
+ *
+ * Reproduced directly, not theorized: running `--target skill --apply`
+ * against fresh temp homes in a loop failed roughly one time in six with
+ * `EPERM: operation not permitted, rename '...krylo-run.new-<pid>-<ts>' ->
+ * '...krylo-run'`. Nothing is wrong with the staged tree -- Windows simply
+ * refuses the rename while another process (antivirus, the Search indexer)
+ * still holds a handle on the hundreds of files the recursive copy just
+ * created. The failure was safe (the existing install was never lost, and
+ * the error said so), but a routine setup command failing intermittently is
+ * still a defect, and it was the source of the install tests' flakiness.
+ *
+ * Bounded and synchronous on purpose: a handful of short sleeps, then give
+ * up and let the caller's existing failure path report it exactly as before.
+ * Only the known-transient codes are retried; a genuine EXDEV or ENOENT
+ * fails immediately rather than being retried into a slower identical error.
+ */
+const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EBUSY', 'EACCES', 'ENOTEMPTY']);
+
+export function renameWithRetry(from, to, { attempts = 8, delayMs = 60, rename = fs.renameSync } = {}) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      rename(from, to);
+      return;
+    } catch (err) {
+      if (attempt >= attempts || !TRANSIENT_RENAME_CODES.has(err.code)) throw err;
+      // Synchronous sleep: this is a one-shot CLI, there is no event loop to
+      // keep responsive, and Atomics.wait is the only portable blocking wait.
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, delayMs * attempt);
+    }
+  }
+}
+
 function copyDirRecursive(src, dest) {
   fs.mkdirSync(dest, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
@@ -182,13 +217,13 @@ function planSkillInstall(apply) {
     // function promises everywhere else. Both renames, and the tempDir
     // cleanup, are now one failure-handled unit.
     try {
-      if (backupPath) fs.renameSync(skillDestDir, backupPath);
-      fs.renameSync(tempDir, skillDestDir);
+      if (backupPath) renameWithRetry(skillDestDir, backupPath);
+      renameWithRetry(tempDir, skillDestDir);
     } catch (err) {
       let restored = false;
       if (backupPath && fs.existsSync(backupPath) && !fs.existsSync(skillDestDir)) {
         try {
-          fs.renameSync(backupPath, skillDestDir);
+          renameWithRetry(backupPath, skillDestDir);
           restored = true;
         } catch {
           // Best-effort restore only; fall through to report the failure.
@@ -293,7 +328,7 @@ function planRulesInstall(apply, projectDir, codexBinary) {
     // can never leave a truncated rules file at the live path.
     const tempFile = `${rulesFile}.new-${process.pid}-${Date.now()}`;
     fs.writeFileSync(tempFile, content, 'utf8');
-    fs.renameSync(tempFile, rulesFile);
+    renameWithRetry(tempFile, rulesFile);
     plan.applied = true;
     plan.validation = validateRulesWithCodex(rulesFile, codexBinary);
   }
@@ -622,10 +657,10 @@ function planHooksInstall(apply, projectDir) {
     // own PreToolUse gate included, a fail-open outcome worth closing here.
     const hooksTemp = `${hooksFile}.new-${process.pid}-${Date.now()}`;
     fs.writeFileSync(hooksTemp, `${JSON.stringify(nextHooksJson, null, 2)}\n`, 'utf8');
-    fs.renameSync(hooksTemp, hooksFile);
+    renameWithRetry(hooksTemp, hooksFile);
     const sidecarTemp = `${sidecarFile}.new-${process.pid}-${Date.now()}`;
     fs.writeFileSync(sidecarTemp, `${JSON.stringify({ version: HOOKS_VERSION, installedAt: new Date().toISOString(), ownedEntries: newOwnedEntries }, null, 2)}\n`, 'utf8');
-    fs.renameSync(sidecarTemp, sidecarFile);
+    renameWithRetry(sidecarTemp, sidecarFile);
     fs.mkdirSync(path.dirname(launcherDestFile), { recursive: true });
     fs.copyFileSync(launcherSrcFile, launcherDestFile);
     plan.applied = true;
@@ -719,7 +754,7 @@ function removeHooks(apply, projectDir) {
     if (Object.keys(nextHooksJson).length > 0) {
       const hooksTemp = `${hooksFile}.new-${process.pid}-${Date.now()}`;
       fs.writeFileSync(hooksTemp, `${JSON.stringify(nextHooksJson, null, 2)}\n`, 'utf8');
-      fs.renameSync(hooksTemp, hooksFile);
+      renameWithRetry(hooksTemp, hooksFile);
     } else {
       fs.rmSync(hooksFile, { force: true });
     }
@@ -855,4 +890,12 @@ function main() {
   process.exit(overallOk ? 0 : 1);
 }
 
-main();
+// Guarded the same way every other script in this repository guards its own
+// entrypoint, so importing this module (to unit-test renameWithRetry) does
+// not execute the installer as a side effect. Invoking it as a CLI --
+// `node plugins/krylo/scripts/setup/install-codex.mjs ...`, including from
+// the test suite's own subprocess calls -- is unchanged.
+const isMainModule = process.argv[1] && path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);
+if (isMainModule) {
+  main();
+}

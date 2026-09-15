@@ -6,6 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
 import { SCRIPTS_ROOT } from '../hooks/helpers.mjs';
+import { renameWithRetry } from '../../scripts/setup/install-codex.mjs';
 
 function run(args, home, projectDir) {
   const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, 'setup', 'install-codex.mjs'), ...args], {
@@ -348,4 +349,48 @@ test('install-codex: a foreign rules file at the same path is never overwritten'
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(project, { recursive: true, force: true });
   }
+});
+
+// Reproduced directly while verifying the Weekly Upstream Watch work:
+// `--target skill --apply` against fresh temp homes failed roughly one time
+// in six with `EPERM: operation not permitted, rename
+// '...krylo-run.new-<pid>-<ts>' -> '...krylo-run'`. Nothing was wrong with
+// the staged tree -- Windows refuses the rename while another process
+// (antivirus, the Search indexer) still holds a handle on the hundreds of
+// files the recursive copy just created. It failed SAFELY, but a routine
+// setup command failing intermittently is still a defect, and it was the
+// source of this file's own flakiness.
+test('renameWithRetry: retries a transient Windows rename failure and then succeeds', () => {
+  let calls = 0;
+  renameWithRetry('from', 'to', {
+    delayMs: 1,
+    rename: () => {
+      calls += 1;
+      if (calls < 3) {
+        const err = new Error('EPERM: operation not permitted, rename');
+        err.code = 'EPERM';
+        throw err;
+      }
+    },
+  });
+  assert.equal(calls, 3, 'must keep retrying until the rename succeeds');
+});
+
+test('renameWithRetry: gives up after its bounded attempts rather than looping forever', () => {
+  let calls = 0;
+  assert.throws(() => renameWithRetry('from', 'to', {
+    attempts: 4,
+    delayMs: 1,
+    rename: () => { calls += 1; const err = new Error('EBUSY'); err.code = 'EBUSY'; throw err; },
+  }), /EBUSY/);
+  assert.equal(calls, 4, 'must stop at the configured attempt limit');
+});
+
+test('renameWithRetry: a non-transient failure is rethrown immediately, never retried into a slower identical error', () => {
+  let calls = 0;
+  assert.throws(() => renameWithRetry('from', 'to', {
+    delayMs: 1,
+    rename: () => { calls += 1; const err = new Error('EXDEV: cross-device link not permitted'); err.code = 'EXDEV'; throw err; },
+  }), /EXDEV/);
+  assert.equal(calls, 1, 'a cross-device rename can never succeed by waiting');
 });
