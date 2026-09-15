@@ -2,7 +2,7 @@
   "name": "krylo-release",
   "version": "0.2.0",
   "note": "Per-file SHA-256 of every git-tracked file at HEAD (excluding this manifest itself). Hashed from the committed git blob content, not the working tree, so this is reproducible from a clean clone of the same commit. Deterministic: regenerating from an unchanged HEAD produces byte-identical output (no timestamp or other nondeterministic field is embedded). BLUEPRINT_MANIFEST.json remains the separate, immutable record of blueprint 0.1.2 as delivered in the baseline commit.",
-  "fileCount": 377,
+  "fileCount": 384,
   "files": [
     {
       "path": ".claude-plugin/marketplace.json",
@@ -75,6 +75,11 @@
       "sha256": "a7c90f86e8d15322320d0dc5baee01d3b92d730eaa508eb0c6a800de08d5fb2a"
     },
     {
+      "path": ".github/workflows/ecosystem-radar.yml",
+      "bytes": 2641,
+      "sha256": "89f7d1c46406ba1e81290866f1a7ba008c82cda745af17af9eef382722fdb27b"
+    },
+    {
       "path": ".github/workflows/release.yml",
       "bytes": 4472,
       "sha256": "3db61e0bc72eb54317d533c08bb9f2b8b13b5a6d868241e13743183df663e60c"
@@ -126,8 +131,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 36539,
-      "sha256": "2de55730498a5837e97387717da78b0b27bc0bf9ef126e8ad977d5763185af72"
+      "bytes": 38233,
+      "sha256": "3798cbcf459270319ca5cf56125b4764ae369b0c1bf8695c3c4939c1933bfbf2"
     },
     {
       "path": "CLAUDE.md",
@@ -700,6 +705,11 @@
       "sha256": "abc8880c7360e7bbb3ed4beb011f9201b20cdee9edfe4966a6861846984893c0"
     },
     {
+      "path": "docs/adr/0039-monthly-ecosystem-radar.md",
+      "bytes": 7463,
+      "sha256": "9541422061aa16d5dfc742be115c1c6379d909e7a235f558a5a0dbcbf5a27144"
+    },
+    {
       "path": "docs/adr/README.md",
       "bytes": 451,
       "sha256": "8da79a6ef78e8f2cda90a7cc8e9109b5b4592cc68b2e42751b2b5b026de7a207"
@@ -761,8 +771,8 @@
     },
     {
       "path": "docs/process/FILE_MANIFEST.md",
-      "bytes": 20608,
-      "sha256": "711df26a59ef1783b86665f882dedbba8605b887583ab494c2dd21634bbd9602"
+      "bytes": 21505,
+      "sha256": "e3ac9e9ad355ac89dff0af376e89d7b1809fbdb59aee89dd6051993fa492ee17"
     },
     {
       "path": "docs/process/IMPLEMENTATION_PLAN.md",
@@ -993,6 +1003,11 @@
       "path": "plugins/krylo/catalog/publishers.json",
       "bytes": 1025,
       "sha256": "a78435ee9da7b1533c491f990d353be0b8f4e472893165f1e825acb0030f0e9d"
+    },
+    {
+      "path": "plugins/krylo/catalog/radar-sources.json",
+      "bytes": 2228,
+      "sha256": "46c820e5d36fb51cf4a619d716068764d61698eedf0e78f46bbf79d04ed3bfc3"
     },
     {
       "path": "plugins/krylo/catalog/tools.json",
@@ -1266,13 +1281,18 @@
     },
     {
       "path": "plugins/krylo/scripts/lib/upstream-client.mjs",
-      "bytes": 9343,
-      "sha256": "b11d14c8f874c2bca3d4acea5cb0c9fad16281f65503413b032d1dcc79304ccd"
+      "bytes": 10775,
+      "sha256": "9d0e2c2355c3f59daa2f63c3fb0fae12620a1f8cf1d8863206163f76ae9836d8"
     },
     {
       "path": "plugins/krylo/scripts/lib/version-compare.mjs",
       "bytes": 2768,
       "sha256": "3dfe85be631bc6b025338b92c9ea78e498c18dc26e30d1d09e5e60667cd3bb04"
+    },
+    {
+      "path": "plugins/krylo/scripts/maintenance/check-ecosystem-radar.mjs",
+      "bytes": 3761,
+      "sha256": "73c76b189d3094a6d2e8b6cc805f565081706dd8efcebb00b6af436b9680e214"
     },
     {
       "path": "plugins/krylo/scripts/maintenance/check-ecosystem.mjs",
@@ -1303,6 +1323,11 @@
       "path": "plugins/krylo/scripts/maintenance/checks/dependencies.mjs",
       "bytes": 7874,
       "sha256": "26264fb24eced2b26538cb33c9e102c4353663876effeb59f4286d6308fc9c86"
+    },
+    {
+      "path": "plugins/krylo/scripts/maintenance/checks/ecosystem-radar.mjs",
+      "bytes": 19033,
+      "sha256": "ad5143145a73ba0378db6b48a661b4091b816a5e5d9da75409b9515a69506885"
     },
     {
       "path": "plugins/krylo/scripts/maintenance/checks/internal-drift.mjs",
@@ -1555,6 +1580,11 @@
       "sha256": "e8c6d8e669feb06cf6ac2cb0ab932f8608191b33ad7675db08ac47ed93d68c34"
     },
     {
+      "path": "plugins/krylo/tests/governance/ecosystem-radar-workflow.test.mjs",
+      "bytes": 5161,
+      "sha256": "569dffb384b6b2f831e69b4fc6c539ac2b309de1683b4e3386cde6fd24fe3457"
+    },
+    {
       "path": "plugins/krylo/tests/governance/hook-scoping.test.mjs",
       "bytes": 17020,
       "sha256": "d75a7e8a9ed63fce0c4b547368b2112cf5ff375051e4b64a95e97ddc522e86f9"
@@ -1698,6 +1728,11 @@
       "path": "plugins/krylo/tests/maintenance/dependencies.test.mjs",
       "bytes": 6564,
       "sha256": "1959e0df48f1b6efeec29e507e89a5fd6475e849f2af2408bcb983517ea8b07f"
+    },
+    {
+      "path": "plugins/krylo/tests/maintenance/ecosystem-radar.test.mjs",
+      "bytes": 11769,
+      "sha256": "7c22e1c45b2ee1e4117fc74ac32104224cac1267704d930d21506666ca14ff31"
     },
     {
       "path": "plugins/krylo/tests/maintenance/internal-drift.test.mjs",
