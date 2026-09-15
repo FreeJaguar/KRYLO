@@ -54,6 +54,14 @@ docs/adr/0031-ecosystem-maintenance-drift-checker.md  # accepted: read-only, off
 docs/process/ECOSYSTEM_MAINTENANCE_IMPLEMENTATION_PLAN.md  # implemented: design/verification reconciliation
 .github/workflows/ecosystem-maintenance.yml           # implemented: monthly + workflow_dispatch,
                                                        # contents:read only, invokes check-ecosystem.mjs
+.github/workflows/upstream-watch.yml                  # implemented: weekly + workflow_dispatch,
+                                                       # contents: read, read-only, never push/pull_request
+                                                       # (docs/adr/0036)
+plugins/krylo/catalog/upstream-watch.json             # implemented: watch CONFIGURATION only; every
+                                                       # baseline ref is read from tools.json at runtime,
+                                                       # never duplicated or auto-updated here
+plugins/krylo/scripts/maintenance/check-upstream-watch.mjs        # implemented: watch entrypoint
+plugins/krylo/scripts/maintenance/checks/upstream-watch.mjs       # implemented: drift classification
 docs/adr/0032-codex-project-scoped-hook-enforcement.md  # accepted: closes the VS Code project-hook
                                                        # enforcement gap disclosed by ADR-0029
 docs/process/CODEX_PROJECT_HOOKS_IMPLEMENTATION_PLAN.md  # implemented: task breakdown + current-stable-
@@ -69,6 +77,12 @@ docs/adr/0034-codex-runtime-compatibility-gate.md     # accepted: admission cont
                                                        # Codex compatibility contract
 docs/process/CODEX_RUNTIME_COMPATIBILITY_GATE_DESIGN.md          # design: contract shape, decision table
 docs/process/CODEX_RUNTIME_COMPATIBILITY_GATE_IMPLEMENTATION_PLAN.md  # implemented: task breakdown
+docs/adr/0035-codex-live-hook-verification.md         # accepted: FIRST live authenticated Codex session;
+                                                       # found and fixed the two config defects that had
+                                                       # kept every KRYLO Codex hook from running on Windows
+docs/adr/0036-weekly-upstream-watch.md                # accepted: read-only weekly drift watch over the
+                                                       # REVIEWED external integrations in catalog/tools.json
+                                                       # (design Section 15 / Phase 6)
 ```
 
 ## Plugin root
