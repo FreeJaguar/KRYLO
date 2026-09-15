@@ -30,6 +30,7 @@
 
 import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -105,13 +106,38 @@ export function generateManifest({ version }) {
 function main() {
   const args = process.argv.slice(2);
   const versionArg = args.find((a) => a.startsWith('--version='));
-  if (!versionArg) {
-    process.stderr.write('Usage: generate-release-manifest.mjs --version=X.Y.Z\n');
-    process.exit(2);
+  // Defaults to the repository's own declared version. Every manifest in
+  // this repository is required to report the same version anyway (the
+  // Ecosystem Maintenance internal-drift check enforces it), so asking the
+  // caller to retype it only created a way to get it wrong.
+  let version = versionArg ? versionArg.slice('--version='.length) : null;
+  if (!version) {
+    try {
+      version = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8')).version;
+    } catch {
+      process.stderr.write('Usage: generate-release-manifest.mjs [--version=X.Y.Z] [--write]\n');
+      process.exit(2);
+    }
   }
-  const version = versionArg.slice('--version='.length);
+
   const manifest = generateManifest({ version });
-  process.stdout.write(`${JSON.stringify(manifest, null, 2)}\n`);
+  const serialized = `${JSON.stringify(manifest, null, 2)}\n`;
+
+  // --write exists because printing to stdout is a genuine footgun here:
+  // `node generate-release-manifest.mjs` looks like it did the job, changes
+  // nothing on disk, and the next `git add` finds nothing -- so the commit
+  // ships a stale manifest and CI fails on the NEXT push instead. Writing
+  // via a temp file plus rename means an interrupted run can never leave a
+  // half-written manifest in place of a valid one.
+  if (args.includes('--write')) {
+    const dest = path.join(REPO_ROOT, 'RELEASE_MANIFEST.json');
+    const temp = `${dest}.new-${process.pid}`;
+    fs.writeFileSync(temp, serialized, 'utf8');
+    fs.renameSync(temp, dest);
+    process.stderr.write(`RELEASE_MANIFEST.json regenerated for version ${version} (${manifest.fileCount} files).\n`);
+    return;
+  }
+  process.stdout.write(serialized);
 }
 
 const isMainModule = process.argv[1] && path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);

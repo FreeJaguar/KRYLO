@@ -65,7 +65,17 @@ test('the manifest is internally consistent: fileCount matches the actual entry 
 
 test('verifyManifest against the real, currently-committed RELEASE_MANIFEST.json reports ok with zero errors', () => {
   const result = verifyManifest();
-  assert.equal(result.ok, true, JSON.stringify(result.errors));
+  // A stale manifest is the single most common way this test fails, and its
+  // raw output is a wall of twenty-plus hash mismatches that says nothing
+  // about what to DO. It is the expected state of any commit that changed a
+  // tracked file without regenerating -- including every automated
+  // dependency PR, since a bot cannot regenerate it and this repository
+  // deliberately grants no repository-write automation (ADR-0031). Lead with
+  // the remedy, keep the raw errors after it for the genuinely different
+  // case (a file the manifest lists that is no longer tracked, or vice
+  // versa).
+  const remedy = 'RELEASE_MANIFEST.json is out of date for this commit. Regenerate it with `npm run manifest` and commit the result. (This is expected on any commit that changed a tracked file, including an automated dependency PR: the manifest covers EVERY git-tracked file by design, and narrowing that scope to keep a bot green would weaken a supply-chain control.)';
+  assert.equal(result.ok, true, `${remedy}\n\nraw verifier errors:\n${JSON.stringify(result.errors, null, 2)}`);
   assert.deepEqual(result.errors, []);
 });
 
