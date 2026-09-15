@@ -52,62 +52,62 @@
     {
       "path": ".github/workflows/actions-security.yml",
       "bytes": 1226,
-      "sha256": "d0029078165ebe0ac16f313d18be4ef368ffa4d616b37b7b1c52b815c605f0d5"
+      "sha256": "f04a61e865d55c9c70a8f118f931ad2e815590fe6842fd92b7698007a67c437c"
     },
     {
       "path": ".github/workflows/claude-code-compat.yml",
       "bytes": 1491,
-      "sha256": "c5f6d18368bae5e40d764cd6f0b732d58f8d63bee616953faa9291b2fa4f2097"
+      "sha256": "0aa300982f9b8c6a8806a1c657f6cb9797e0d16c5d145aab236634edbce90d9a"
     },
     {
       "path": ".github/workflows/codeql.yml",
       "bytes": 720,
-      "sha256": "9ec00230f06dddf6d0fbed03a59b9c4b863cc1d92b27f4142f9843815b692279"
+      "sha256": "66b6401655af9918405e7682f4b3b7a841974a64df43fc480189048540c90867"
     },
     {
       "path": ".github/workflows/dependency-security.yml",
       "bytes": 894,
-      "sha256": "b1335fcac1e3b69aa9cda77b2f6705727b436e7494bb1f13e4a64b05e90227ba"
+      "sha256": "cbb33beb522f232d8c32b6aa0b1ef71a15e95aca41267d46854f2f8fb6d0b5ee"
     },
     {
       "path": ".github/workflows/ecosystem-maintenance.yml",
       "bytes": 1773,
-      "sha256": "d9ab14ba9ce9875b388cbf69774466de62ec437c59fe409b3bbb89192dc9284d"
+      "sha256": "a7c90f86e8d15322320d0dc5baee01d3b92d730eaa508eb0c6a800de08d5fb2a"
     },
     {
       "path": ".github/workflows/release.yml",
       "bytes": 4472,
-      "sha256": "074e1f0d0e4bae580c346c30954e4185cb216c4ac34407ca972c351f366958a9"
+      "sha256": "3db61e0bc72eb54317d533c08bb9f2b8b13b5a6d868241e13743183df663e60c"
     },
     {
       "path": ".github/workflows/sbom.yml",
       "bytes": 617,
-      "sha256": "96317781aa5b1a0ae1666d93784c0b6f0deba44f3e68fa316cbc0f3b5a696f80"
+      "sha256": "6701d36ab5603fabd37a68f226dcd45230bc84dfeb9f5a4d08b65568dfb4593a"
     },
     {
       "path": ".github/workflows/secret-scan.yml",
       "bytes": 999,
-      "sha256": "82cbceae0a04741fb8bcb8d2fee0d5c891e98702f065c0a75a7f850891e944e5"
+      "sha256": "a84ac8bd813b98f24ca83605ccbcb4a7aa09ce66bd6e43de0aa034ce2410c568"
     },
     {
       "path": ".github/workflows/semgrep.yml",
       "bytes": 839,
-      "sha256": "f91bc1e629d83cf4d3de123ef6ed53936a5a5fdd5cc215ff4e60cd7f89e89031"
+      "sha256": "3cf339279b39729d3c3f8cf38605646d803cf911550f53803ab29bf3941928cd"
     },
     {
       "path": ".github/workflows/test.yml",
       "bytes": 841,
-      "sha256": "7c628a4a1be82727375f17e521c10c4bd2bbb99f217c4597113828f8f7cb5868"
+      "sha256": "5ee9b1522a0839d8a9e56b49ccab77ca9ba2bb342b8e31166b688ed293093d92"
     },
     {
       "path": ".github/workflows/upstream-watch.yml",
       "bytes": 3059,
-      "sha256": "90b50ae9979eb67c0b322b83e7e87456eddc0fd68e3b60ad3af43db205f692d1"
+      "sha256": "eaa189d0040ec96c9722f4d7c70bed2c93fd934f1f541f93f5d2370b8f665bbd"
     },
     {
       "path": ".github/workflows/validate-plugin.yml",
       "bytes": 2102,
-      "sha256": "1f75d0055682f8bef0300314a12b11b2be8d5a92621e920c292b8ad67b805a4c"
+      "sha256": "df18bb3f6ea28d3163bf7592393e65aad7d054a283a61a6cba3ceb111d93755d"
     },
     {
       "path": ".gitignore",
