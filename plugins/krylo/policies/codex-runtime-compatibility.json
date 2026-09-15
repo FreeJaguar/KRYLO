@@ -1,12 +1,32 @@
 {
   "contractSchemaVersion": 1,
-  "reviewedAt": "2026-09-02",
+  "reviewedAt": "2026-09-15",
   "supported": [
     {
       "version": "0.120.0",
       "evidence": "Locally passed: `codex --version` and `codex execpolicy check` run against the real installed binary; PreToolUse/PostToolUse/UserPromptSubmit hook scripts exercised via real subprocess invocation against realistic payloads matching this binary's own embedded schema (docs/adr/0029-codex-host-packaging-and-approval-boundary.md). Direct byte inspection of the installed binary's own embedded ASCII strings, independently re-confirmed docs/adr/0034-codex-runtime-compatibility-gate.md.",
-      "confirmedHookEvents": ["PreToolUse", "PostToolUse", "SessionStart", "UserPromptSubmit", "Stop"],
+      "confirmedHookEvents": [
+        "PreToolUse",
+        "PostToolUse",
+        "SessionStart",
+        "UserPromptSubmit",
+        "Stop"
+      ],
       "notes": "SessionEnd and PermissionRequest are NOT confirmed present in this exact binary's own embedded strings (independently re-verified docs/adr/0034-codex-runtime-compatibility-gate.md; corroborated by the pre-existing, unmodified Ecosystem Maintenance codex-hook-event-names-recognized check, which independently flags this at ATTENTION/high severity). plugins/krylo/hooks/codex-hooks.json registers SessionEnd anyway, sourced only from rust-v0.152.1 SOURCE inspection (docs/adr/0033-codex-lifecycle-enforcement.md), never from running this binary -- a disclosed, unresolved capability gap for this specific version, not silently assumed proven."
+    },
+    {
+      "version": "0.154.0",
+      "reviewedAt": "2026-09-15",
+      "evidence": "Locally passed, LIVE, against a real authenticated `codex exec` session in an isolated CODEX_HOME (docs/adr/0038-codex-0154-supported.md, evidence gathered in docs/adr/0037-codex-enforcement-verified-live.md). Observed directly, not inferred: UserPromptSubmit bootstraps a run bound to the real host session_id; PreToolUse fires and BLOCKS a real model-issued command for both a require-approval class and a hard-deny (secret-path) class, surfacing KRYLO's own reason to the model, which acknowledged being blocked despite an explicit instruction to proceed; a benign command in the same configuration is allowed and actually executes, so the gate is not blanket-denying; PostToolUse fires and the telemetry written carries counters only, with no command text, prompt, path or secret; the Orbit Stop gate decides correctly, holding an active run open (`hook: Stop Blocked`) and releasing a terminal one. Byte-inspection of the installed codex.exe additionally finds every hook event name present, unlike 0.120.0.",
+      "confirmedHookEvents": [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "Stop",
+        "SessionEnd"
+      ],
+      "notes": "This entry deliberately records what was NOT established, because the approval it grants is only as good as its evidence. (1) SessionEnd fires and is confirmed: its telemetry marker was written on an active run. An earlier draft of this entry recorded it as never firing, which was wrong -- scripts/status/session-end-codex.mjs no-ops SILENTLY for a terminal run (its own `if (!run.active)` guard), so every earlier SAFE_BLOCKED session produced no evidence either way rather than evidence of absence. (2) The bootstrap-failure marker's own PreToolUse deny was not exercised live: the model complied with the advisory context every time, including when explicitly told to attempt the call anyway, so no tool call was ever issued on a SAFE_BLOCKED session. That path remains fixture-tested only, and KRYLO's own principle that enforcement must not depend on model cooperation is therefore still unproven live for it. (3) Hook trust and project trust were bypassed or preconfigured in the sandbox rather than exercised through their real review flows; on a real machine, hooks that are never trusted never run, and no KRYLO enforcement exists until they are. (4) PermissionRequest, SubagentStart/SubagentStop and PreCompact are recognized by this build but remain unregistered and unexercised. (5) Verified against the npm-installed codex.exe that KRYLO's own spawn-platform resolution selects. A second, natively-installed 0.153.4 exists on the same machine and was NOT verified; version identity here is per-binary, not per-machine."
     }
   ],
   "blocked": []

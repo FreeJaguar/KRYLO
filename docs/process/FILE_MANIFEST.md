@@ -83,6 +83,12 @@ docs/adr/0035-codex-live-hook-verification.md         # accepted: FIRST live aut
 docs/adr/0036-weekly-upstream-watch.md                # accepted: read-only weekly drift watch over the
                                                        # REVIEWED external integrations in catalog/tools.json
                                                        # (design Section 15 / Phase 6)
+docs/adr/0037-codex-enforcement-verified-live.md      # accepted: PreToolUse observed BLOCKING real
+                                                       # model-issued commands on a live Codex session;
+                                                       # closes ADR-0035's post-model-call gap
+docs/adr/0038-codex-0154-supported.md                 # accepted: 0.154.0 added to the reviewed Codex
+                                                       # compatibility contract on ADR-0037's evidence,
+                                                       # via ADR-0034's own amendment procedure
 ```
 
 ## Plugin root
