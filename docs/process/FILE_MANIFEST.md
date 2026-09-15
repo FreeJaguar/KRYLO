@@ -57,6 +57,12 @@ docs/process/ECOSYSTEM_MAINTENANCE_IMPLEMENTATION_PLAN.md  # implemented: design
 .github/workflows/upstream-watch.yml                  # implemented: weekly + workflow_dispatch,
                                                        # contents: read, read-only, never push/pull_request
                                                        # (docs/adr/0036)
+.github/workflows/ecosystem-radar.yml                 # implemented: monthly + workflow_dispatch,
+                                                       # contents: read, read-only (docs/adr/0039)
+plugins/krylo/catalog/radar-sources.json              # implemented: REVIEWED discovery source policy;
+                                                       # every query carries a rationale and bounds
+plugins/krylo/scripts/maintenance/check-ecosystem-radar.mjs       # implemented: radar entrypoint
+plugins/krylo/scripts/maintenance/checks/ecosystem-radar.mjs      # implemented: partial scoring + triage
 plugins/krylo/catalog/upstream-watch.json             # implemented: watch CONFIGURATION only; every
                                                        # baseline ref is read from tools.json at runtime,
                                                        # never duplicated or auto-updated here
@@ -89,6 +95,9 @@ docs/adr/0037-codex-enforcement-verified-live.md      # accepted: PreToolUse obs
 docs/adr/0038-codex-0154-supported.md                 # accepted: 0.154.0 added to the reviewed Codex
                                                        # compatibility contract on ADR-0037's evidence,
                                                        # via ADR-0034's own amendment procedure
+docs/adr/0039-monthly-ecosystem-radar.md              # accepted: read-only monthly ecosystem discovery
+                                                       # and triage with a deliberately PARTIAL score
+                                                       # (design Section 16 / Phase 7)
 ```
 
 ## Plugin root

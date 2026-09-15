@@ -1,0 +1,35 @@
+{
+  "$comment": "Monthly Ecosystem Radar source policy (docs/adr/0039-monthly-ecosystem-radar.md, docs/process/MULTI_HOST_CODEX_MAINTENANCE_DESIGN.md Section 16). Design Section 16.2 requires discovery sources to pass a source-policy review rather than be assembled ad hoc, and to be SKIPPED rather than scraped when they expose no stable public interface. Every query below runs against GitHub's own public search API -- the only discovery interface in scope that is public, stable, documented, and already inside upstream-client.mjs's fixed domain allowlist. Deliberately NOT included: blog posts, awesome-lists, social feeds, package-registry search, and any vendor directory without a documented stable API. Those were considered and rejected as brittle or unreviewable, not overlooked. A query here is a place to LOOK, never a statement of trust: everything it returns is an unreviewed candidate, and the Radar can only ever recommend that a human look at one.",
+  "radarSchemaVersion": 1,
+  "queries": [
+    {
+      "id": "claude-code-plugins",
+      "category": "claude-plugins",
+      "query": "topic:claude-code-plugin",
+      "rationale": "Plugins targeting the host KRYLO already ships on."
+    },
+    {
+      "id": "claude-skills",
+      "category": "claude-skills",
+      "query": "topic:claude-skills",
+      "rationale": "Skill collections are the most direct overlap with KRYLO's own command surface."
+    },
+    {
+      "id": "codex-plugins",
+      "category": "codex-plugins",
+      "query": "topic:codex-plugin",
+      "rationale": "The second first-class host (docs/adr/0029)."
+    },
+    {
+      "id": "mcp-servers",
+      "category": "mcp-servers",
+      "query": "topic:mcp-server",
+      "rationale": "MCP servers are the main way external write capability reaches an agent, so they matter for the tool-governance surface even when KRYLO never adopts them."
+    }
+  ],
+  "limits": {
+    "$comment": "Bounded on purpose. Unauthenticated GitHub search allows 10 requests per minute and the core API 60 per hour; a monthly job with four queries stays far inside both, and capping deep inspection keeps it there even as the query set grows.",
+    "maxResultsPerQuery": 15,
+    "maxDeepInspections": 12
+  }
+}

@@ -174,6 +174,35 @@ export async function getGithubCommitForRef(owner, repo, ref) {
 }
 
 /**
+ * GET /search/repositories -- candidate DISCOVERY for the Monthly Ecosystem
+ * Radar (docs/adr/0039-monthly-ecosystem-radar.md). The query comes from the
+ * reviewed source catalog, never from arbitrary input, and is
+ * percent-encoded regardless. Unauthenticated search is rate-limited to 10
+ * requests per minute, which a monthly job with a handful of reviewed
+ * queries stays far inside; exceeding it surfaces as a normal
+ * `{ok:false, reason}` rather than an empty result set.
+ */
+export async function searchGithubRepositories(query, { perPage = 20, sort = 'updated' } = {}) {
+  const bounded = Math.min(Math.max(Number(perPage) || 1, 1), 50);
+  const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(query)}`
+    + `&sort=${encodeURIComponent(sort)}&order=desc&per_page=${bounded}`;
+  return fetchUpstreamJson(url);
+}
+
+/**
+ * GET /repos/{owner}/{repo}/contents/{path} -- used only to read a
+ * candidate's own `package.json` METADATA (its declared lifecycle scripts
+ * and dependency count). The file is parsed as data and never executed, and
+ * nothing else about a candidate is ever fetched.
+ */
+export async function getGithubFileContent(owner, repo, filePath) {
+  const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+  return fetchUpstreamJson(
+    `https://api.github.com/repos/${encodeRepoSegment(owner)}/${encodeRepoSegment(repo)}/contents/${encodedPath}`,
+  );
+}
+
+/**
  * GET /repos/{owner}/{repo}/compare/{base}...{head} -- the changed-FILE LIST
  * between a reviewed ref and an observed one (Weekly Upstream Watch,
  * docs/adr/0036-weekly-upstream-watch.md). Only `files[].filename`/`status`
