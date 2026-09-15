@@ -12,7 +12,12 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { runEcosystemRadar, computeRadarExitCode, HUMAN_JUDGEMENT_DIMENSIONS } from './checks/ecosystem-radar.mjs';
+import {
+  runEcosystemRadar,
+  computeRadarExitCode,
+  HUMAN_JUDGEMENT_DIMENSIONS,
+  BEHAVIOURAL_PENALTIES,
+} from './checks/ecosystem-radar.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
@@ -40,6 +45,22 @@ function renderText(report) {
     lines.push(`         score: ${c.score.scored}/${c.score.maxAvailable} on measurable dimensions${c.deepInspected ? '' : ' (not deep-inspected)'}`);
     if (c.score.unknownDimensions.length) lines.push(`         not measurable here: ${c.score.unknownDimensions.join(', ')}`);
     if (c.riskPenalties.applied.length) lines.push(`         risk: ${c.riskPenalties.applied.join(', ')}`);
+    // Rendered right beside `risk:`, and deliberately so. The checker has
+    // always computed `undetectable`, but an earlier version of this
+    // renderer dropped it -- and this text report is the ONLY output the
+    // scheduled workflow produces. A risk line with nothing under it then
+    // read as "checked, and clean" for penalties nobody had checked,
+    // which is the exact claim ADR-0039 exists to refuse. An absent line
+    // and an absent risk must not look the same.
+    // Only the penalties undetectable for THIS candidate. The behavioural
+    // set is undetectable for every candidate and is stated once below;
+    // repeating it here made the informative case -- a probe that failed on
+    // this one repository -- invisible inside a constant list.
+    const candidateSpecific = c.riskPenalties.undetectable.filter((x) => !BEHAVIOURAL_PENALTIES.includes(x));
+    if (candidateSpecific.length) lines.push(`         not checked on this candidate: ${candidateSpecific.join(', ')}`);
+    if (c.probeFailures?.length) {
+      lines.push(`         inspection incomplete: ${c.probeFailures.map((f) => `${f.probe} (${f.reason})`).join(', ')}`);
+    }
     if (c.overlap.alreadyInTrustCatalog) lines.push(`         overlap: already reviewed as ${c.overlap.catalogId} (tier ${c.overlap.trustTier})`);
     if (c.description) lines.push(`         "${c.description}"`);
     lines.push(`         why: ${c.rationale}`);
@@ -56,6 +77,18 @@ function renderText(report) {
     lines.push(`  - ${dim} (${max} points)`);
   }
   lines.push('');
+  lines.push('A "not checked on this candidate" line is not a clean bill of health: it');
+  lines.push('names a penalty this run could not evaluate for that repository, which is');
+  lines.push('different from one it evaluated and cleared. An unknown is never reported');
+  lines.push('as an absence.');
+  lines.push('');
+  lines.push('These penalties are undetectable for EVERY candidate, because establishing');
+  lines.push('them requires reading a candidate\'s actual runtime behaviour, which this');
+  lines.push('Radar never does. No candidate above has been cleared of them:');
+  for (const penalty of BEHAVIOURAL_PENALTIES) {
+    lines.push(`  - ${penalty}`);
+  }
+  lines.push('');
   lines.push('AUDIT_RECOMMENDED means only "a human should look at this". Nothing here');
   lines.push('adopts a tool, confers trust, or changes catalog/tools.json -- that remains');
   lines.push('a separate, human-initiated review (design Section 16.5).');
@@ -66,7 +99,12 @@ async function main() {
   const args = process.argv.slice(2);
   const report = await runEcosystemRadar({ repoRoot: REPO_ROOT, offline: args.includes('--offline') });
   process.stdout.write(`${args.includes('--json') ? JSON.stringify(report, null, 2) : renderText(report)}\n`);
-  process.exit(computeRadarExitCode(report));
+  // Set the code and let the process end on its own rather than calling
+  // process.exit: when stdout is a pipe -- which is exactly how the
+  // workflow runs this, redirecting into radar.txt -- process.exit can
+  // terminate the process before a large buffered write has drained,
+  // silently truncating the only artefact the run produces.
+  process.exitCode = computeRadarExitCode(report);
 }
 
 const isMainModule = process.argv[1] && path.resolve(fileURLToPath(import.meta.url)) === path.resolve(process.argv[1]);

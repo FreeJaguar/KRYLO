@@ -16,9 +16,11 @@ A checker that emitted a single 0-100 number would therefore be fabricating half
 
 ### The resolution: a partial score that says so
 
-Only dimensions genuinely derivable from metadata are computed — maintenance activity, testing/CI presence, host compatibility, license/provenance, dependency footprint (40 points). Every other dimension is emitted by name in `requiresHumanJudgement` **with its weight**, so the size of the gap is visible in the report rather than hidden inside a total. `scored` is never normalised to 100 and is always reported against `maxAvailable` — the sum of the maxima actually computed.
+Only dimensions genuinely derivable from metadata are computed — maintenance activity (10), CI presence (6), declared test script (4), host compatibility (10), license/provenance (5), dependency footprint (5), totalling 40 points. Every other dimension is emitted by name in `requiresHumanJudgement` **with its weight**, so the size of the gap is visible in the report rather than hidden inside a total. `scored` is never normalised to 100 and is always reported against `maxAvailable` — the sum of the maxima actually computed.
 
 A dimension that could not be measured for a particular candidate is excluded from **both** the numerator and the denominator. An unknown and a zero are different things, and conflating them is how a triage tool starts lying.
+
+Section 16.4's single "Testing and CI quality" dimension (10) is deliberately carried here as **two** dimensions of 6 and 4. They are read by two different upstream calls that can succeed independently, and a scoring model whose unit of knowledge is coarser than its unit of measurement cannot express "I learned half of this" — which is exactly the defect recorded below. Host compatibility is scored from the repository's own GitHub topics and is therefore **self-declared**: it measures a claim of host affinity, not verified compatibility, and its absent case is reported as "declares no host affinity" rather than as incompatibility, because silence is not a negative finding.
 
 ### Risk penalties: detectable ones only, and the rest named
 
@@ -32,13 +34,27 @@ Section 16.4's penalty list mixes the detectable (`install-lifecycle-scripts`, `
 
 ### Classification is conservative in both directions
 
-`REJECT` is reserved for hard, individually sufficient disqualifiers metadata really does establish — an archived repository, or one with no license, is not a judgement call. `AUDIT_RECOMMENDED` means only **"a human should look at this"**, which is the strongest claim automated triage is entitled to make; it never means "adopt", and nothing in this subsystem can move a candidate into `catalog/tools.json`. `WATCH` is the honest default. A candidate already in the trust catalog is always `WATCH`: its upstream drift is the Weekly Upstream Watch's job, not the Radar's.
+`REJECT` is reserved for hard, individually sufficient disqualifiers metadata really does establish — an archived repository, or one with no license, is not a judgement call. `AUDIT_RECOMMENDED` means only **"a human should look at this"**, which is the strongest claim automated triage is entitled to make; it never means "adopt", and nothing in this subsystem can move a candidate into `catalog/tools.json`. `WATCH` is the honest default.
+
+The precedence, in the order `classifyCandidate` actually applies it: hard disqualifiers first, then trust-catalog membership, then a detected install-lifecycle-script penalty, then the score ratio. So a candidate already in the trust catalog is `WATCH` — its upstream drift is the Weekly Upstream Watch's job, not the Radar's — **except** when a hard disqualifier applies, which is checked first on purpose. An already-reviewed tool that has since been archived or lost its license is the most useful thing a run can surface, and suppressing that because the tool is already trusted would invert the point; the rationale text names the catalog entry so the verdict cannot be misread as being about a fresh candidate. An earlier draft of this ADR claimed catalog membership was unconditional, which the shipped ordering contradicted; the ordering is the deliberate behaviour and this text now follows it.
 
 ### A flaw found by running it, not by reasoning about it
 
 The first live run surfaced a real defect in the scoring model: a candidate that did **not** get a deep-inspection slot scored `25/25` — a perfect ratio over three dimensions — and outranked a fully-inspected candidate at `32/40`. The ratio rewarded *knowing less*. A candidate without a deep inspection can now reach `WATCH` on metadata alone but never `AUDIT_RECOMMENDED`, because a partial look cannot justify spending a human audit slot. Regression-tested.
 
-Two smaller defects were caught the same way: `hasCiWorkflows` was hardcoded `false` with a comment promising a caller would fill it in that never did — six of that dimension's ten points were unearnable and every candidate was silently marked down for a check that never ran — and the offline report carried no summary, so the renderer printed "0 sources unavailable" directly beneath a list of unavailable sources.
+### The defect an independent review found, and what it changed
+
+A security review of the completed implementation found the central honesty claim broken in two places at once, both reproduced against the committed code:
+
+`deepInspect` made two upstream calls — the CI directory and `package.json` — and reported the result through a **single** `inspected` flag set from whichever call happened to succeed. A repository with CI and no readable `package.json` therefore came back as "inspected", and the two package-derived risk penalties then fell out of `applied` **and** out of `undetectable`. The report showed a candidate with no risk line, which is indistinguishable from one that was checked and found clean — the precise claim this ADR exists to refuse, reached by every Python or Go candidate whose `package.json` request 404s or is rate-limited, from queries this Radar ships. A direct comparison against the committed module confirmed `deepInspected: true` with the penalty absent from both lists; after the fix the same input reports `deepInspected: false` with the penalty declared undetectable.
+
+The fix is a split rather than a patched condition: `ciInspected` and `packageInspected` are tracked separately, each dimension and penalty keys on the probe it actually depends on, and `isFullyInspected` gates the audit recommendation. A `not-found` response is treated as an **answer** — a repository with no `.github/workflows` genuinely has no Actions CI — while a rate limit, timeout or unparseable body means the probe did not run. That distinction is the whole difference between a measurement and a gap, and it now also holds at the client layer: GitHub reports an exhausted primary rate limit as `403` with `x-ratelimit-remaining: 0`, which previously surfaced as the catch-all `unexpected-status` and read like a broken endpoint rather than a probe that never happened.
+
+Second, the `undetectable` list was computed correctly and then **never rendered**. The text report is the only output the scheduled workflow produces, so a correctly-computed honesty signal that no human ever sees is not a control. Undetectable penalties and incomplete probes are now printed beside the `risk:` line, with the report stating plainly that a "not checked" line is not a clean bill of health.
+
+The general lesson is recorded because it recurs: the failure in both cases was not a wrong number but a **wrong claim**, produced by a data structure too coarse to represent partial knowledge and by a renderer that dropped the part that qualified it. Regression tests now cover the half-completed inspection shape specifically, which no existing test had reached; the exported `classifyCandidate` guard also defaults to the restrictive value, so a caller that omits it cannot silently disable it.
+
+Two smaller defects were caught by running it: `hasCiWorkflows` was hardcoded `false` with a comment promising a caller would fill it in that never did — six of that dimension's ten points were unearnable and every candidate was silently marked down for a check that never ran — and the offline report carried no summary, so the renderer printed "0 sources unavailable" directly beneath a list of unavailable sources.
 
 ### Least-privilege scheduled workflow
 
@@ -48,7 +64,7 @@ Section 16.5's prohibitions are structural rather than promised: the module refe
 
 ## Verified live
 
-Run against the real GitHub search API while building this: four reviewed queries returned 15 results each, deduplicated into ranked candidates with real licenses, maintenance signals, scores and rationales. The 16 unit tests are hermetic (injected client) and cover the scoring honesty properties, every classification branch, the deep-inspection guard, rate-limited and unreadable-source failures, control characters in attacker-authored text, and the structural no-write/no-exec properties.
+Run against the real GitHub search API while building this: four reviewed queries returned 15 results each, deduplicated into ranked candidates with real licenses, maintenance signals, scores and rationales. The 21 unit tests are hermetic (injected client) and cover the scoring honesty properties, every classification branch and its precedence, the full and half-completed inspection guards, the answer-versus-gap distinction between a 404 and a rate limit, unreadable-source failures, control characters from all three families (C0, C1, and the U+2028/U+2029 line separators) in attacker-authored text, and the structural no-write/no-exec properties — the last widened from a list of exact names to the call families they belong to, since a structural guarantee is only as strong as the width of what it matches.
 
 ## Consequences
 

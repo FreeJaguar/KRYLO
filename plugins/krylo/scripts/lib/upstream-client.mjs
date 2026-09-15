@@ -106,7 +106,19 @@ async function fetchOnce(url, { acceptHeader }) {
       currentUrl = new URL(location, currentUrl).toString();
       continue;
     }
-    if (response.status === 429) { clearTimeout(timer); return { ok: false, reason: 'rate-limited', status: response.status }; }
+    // GitHub reports an exhausted PRIMARY rate limit as 403 with
+    // x-ratelimit-remaining: 0, and only secondary limits as 429. Without
+    // this branch the single most likely failure mode for an
+    // unauthenticated scheduled job -- running out of anonymous quota --
+    // surfaced as the catch-all `unexpected-status`, which reads like a
+    // broken endpoint rather than "come back later". The distinction
+    // matters downstream: a rate limit means the probe did not run, which
+    // the Ecosystem Radar must report as an unknown rather than a finding.
+    if (response.status === 429
+      || (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')) {
+      clearTimeout(timer);
+      return { ok: false, reason: 'rate-limited', status: response.status };
+    }
     if (response.status >= 500) { clearTimeout(timer); return { ok: false, reason: 'server-error', status: response.status }; }
     if (response.status === 404) { clearTimeout(timer); return { ok: false, reason: 'not-found', status: response.status }; }
     if (response.status !== 200) { clearTimeout(timer); return { ok: false, reason: 'unexpected-status', status: response.status }; }

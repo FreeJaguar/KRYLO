@@ -1,5 +1,5 @@
 // Workflow-security static tests for ecosystem-radar.yml (Monthly Ecosystem
-// Watch, docs/adr/0036-weekly-ecosystem-radar.md). Mirrors
+// Radar, docs/adr/0039-monthly-ecosystem-radar.md). Mirrors
 // ecosystem-maintenance-workflow.test.mjs: proves the read-only architecture
 // is real in the SHIPPED workflow file, not merely described in the ADR.
 
