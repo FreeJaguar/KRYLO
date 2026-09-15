@@ -34,6 +34,20 @@ A pull request must include:
 - Documentation changes.
 - Rollback plan for high-risk changes.
 
+### Regenerating RELEASE_MANIFEST.json
+
+`RELEASE_MANIFEST.json` records a SHA-256 for **every git-tracked file**, so any commit that changes a tracked file leaves it stale and the test suite fails. Fix it with one command, and commit the result:
+
+```bash
+npm run manifest         # regenerate in place
+npm run manifest:verify  # confirm it matches the committed tree
+```
+
+Two notes that regularly cost people time:
+
+- The manifest is hashed from **committed git blob content**, not the working tree, so regenerate it *after* committing your change (or amend). Running it before you commit reproduces the old manifest and looks like a no-op.
+- **An automated dependency pull request will always arrive with a stale manifest**, because a bot cannot regenerate it and this repository deliberately grants no repository-write automation (`docs/adr/0031-ecosystem-maintenance-drift-checker.md`). A maintainer regenerates and pushes that one commit to the bot's branch. Narrowing the manifest's scope so bot PRs stay green was considered and rejected: it covers every tracked file on purpose, and shrinking a supply-chain control to reduce maintenance noise is exactly the trade this project does not make.
+
 ## Security-sensitive changes
 
 A change to any of the following requires a security-focused review before merge, not just a normal code review:
