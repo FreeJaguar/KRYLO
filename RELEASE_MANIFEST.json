@@ -706,8 +706,8 @@
     },
     {
       "path": "docs/adr/0039-monthly-ecosystem-radar.md",
-      "bytes": 12108,
-      "sha256": "92dcecdfc0e325f6521e15a94fe2c4fdc1880df3b1aea7d8bcf0aff2fae993a5"
+      "bytes": 14213,
+      "sha256": "f88d61db106d3e08c93ac3d8712683d2c4dc87f36a30bf7b5db86ca2857db0d2"
     },
     {
       "path": "docs/adr/README.md",
@@ -1291,8 +1291,8 @@
     },
     {
       "path": "plugins/krylo/scripts/maintenance/check-ecosystem-radar.mjs",
-      "bytes": 6004,
-      "sha256": "99aa337a872bf10257a971080e5eec9e68f9df2eae52ce061197de31b0f54aa3"
+      "bytes": 6369,
+      "sha256": "95b79c6afa10d4166ba529ac5586a2f392d2b988ab88711d6070d5ac61bde404"
     },
     {
       "path": "plugins/krylo/scripts/maintenance/check-ecosystem.mjs",
@@ -1326,8 +1326,8 @@
     },
     {
       "path": "plugins/krylo/scripts/maintenance/checks/ecosystem-radar.mjs",
-      "bytes": 25184,
-      "sha256": "0e0743ac4b5760403d4d19cfb164aa729e41c42e638f81df125ae83d9ddb1630"
+      "bytes": 27471,
+      "sha256": "01ce4a00c38aefeb79435d276618128a82694e99f868f3e71cff2b3211a7bfe3"
     },
     {
       "path": "plugins/krylo/scripts/maintenance/checks/internal-drift.mjs",
@@ -1581,8 +1581,8 @@
     },
     {
       "path": "plugins/krylo/tests/governance/ecosystem-radar-workflow.test.mjs",
-      "bytes": 5162,
-      "sha256": "fe118ee96d20bf1d70d50359923ce162f605694c017d31be0dfc881349a992a8"
+      "bytes": 5163,
+      "sha256": "f4954c2c5c71339e8afa9d95262c442ea7cd77138be7e7bb7370f4443766f7ae"
     },
     {
       "path": "plugins/krylo/tests/governance/hook-scoping.test.mjs",
@@ -1731,8 +1731,8 @@
     },
     {
       "path": "plugins/krylo/tests/maintenance/ecosystem-radar.test.mjs",
-      "bytes": 19966,
-      "sha256": "36d5fa0006b2d9359fffcb48748726c494990dd1305d578d12e8c9e9b62c4968"
+      "bytes": 28234,
+      "sha256": "d80a0ca0a89090369670b940fbca14ab9c4ec2aa8d34eb5ab2824bbdd6f702e6"
     },
     {
       "path": "plugins/krylo/tests/maintenance/internal-drift.test.mjs",
@@ -1756,8 +1756,8 @@
     },
     {
       "path": "plugins/krylo/tests/maintenance/upstream-client.test.mjs",
-      "bytes": 11374,
-      "sha256": "066220f50dbeaa7842421b5e8b841b23d4df4fea8436960cbad68e507e1c5d45"
+      "bytes": 13865,
+      "sha256": "27da8dbcdbb1b0f86fb1fdd3a27a4499a0b73af9abb2aaaf5733d20113975682"
     },
     {
       "path": "plugins/krylo/tests/maintenance/upstream-watch.test.mjs",
