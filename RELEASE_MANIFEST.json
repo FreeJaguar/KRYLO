@@ -101,8 +101,8 @@
     },
     {
       "path": ".github/workflows/upstream-watch.yml",
-      "bytes": 2218,
-      "sha256": "b8593fd6797cd68633bc10bc7f57528fb15ab20927034a4aa4e9d6718ab49f0a"
+      "bytes": 3059,
+      "sha256": "90b50ae9979eb67c0b322b83e7e87456eddc0fd68e3b60ad3af43db205f692d1"
     },
     {
       "path": ".github/workflows/validate-plugin.yml",
@@ -686,8 +686,8 @@
     },
     {
       "path": "docs/adr/0036-weekly-upstream-watch.md",
-      "bytes": 8377,
-      "sha256": "8f35f7c5b0e756bea16d6e6a11fe33aa06a58076a4a25e14c002daa0e8816ead"
+      "bytes": 13344,
+      "sha256": "2e730d3a865d2564164f509fc934b1e69de370bce9313bdcf940d9f9caf2c190"
     },
     {
       "path": "docs/adr/README.md",
@@ -996,8 +996,8 @@
     },
     {
       "path": "plugins/krylo/catalog/upstream-watch.json",
-      "bytes": 2643,
-      "sha256": "b7e7fc3edd1da8b82694ed6564554936d287ba213202c095b0588b2c0d0bd544"
+      "bytes": 3315,
+      "sha256": "18df749fd45da2a7da127c2819e26bbf333a8d5244abbb603bdd3a1631763eb1"
     },
     {
       "path": "plugins/krylo/codex/project-hooks/codex-project-hook-launcher.mjs",
@@ -1306,8 +1306,8 @@
     },
     {
       "path": "plugins/krylo/scripts/maintenance/checks/upstream-watch.mjs",
-      "bytes": 14081,
-      "sha256": "7dab2edcd398294e1fa0bf53bedc4769f4e43452595b6085a5d617989bf4c681"
+      "bytes": 20578,
+      "sha256": "7c91bfbbbdf431658e5398b25afdd105d57f448294f9fe02b64740590058314d"
     },
     {
       "path": "plugins/krylo/scripts/orbit/fingerprint.mjs",
@@ -1436,8 +1436,8 @@
     },
     {
       "path": "plugins/krylo/scripts/setup/install-codex.mjs",
-      "bytes": 42501,
-      "sha256": "d097223e7381c70e03a11db336ee9768f39e53141cf8a268d8c486ca8ea14a09"
+      "bytes": 44765,
+      "sha256": "79d0e65391216c57380abdafeb752ea125ac4a26036af9c3161ddb832211f0be"
     },
     {
       "path": "plugins/krylo/scripts/setup/remove-alias.mjs",
@@ -1716,8 +1716,8 @@
     },
     {
       "path": "plugins/krylo/tests/maintenance/upstream-watch.test.mjs",
-      "bytes": 13945,
-      "sha256": "d113437f0db9bae1847f7f0a414cc1c74ac9a84dd63250c5b570ced6d1f6bfc0"
+      "bytes": 23836,
+      "sha256": "fb5f0618dd32d3e5ffe8dd8f43707cad8568b802d54620b23cd893126b491626"
     },
     {
       "path": "plugins/krylo/tests/maintenance/version-compare.test.mjs",
@@ -1771,8 +1771,8 @@
     },
     {
       "path": "plugins/krylo/tests/setup/install-codex.test.mjs",
-      "bytes": 16652,
-      "sha256": "42c0b597d526c00ddd048a730336ad7f83bcf9703b0e18604c8e5ecd38f88752"
+      "bytes": 18616,
+      "sha256": "6a8137490ce626b9569c895a9e07aa229de2a6d226b6814e7a388374f7ca1dd0"
     },
     {
       "path": "plugins/krylo/tests/status/agent-events.test.mjs",
