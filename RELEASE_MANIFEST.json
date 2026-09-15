@@ -2,7 +2,7 @@
   "name": "krylo-release",
   "version": "0.2.0",
   "note": "Per-file SHA-256 of every git-tracked file at HEAD (excluding this manifest itself). Hashed from the committed git blob content, not the working tree, so this is reproducible from a clean clone of the same commit. Deterministic: regenerating from an unchanged HEAD produces byte-identical output (no timestamp or other nondeterministic field is embedded). BLUEPRINT_MANIFEST.json remains the separate, immutable record of blueprint 0.1.2 as delivered in the baseline commit.",
-  "fileCount": 376,
+  "fileCount": 377,
   "files": [
     {
       "path": ".claude-plugin/marketplace.json",
@@ -126,8 +126,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 35208,
-      "sha256": "90ff4907c939ac5c919debf56d65e4821098deecb5555a8065511d3e84386ac2"
+      "bytes": 36539,
+      "sha256": "2de55730498a5837e97387717da78b0b27bc0bf9ef126e8ad977d5763185af72"
     },
     {
       "path": "CLAUDE.md",
@@ -691,8 +691,13 @@
     },
     {
       "path": "docs/adr/0037-codex-enforcement-verified-live.md",
-      "bytes": 8478,
-      "sha256": "cc2ce86794de9e4dee24e4878a1767398c4ae53ebb176b323b93690cf356b9ae"
+      "bytes": 9394,
+      "sha256": "0e15cd463da76ca63932088e1e4ce9bc4855c1aaec1b9567347b776c564c355b"
+    },
+    {
+      "path": "docs/adr/0038-codex-0154-supported.md",
+      "bytes": 5167,
+      "sha256": "abc8880c7360e7bbb3ed4beb011f9201b20cdee9edfe4966a6861846984893c0"
     },
     {
       "path": "docs/adr/README.md",
@@ -706,8 +711,8 @@
     },
     {
       "path": "docs/codex-capability-matrix.md",
-      "bytes": 38321,
-      "sha256": "19587b3b0c0aa933214f26fb8b0e8de9de988e3706e1bc479d9424b42cbbc91b"
+      "bytes": 38970,
+      "sha256": "2d19ecff6c4ef5abf50cfa6b187f76c4689d72dfc59234a1b342c54cb8a31958"
     },
     {
       "path": "docs/external-adapter-audit-2026-07-27.md",
@@ -756,8 +761,8 @@
     },
     {
       "path": "docs/process/FILE_MANIFEST.md",
-      "bytes": 20306,
-      "sha256": "8478d1de7795abd87e1e7d55b6c77d4e79b91f8a0383b2fcae0103fc490b07f1"
+      "bytes": 20608,
+      "sha256": "711df26a59ef1783b86665f882dedbba8605b887583ab494c2dd21634bbd9602"
     },
     {
       "path": "docs/process/IMPLEMENTATION_PLAN.md",
@@ -1041,8 +1046,8 @@
     },
     {
       "path": "plugins/krylo/policies/codex-runtime-compatibility.json",
-      "bytes": 1410,
-      "sha256": "463d3b3c79b427206bea5109f023dfd3da5eda0df4ab86f9483e2c3a003ecafb"
+      "bytes": 4291,
+      "sha256": "4499aebf610b9e73ff36f9b21ecaafd28886c700fdab8ab99d2006d9f6eccafa"
     },
     {
       "path": "plugins/krylo/policies/data-egress.json",
