@@ -141,8 +141,8 @@
     },
     {
       "path": "CONTRIBUTING.md",
-      "bytes": 2956,
-      "sha256": "09bd1496bc3f7c66c6b65c8713ffc8096c68c05f1510c5ed2ce20b66240e4329"
+      "bytes": 4157,
+      "sha256": "4733147ac348b1b79db52087a2de2a80998d54df9deb1bf43be72437a7717daa"
     },
     {
       "path": "LICENSE",
@@ -826,8 +826,8 @@
     },
     {
       "path": "package.json",
-      "bytes": 1235,
-      "sha256": "9d870593439a305ccc2f4e77dfe8aeae8c6b9a5e7829e937d61f6d9275d061d4"
+      "bytes": 1416,
+      "sha256": "e09e031de812268cd182b653e153950d9250f6d80facf8347024cc5aed22666d"
     },
     {
       "path": "plugins/krylo/.claude-plugin/plugin.json",
@@ -1336,8 +1336,8 @@
     },
     {
       "path": "plugins/krylo/scripts/release/generate-release-manifest.mjs",
-      "bytes": 5702,
-      "sha256": "1bd4a1fe8f269df67eed481810e63be90acbef98a94dfe072e8a37f3423181c9"
+      "bytes": 6995,
+      "sha256": "efb3ea418f39d78f9ac7383ddea14e7751c74d3d54b153adfaffdb6812260e1a"
     },
     {
       "path": "plugins/krylo/scripts/release/verify-release-manifest.mjs",
@@ -1561,8 +1561,8 @@
     },
     {
       "path": "plugins/krylo/tests/governance/release-manifest.test.mjs",
-      "bytes": 5262,
-      "sha256": "854b979c72ce235d4c551c6b05bb5986f1759ee93b7040430b4c99f3c0aa59f0"
+      "bytes": 6289,
+      "sha256": "c0126fbf97bfdcca236dd71b68a70355a342a98768a51965b581de2827ec8749"
     },
     {
       "path": "plugins/krylo/tests/governance/release-tag-contract.test.mjs",
