@@ -15,7 +15,9 @@ import {
   runEcosystemRadar,
   computeRadarExitCode,
   isFullyInspected,
+  BEHAVIOURAL_PENALTIES,
 } from '../../scripts/maintenance/checks/ecosystem-radar.mjs';
+import { renderText } from '../../scripts/maintenance/check-ecosystem-radar.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT = path.resolve(__dirname, '..', '..');
@@ -40,14 +42,14 @@ function repoFixture(over = {}) {
 }
 
 // Both probes answered.
-const DEEP_FULL = { ciInspected: true, packageInspected: true, hasCiWorkflows: true, hasInstallLifecycleScripts: false, dependencyCount: 0, hasTests: true, probeFailures: [] };
+const DEEP_FULL = { ciInspected: true, packageInspected: true, packagePresent: true, hasCiWorkflows: true, hasInstallLifecycleScripts: false, dependencyCount: 0, hasTests: true, probeFailures: [] };
 // No deep-inspection slot at all: neither probe ran.
-const DEEP_NONE = { ciInspected: false, packageInspected: false, hasCiWorkflows: false, hasInstallLifecycleScripts: false, dependencyCount: null, hasTests: false, probeFailures: [] };
+const DEEP_NONE = { ciInspected: false, packageInspected: false, packagePresent: false, hasCiWorkflows: false, hasInstallLifecycleScripts: false, dependencyCount: null, hasTests: false, probeFailures: [] };
 // The shape the whole split exists for: CI was read, package.json was not.
 // Every Python or Go candidate whose package.json fetch is rate-limited
 // lands here, and the single-flag version called it "inspected".
 const DEEP_HALF = {
-  ciInspected: true, packageInspected: false,
+  ciInspected: true, packageInspected: false, packagePresent: false,
   hasCiWorkflows: true, hasInstallLifecycleScripts: false, dependencyCount: null, hasTests: false,
   probeFailures: [{ probe: 'package.json', reason: 'rate-limited' }],
 };
@@ -182,7 +184,7 @@ test('ecosystem-radar: the inspection guard defaults to restrictive when the cal
 // `not-found` is an ANSWER. A repository with no .github/workflows genuinely
 // has no Actions CI, and one with no root package.json genuinely declares no
 // npm lifecycle scripts -- both facts are established, not missing.
-test('ecosystem-radar: a 404 on a probe is a measurement, while a rate limit is not', async () => {
+test('ecosystem-radar: a 404 answers the REQUEST without measuring the candidate, while a rate limit answers nothing', async () => {
   const seen = [];
   const notFound = fakeClient({
     search: { ok: true, json: { items: [repoFixture({ full_name: 'py/server', name: 'server' })] } },
@@ -191,10 +193,14 @@ test('ecosystem-radar: a 404 on a probe is a measurement, while a rate limit is 
   const report = await runEcosystemRadar({ repoRoot: REPO_ROOT, client: notFound });
   const candidate = report.candidates.find((c) => c.source.includes('py/server'));
   assert.ok(candidate, 'the candidate should be present');
-  assert.equal(candidate.deepInspected, true, 'two 404s are two answers, so the inspection is complete');
-  assert.deepEqual(candidate.probeFailures, []);
-  assert.ok(!candidate.riskPenalties.undetectable.includes('install-lifecycle-scripts'),
-    'an absent package.json establishes that there are no npm lifecycle scripts');
+  assert.equal(candidate.deepInspected, true, 'two 404s are two answered probes, so the inspection ran to completion');
+  assert.deepEqual(candidate.probeFailures, [], 'nothing failed: the answer was "there is nothing here"');
+  // Corrected from the inverse assertion, which encoded the very over-claim a
+  // second review caught (S1): a completed inspection is not the same as a
+  // measured candidate. An absent ROOT package.json leaves the npm-derived
+  // penalties unmeasured, and the report must say so.
+  assert.ok(candidate.riskPenalties.undetectable.includes('install-lifecycle-scripts'),
+    'an absent ROOT package.json does not establish that the repository declares no install hooks');
 
   const limited = fakeClient({
     search: { ok: true, json: { items: [repoFixture({ full_name: 'py/server', name: 'server' })] } },
@@ -205,6 +211,122 @@ test('ecosystem-radar: a 404 on a probe is a measurement, while a rate limit is 
   assert.equal(limitedCandidate.deepInspected, false, 'a rate-limited probe did not run');
   assert.deepEqual(limitedCandidate.probeFailures, [{ probe: 'package.json', reason: 'rate-limited' }]);
   assert.ok(limitedCandidate.riskPenalties.undetectable.includes('install-lifecycle-scripts'));
+});
+
+
+// REGRESSION (second independent review, S1). The FIRST fix for F1 treated a
+// 404 on package.json as a measurement: it set dependencyCount to 0, which
+// awarded a full 5/5 for "zero runtime dependencies" to a repository whose
+// dependencies had never been read, and dropped both package-derived
+// penalties out of `applied` and `undetectable` alike -- F1's exact
+// signature, reintroduced in a narrower and more confident form. A missing
+// ROOT package.json is not a missing manifest: monorepos, Python and Go
+// candidates all take this path, and `topic:mcp-server` is a shipped query.
+const DEEP_NO_MANIFEST = {
+  ciInspected: true, packageInspected: true, packagePresent: false,
+  hasCiWorkflows: true, hasInstallLifecycleScripts: false, dependencyCount: null, hasTests: false,
+  probeFailures: [],
+};
+
+test('ecosystem-radar: an absent root package.json establishes nothing about dependencies or install hooks', () => {
+  const { applied, undetectable } = detectRiskPenalties(repoFixture(), DEEP_NO_MANIFEST);
+  for (const packageDerived of ['install-lifecycle-scripts', 'excessive-dependency-footprint']) {
+    assert.ok(!applied.includes(packageDerived));
+    assert.ok(undetectable.includes(packageDerived),
+      `a repository with no ROOT manifest may still declare ${packageDerived} elsewhere; it must be reported unchecked`);
+  }
+
+  const score = scoreCandidate(repoFixture(), DEEP_NO_MANIFEST);
+  assert.ok(score.unknownDimensions.includes('dependency-footprint'),
+    'crediting "zero runtime dependencies" for an unread manifest is a fabricated positive');
+  assert.ok(score.unknownDimensions.includes('declared-test-script'),
+    'and charging 0/4 for an unread manifest is the mirror-image fabricated negative');
+  assert.ok(!score.unknownDimensions.includes('ci-presence'), 'the CI half was genuinely measured');
+});
+
+test('ecosystem-radar: a non-Node candidate is still fully inspected and can still earn an audit', () => {
+  // Honesty must not degrade into uselessness: the absence of a manifest is
+  // not a failed inspection, so such a candidate is still ranked on what was
+  // actually measured rather than being held at WATCH for being non-Node.
+  assert.equal(isFullyInspected(DEEP_NO_MANIFEST), true);
+  const score = scoreCandidate(repoFixture(), DEEP_NO_MANIFEST);
+  const res = classifyCandidate({
+    ...score, penalties: detectRiskPenalties(repoFixture(), DEEP_NO_MANIFEST),
+    overlap: { alreadyInTrustCatalog: false }, fullyInspected: true,
+  });
+  assert.ok(['WATCH', 'AUDIT_RECOMMENDED'].includes(res.classification));
+});
+
+// S3. Bidi overrides and zero-width characters do not merely forge a line;
+// they change what a human READS while the bytes say something else. The
+// report is the only input to the decision about where to spend an audit
+// slot, so a publisher name that renders as a different publisher is the
+// most consequential possible corruption of it.
+test('ecosystem-radar: bidi overrides, isolates and zero-width characters never reach the report', async () => {
+  const payload = `evil\u202Eelbaton-lacitirc\u200B\u2066anthropics\u2069\uFEFF`;
+  const report = await runEcosystemRadar({
+    repoRoot: REPO_ROOT,
+    client: fakeClient({
+      search: { ok: true, json: { items: [repoFixture({ description: payload, full_name: 'a/b' })] } },
+      file: { ok: false, reason: 'not-found' },
+    }),
+  });
+  const c = report.candidates[0];
+  const forbidden = /[\u200B-\u200F\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/;
+  assert.doesNotMatch(c.description, forbidden, 'no bidi or zero-width character may reach the report');
+  assert.doesNotMatch(c.publisher, forbidden);
+});
+
+// S4. The renderer is the SUBJECT of the F2 fix and had no test at all,
+// which is precisely where that defect returns unnoticed.
+test('ecosystem-radar report: an unchecked penalty is visible in the text a human actually reads', () => {
+  const report = {
+    mode: 'live',
+    sources: [{ id: 'q', status: 'ok', found: 1 }],
+    candidates: [{
+      classification: 'WATCH', source: 'https://github.com/a/b', publisher: 'a', publisherType: 'User',
+      license: 'MIT', stars: 1, maintenanceSignal: 'pushed 0d ago', description: 'x', rationale: 'y',
+      deepInspected: false,
+      score: { scored: 10, maxAvailable: 25, unknownDimensions: ['dependency-footprint'] },
+      riskPenalties: { applied: [], undetectable: ['install-lifecycle-scripts', ...BEHAVIOURAL_PENALTIES] },
+      probeFailures: [{ probe: 'package.json', reason: 'rate-limited' }],
+      overlap: { alreadyInTrustCatalog: false },
+    }],
+    summary: { total: 1, auditRecommended: 0, watch: 1, rejected: 0, sourcesUnavailable: 0 },
+  };
+  const text = renderText(report);
+  assert.match(text, /^ +not checked on this candidate: install-lifecycle-scripts$/m,
+    'a penalty unchecked for THIS candidate must appear beside its entry');
+  assert.match(text, /inspection incomplete: package\.json \(rate-limited\)/,
+    'a probe that did not run must be named, not silently omitted');
+  assert.match(text, /not measurable here: dependency-footprint/);
+  for (const behavioural of BEHAVIOURAL_PENALTIES) {
+    assert.ok(text.includes(behavioural), `${behavioural} must still appear somewhere in the report`);
+  }
+  // The constant set is stated ONCE, not repeated under every candidate.
+  assert.equal(text.split('broad-secret-access').length - 1, 1);
+  assert.match(text, /No candidate above has been cleared of them/);
+});
+
+test('ecosystem-radar report: a clean candidate is not made to look checked for what was not checked', () => {
+  const text = renderText({
+    mode: 'live', sources: [], summary: {},
+    candidates: [{
+      classification: 'AUDIT_RECOMMENDED', source: 'https://github.com/a/b', publisher: 'a',
+      publisherType: 'User', license: 'MIT', stars: 1, maintenanceSignal: 'pushed 0d ago',
+      description: '', rationale: 'y', deepInspected: true,
+      score: { scored: 36, maxAvailable: 40, unknownDimensions: [] },
+      riskPenalties: { applied: [], undetectable: [...BEHAVIOURAL_PENALTIES] },
+      probeFailures: [], overlap: { alreadyInTrustCatalog: false },
+    }],
+  });
+  // Anchored to the RENDERED candidate line, indentation and all: the footer
+  // legend quotes the same phrase, and a looser pattern matched that instead
+  // of the thing under test.
+  assert.doesNotMatch(text, /^ +not checked on this candidate:/m,
+    'with nothing candidate-specific unchecked, the line must be absent rather than empty');
+  assert.match(text, /No candidate above has been cleared of them/,
+    'but the always-behavioural caveat must still apply to it');
 });
 
 test('ecosystem-radar: overlap with the trust catalog is detected by source', () => {
@@ -299,14 +421,28 @@ test('ecosystem-radar: a real run never writes to the trust catalog or the sourc
 // form), `createWriteStream`, and `unlink`. Matching families rather than
 // names is what makes this an argument instead of a spot check.
 test('ecosystem-radar: the module has no process-execution or filesystem-write capability at all', () => {
-  const source = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'maintenance', 'checks', 'ecosystem-radar.mjs'), 'utf8');
+  // BOTH files, because the one the scheduled workflow actually invokes is
+  // the entrypoint, and an earlier version of this test scanned only the
+  // checker -- asserting the property of a module while the executable half
+  // of the same subsystem went unexamined.
+  const source = [
+    path.join(PLUGIN_ROOT, 'scripts', 'maintenance', 'checks', 'ecosystem-radar.mjs'),
+    path.join(PLUGIN_ROOT, 'scripts', 'maintenance', 'check-ecosystem-radar.mjs'),
+  ].map((f) => fs.readFileSync(f, 'utf8')).join('\n');
   const forbidden = [
     [/child_process/, 'child_process'],
     [/node:vm|require\(['"]vm['"]\)/, 'the vm module'],
-    [/\b(exec|execSync|execFile|execFileSync|spawn|spawnSync|fork)\s*\(/, 'any process-spawning call'],
+    // Anchored to a module binding rather than a bare name: a bare /exec\(/
+    // also matches RegExp.prototype.exec, and a false positive on a
+    // legitimate call is how a future maintainer gets pushed into weakening
+    // a security test, which this repository forbids outright.
+    [/(?:child_process|cp|proc)\s*\.\s*(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork)\s*\(/, 'a process-spawning call on a child_process binding'],
+    [/(?:^|[^.\w])(execSync|execFileSync|spawnSync)\s*\(/m, 'a bare synchronous process call'],
     [/\bnew\s+Function\s*\(/, 'new Function'],
     [/\beval\s*\(/, 'eval'],
-    [/\bimport\s*\(/, 'a dynamic import, which could load a module chosen at runtime'],
+    // `import(` only where it is a call, not inside prose: the comments in
+    // these files legitimately discuss imports.
+    [/(?:^|[^\w.'"`])import\s*\(\s*[^)'"`\s]/m, 'a dynamic import, which could load a module chosen at runtime'],
     [/\b(writeFile|writeFileSync|appendFile|appendFileSync|createWriteStream|copyFile|copyFileSync)\s*\(/, 'any filesystem write'],
     [/\b(rm|rmSync|rmdir|rmdirSync|unlink|unlinkSync|mkdir|mkdirSync|rename|renameSync|chmod|chmodSync)\s*\(/, 'any filesystem mutation'],
   ];
@@ -315,7 +451,8 @@ test('ecosystem-radar: the module has no process-execution or filesystem-write c
   }
   // The guarantee is only as good as the file it reads, so prove the file
   // being asserted over is non-trivial and is really the checker.
-  assert.ok(source.includes('runEcosystemRadar'), 'the asserted source must be the Radar module itself');
+  assert.ok(source.includes('runEcosystemRadar'), 'the asserted source must be the Radar checker');
+  assert.ok(source.includes('renderText'), 'and must include the entrypoint the workflow actually runs');
   assert.ok(source.length > 5000, 'a truncated or empty read would make every assertion above vacuously pass');
 });
 

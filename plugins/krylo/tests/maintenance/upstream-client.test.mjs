@@ -218,3 +218,51 @@ test('a network error that succeeds on the single retry returns the successful r
   assert.equal(result.ok, true);
   assert.equal(call, 2);
 });
+
+// GitHub reports an exhausted PRIMARY rate limit as 403 with
+// x-ratelimit-remaining: 0, not as 429. Before this branch existed the single
+// most likely failure for an unauthenticated scheduled job fell into the
+// catch-all `unexpected-status`, which reads like a broken endpoint rather
+// than a quota that refills. The distinction is consumed downstream: the
+// Ecosystem Radar reports a rate-limited probe as an unknown.
+test('403 with an exhausted rate-limit header is reported as rate-limited, not as an unexpected status', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => new Response('{}', {
+    status: 403,
+    headers: { 'x-ratelimit-remaining': '0' },
+  }));
+  const result = await fetchUpstreamJson('https://api.github.com/repos/x/y/contents/package.json');
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'rate-limited');
+  assert.equal(result.status, 403);
+});
+
+// The narrowing that keeps the branch honest: a 403 that is NOT a rate limit
+// is an authorization failure and must not be relabelled as one, or a real
+// permission problem would look like something that fixes itself with time.
+test('403 without an exhausted rate-limit header stays an unexpected status', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => new Response('{}', {
+    status: 403,
+    headers: { 'x-ratelimit-remaining': '4999' },
+  }));
+  const result = await fetchUpstreamJson('https://api.github.com/repos/x/y/contents/package.json');
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'unexpected-status');
+});
+
+test('403 with no rate-limit header at all stays an unexpected status', async (t) => {
+  t.mock.method(globalThis, 'fetch', async () => new Response('{}', { status: 403 }));
+  const result = await fetchUpstreamJson('https://api.github.com/repos/x/y/contents/package.json');
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'unexpected-status');
+});
+
+// A rate limit must never be retried: the quota does not refill within a
+// request, so a retry is a wasted call against an already-exhausted budget.
+test('a rate-limited response is not retried', async (t) => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async () => new Response('{}', {
+    status: 403,
+    headers: { 'x-ratelimit-remaining': '0' },
+  }));
+  await fetchUpstreamJson('https://api.github.com/repos/x/y/contents/package.json');
+  assert.equal(fetchMock.mock.callCount(), 1, 'no retry may follow an actual HTTP response');
+});

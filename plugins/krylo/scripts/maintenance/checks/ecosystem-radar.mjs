@@ -99,16 +99,25 @@ export const BEHAVIOURAL_PENALTIES = Object.freeze([
  * so this text is attacker-authored in the only sense that matters, and it
  * is rendered into a terminal and into a GitHub job summary.
  *
- * The stripped set is deliberately wider than the obvious one. C0 and DEL
+ * The stripped set covers four families, because a review found the first
+ * two insufficient twice over. C0 and DEL
  * are the familiar half; \u0080-\u009F (C1) carry terminal escape
  * semantics of their own, and \u2028/\u2029 are line terminators to a
  * JavaScript or JSON parser while staying invisible to a human reading the
- * report -- exactly the kind of character that makes rendered output
- * disagree with what it appears to say.
+ * report. The fourth family is the one that actually rewrites what a human
+ * sees: bidi overrides and isolates (U+202A-U+202E, U+2066-U+2069) reverse
+ * display order in a terminal and in a Markdown job summary, and zero-width
+ * characters (U+200B-U+200F, U+2060-U+2064, U+FEFF) hide inside a name. A
+ * candidate can publish a repository whose description renders as a
+ * different publisher than it is, and this report is the only input to a
+ * human's decision about where to spend an audit slot.
  */
 function boundedText(value, max = 160) {
   return redactText(String(value ?? ''))
-    .replace(/[\u0000-\u001F\u007F-\u009F\u2028\u2029]/g, '\uFFFD')
+    .replace(
+      /[\u0000-\u001F\u007F-\u009F\u200B-\u200F\u2028\u2029\u202A-\u202E\u2060-\u2064\u2066-\u2069\uFEFF]/g,
+      '\uFFFD',
+    )
     .slice(0, max);
 }
 
@@ -148,9 +157,16 @@ function scoreCiPresence(deep) {
     : { points: 0, signal: 'no CI workflows detected' };
 }
 
-/** Whether the package declares a test script. Needs package.json. */
+/**
+ * Whether the package declares a test script. Needs a READABLE root
+ * package.json: a Python candidate with a full pytest suite would otherwise
+ * be charged 0/4 on a dimension whose name does not say "npm", which is the
+ * mirror image of crediting it for dependencies nobody read.
+ */
 function scoreDeclaredTestScript(deep) {
-  if (!deep.packageInspected) return { points: 0, signal: 'not inspected', unknown: true };
+  if (!deep.packageInspected || !deep.packagePresent) {
+    return { points: 0, signal: 'no root package.json to read', unknown: true };
+  }
   return deep.hasTests
     ? { points: 4, signal: 'declares a test script' }
     : { points: 0, signal: 'declares no test script' };
@@ -190,7 +206,7 @@ function scoreLicense(repo) {
 }
 
 function scoreDependencyFootprint(deep) {
-  if (!deep.packageInspected || deep.dependencyCount === null) {
+  if (!deep.packageInspected || !deep.packagePresent || deep.dependencyCount === null) {
     return { points: 0, signal: 'not inspected', unknown: true };
   }
   const n = deep.dependencyCount;
@@ -220,7 +236,7 @@ export function detectRiskPenalties(repo, deep) {
   // `undetectable` -- reading to a human as "checked, and clean". The
   // difference between "we checked" and "we never looked" is the entire
   // point of this function.
-  if (deep.packageInspected) {
+  if (deep.packageInspected && deep.packagePresent) {
     if (deep.hasInstallLifecycleScripts) applied.push('install-lifecycle-scripts');
     if (deep.dependencyCount !== null && deep.dependencyCount > 30) applied.push('excessive-dependency-footprint');
   } else {
@@ -315,6 +331,10 @@ async function deepInspect(owner, repo, client) {
   const result = {
     ciInspected: false,
     packageInspected: false,
+    // Distinct from `packageInspected`: the probe can answer "there is no
+    // root manifest", which is an answer about the REQUEST and not a
+    // measurement of the candidate. See the not-found branch below.
+    packagePresent: false,
     hasCiWorkflows: false,
     hasInstallLifecycleScripts: false,
     dependencyCount: null,
@@ -345,15 +365,34 @@ async function deepInspect(owner, repo, client) {
     const scripts = parsed && typeof parsed.scripts === 'object' && parsed.scripts !== null ? parsed.scripts : {};
     const deps = parsed && typeof parsed.dependencies === 'object' && parsed.dependencies !== null ? parsed.dependencies : {};
     result.packageInspected = true;
+    result.packagePresent = true;
     result.hasInstallLifecycleScripts = ['preinstall', 'install', 'postinstall', 'prepare'].some((k) => typeof scripts[k] === 'string');
     result.dependencyCount = Object.keys(deps).length;
     result.hasTests = typeof scripts.test === 'string' && scripts.test.trim() !== '';
   } else if (pkg.reason === 'not-found') {
-    // Answered: a non-Node candidate declares no npm lifecycle scripts and
-    // no npm dependencies. Both facts are established, so both penalties
-    // are genuinely checked rather than merely unobserved.
+    // The REQUEST was answered, but nothing about the candidate's
+    // dependencies or install hooks was established by it, and an earlier
+    // version of this branch claimed otherwise: it set `dependencyCount: 0`
+    // and the footprint dimension then awarded a full 5/5 for "zero runtime
+    // dependencies" to a repository whose dependencies had never been read,
+    // while both package-derived penalties vanished from `applied` and
+    // `undetectable` alike. That is the same over-claim this whole split
+    // exists to prevent, reintroduced in a narrower and more confident form.
+    //
+    // A missing ROOT package.json is not a missing manifest: a monorepo
+    // keeps it in `packages/<name>/`, and a Python or Go candidate keeps its
+    // dependencies somewhere this Radar does not read at all. The `topic:
+    // mcp-server` query -- one of the four shipped -- returns mostly such
+    // repositories, so this is the ordinary path and not an edge case.
+    //
+    // So: the probe answered (`packageInspected`), and it answered that
+    // there is nothing here to read (`packagePresent: false`). Everything
+    // downstream of a manifest stays unknown. The candidate can still be
+    // fully inspected and still reach AUDIT_RECOMMENDED on what WAS
+    // measured; it simply earns nothing, and is charged nothing, for what
+    // was not.
     result.packageInspected = true;
-    result.dependencyCount = 0;
+    result.packagePresent = false;
   } else {
     result.probeFailures.push({ probe: 'package.json', reason: pkg.reason ?? 'unknown' });
   }
@@ -468,7 +507,7 @@ export async function runEcosystemRadar({ repoRoot, client, offline = false } = 
     const name = String(repo?.name ?? '');
     const deep = (owner && name && index < maxDeep)
       ? await deepInspect(owner, name, effectiveClient)
-      : { ciInspected: false, packageInspected: false, hasCiWorkflows: false, hasInstallLifecycleScripts: false, dependencyCount: null, hasTests: false, probeFailures: [] };
+      : { ciInspected: false, packageInspected: false, packagePresent: false, hasCiWorkflows: false, hasInstallLifecycleScripts: false, dependencyCount: null, hasTests: false, probeFailures: [] };
 
     const overlap = computeOverlap(repo, toolsRead.value);
     const penalties = detectRiskPenalties(repo, deep);

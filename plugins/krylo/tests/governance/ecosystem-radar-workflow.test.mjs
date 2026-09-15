@@ -35,7 +35,7 @@ test('ecosystem-radar workflow: exists', () => {
   assert.ok(fs.existsSync(WORKFLOW_PATH));
 });
 
-test('ecosystem-radar workflow: weekly schedule plus manual dispatch, per design Section 16.2', () => {
+test('ecosystem-radar workflow: monthly schedule plus manual dispatch, per design Section 16.2', () => {
   const text = workflowText();
   assert.match(text, /^\s+- cron: "[^"]+"/m, 'a cron schedule must be declared');
   const cron = /- cron: "([^"]+)"/.exec(text)[1];

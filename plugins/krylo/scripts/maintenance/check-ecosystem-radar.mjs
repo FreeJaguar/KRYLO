@@ -24,7 +24,12 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
 
 const LABEL = { AUDIT_RECOMMENDED: 'AUDIT  ', WATCH: 'WATCH  ', REJECT: 'REJECT ' };
 
-function renderText(report) {
+// Exported for test. An independent review pointed out that this function
+// had no test of any kind -- and it is the entire subject of the F2 fix,
+// where a correctly-computed honesty signal was simply never printed. A
+// renderer nobody asserts on is exactly where that defect returns in
+// silence, so the report's honesty lines are now pinned by test.
+export function renderText(report) {
   const lines = ['KRYLO Monthly Ecosystem Radar', `mode: ${report.mode}`, ''];
   if (report.error) {
     lines.push(`internal failure: ${report.error}`);
