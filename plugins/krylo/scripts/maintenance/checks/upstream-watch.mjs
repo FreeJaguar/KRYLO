@@ -40,18 +40,36 @@ export const DRIFT_CLASSIFICATIONS = [
  * a path-shape test only -- file CONTENT is never fetched, parsed, or run.
  */
 const SECURITY_SENSITIVE_PATH_RULES = [
-  { id: 'package-lifecycle', re: /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|requirements\.txt|pyproject\.toml|Cargo\.toml|go\.mod)$/i },
+  { id: 'package-lifecycle', re: /(^|\/)(package\.json|package-lock\.json|pnpm-lock\.yaml|yarn\.lock|requirements\.txt|pyproject\.toml|poetry\.lock|Cargo\.(toml|lock)|go\.(mod|sum)|Gemfile(\.lock)?|[^/]*\.gemspec|composer\.(json|lock))$/i },
   { id: 'install-scripts', re: /(^|\/)(install|postinstall|preinstall|setup|bootstrap)[^/]*\.(sh|bash|zsh|ps1|cmd|bat|mjs|cjs|js|py)$/i },
   { id: 'hooks', re: /(^|\/)hooks?(\/|\.)|(^|\/)[^/]*hooks[^/]*\.(json|ya?ml|toml)$/i },
   { id: 'plugin-manifests', re: /(^|\/)(\.claude-plugin|\.codex-plugin)\/|(^|\/)plugin\.json$|(^|\/)marketplace\.json$/i },
   { id: 'mcp-inventory', re: /(^|\/)[^/]*mcp[^/]*\.(json|ya?ml|toml|mjs|cjs|js|ts)$/i },
   { id: 'license', re: /(^|\/)(LICENSE|LICENCE|COPYING|NOTICE)([.-][^/]*)?$/i },
-  { id: 'binaries', re: /\.(exe|dll|so|dylib|wasm|jar|bin|node)$/i },
-  { id: 'credentials-or-network-config', re: /(^|\/)(\.npmrc|\.netrc|\.env[^/]*|Dockerfile|docker-compose\.ya?ml)$/i },
+  { id: 'binaries', re: /\.(exe|dll|so|dylib|wasm|jar|bin|node|msi|deb|rpm|pkg|apk|pyc|class|a)(\.\d+)*$/i },
+  { id: 'credentials-or-network-config', re: /(^|\/)(\.npmrc|\.netrc|\.yarnrc(\.ya?ml)?|\.pypirc|\.env[^/]*|Dockerfile[^/]*|docker-compose[^/]*\.ya?ml|\.github\/workflows\/[^/]+\.ya?ml|\.claude\/settings[^/]*\.json)$/i },
+  // In this ecosystem a Markdown file is frequently not documentation at
+  // all: SKILL.md, agent definitions and slash-command files are
+  // INSTRUCTIONS AN AGENT EXECUTES, and a frontmatter change alone can grant
+  // `allowed-tools: Bash`. An independent Security Reviewer pointed out that
+  // the flagship watch entry, mattpocock/skills, is a repository made almost
+  // entirely of such files -- so without this rule the single most
+  // security-relevant change it can make classified as "documentation-only".
+  { id: 'agent-instructions', re: /(^|\/)(SKILL|AGENTS?|CLAUDE|GEMINI)\.mdx?$|(^|\/)(skills|agents|commands|\.claude|\.codex|\.agents)\/[^/]*\.mdx?$/i },
 ];
 
-/** Changed-path patterns that, ALONE, are low-risk: documentation and nothing else. */
-const LOW_RISK_ONLY_RULE = /\.(md|mdx|txt|rst|adoc)$|(^|\/)(docs?|examples?)\//i;
+/**
+ * The ONLY delta that qualifies as low risk: every changed path carries an
+ * inert extension. Deliberately an extension allowlist with no directory
+ * arm. The previous version also treated anything under `docs/`/`examples/`
+ * as documentation regardless of extension, which the same reviewer
+ * reproduced as low-risk verdicts for `docs/build.sh`, `docs/tools/run.py`
+ * and `examples/server.js` -- executable code behind a documentation prefix,
+ * and in plugin repositories `examples/` routinely holds code users copy
+ * verbatim. Markdown is NOT inert here (see agent-instructions above); it
+ * reaches this rule only when the security rules did not already claim it.
+ */
+const INERT_EXTENSION_RULE = /\.(txt|rst|adoc|md|mdx)$/i;
 
 /**
  * A changed path is upstream-authored text. It is used only for pattern
@@ -59,7 +77,14 @@ const LOW_RISK_ONLY_RULE = /\.(md|mdx|txt|rst|adoc)$|(^|\/)(docs?|examples?)\//i
  * open a local file, build a command, or construct a URL.
  */
 function summarizePath(p) {
-  return redactText(String(p)).slice(0, 120);
+  // Control characters are stripped BEFORE truncation. Git permits LF in a
+  // path name and the API returns it verbatim, so an independent Security
+  // Reviewer was able to craft a filename that reproduced this report's own
+  // line format -- a fixed-width status label plus an id, after the
+  // renderer's 12-space indent -- and inject a fabricated `NO DRIFT` entry
+  // into the rendered report and the GitHub job summary. Redaction alone did
+  // not stop it; neither did truncation.
+  return redactText(String(p)).replace(/[\u0000-\u001F\u007F]/g, '\uFFFD').slice(0, 120);
 }
 
 function parseGithubOwnerRepo(source) {
@@ -103,16 +128,28 @@ export function classifyChangedPaths(changedPaths) {
     return { classification: 'REVIEW_REQUIRED', reasons: ['changed-file-list-unavailable-or-truncated'] };
   }
   const hits = new Set();
-  for (const p of changedPaths) {
+  for (const raw of changedPaths) {
+    // Bounded before matching. Several rules carry two unbounded `[^/]*`
+    // quantifiers around a literal, which an independent Security Reviewer
+    // measured as quadratic (not catastrophic: ~327ms at 60k characters,
+    // already capped by upstream-client.mjs's 2MB response limit). Truncating
+    // removes even that, and a path this long cannot be legitimate -- it is
+    // treated as security-sensitive rather than silently shortened into
+    // something that might match an inert rule.
+    if (typeof raw !== 'string') continue;
+    if (raw.length > 512) {
+      hits.add('implausible-path-length');
+      continue;
+    }
     for (const rule of SECURITY_SENSITIVE_PATH_RULES) {
-      if (rule.re.test(p)) hits.add(rule.id);
+      if (rule.re.test(raw)) hits.add(rule.id);
     }
   }
   if (hits.size > 0) {
     return { classification: 'SECURITY_REVIEW_REQUIRED', reasons: [...hits].sort() };
   }
-  const allLowRisk = changedPaths.every((p) => LOW_RISK_ONLY_RULE.test(p));
-  if (allLowRisk) return { classification: 'DRIFT_LOW_RISK', reasons: ['documentation-only'] };
+  const allInert = changedPaths.every((p) => typeof p === 'string' && INERT_EXTENSION_RULE.test(p));
+  if (allInert) return { classification: 'DRIFT_LOW_RISK', reasons: ['inert-prose-only'] };
   return { classification: 'REVIEW_REQUIRED', reasons: ['code-or-config-changed'] };
 }
 
@@ -151,9 +188,14 @@ async function compareWithTagPrefixFallback(client, repo, baseRef, headRef) {
   const first = await client.getGithubCompare(repo.owner, repo.repo, baseRef, headRef);
   if (first.ok || first.reason !== 'not-found') return { result: first, baseRefUsed: baseRef };
 
-  const alternate = /^v\d+(?:\.\d+)*$/i.test(baseRef)
+  // At least two dots, and no case-insensitivity: an independent Security
+  // Reviewer noted the looser form accepted a single-component ref, so a
+  // recorded `3` would retry `v3` -- which in many repositories is a MOVING
+  // alias tag, not the exact release KRYLO reviewed -- and that the `i` flag
+  // let `V3.8.49` through as if it were the same spelling.
+  const alternate = /^v\d+\.\d+\.\d+(?:\.\d+)*$/.test(baseRef)
     ? baseRef.slice(1)
-    : (/^\d+(?:\.\d+)*$/.test(baseRef) ? `v${baseRef}` : null);
+    : (/^\d+\.\d+\.\d+(?:\.\d+)*$/.test(baseRef) ? `v${baseRef}` : null);
   if (!alternate) return { result: first, baseRefUsed: baseRef };
 
   const second = await client.getGithubCompare(repo.owner, repo.repo, alternate, headRef);
@@ -186,14 +228,40 @@ export async function watchEntry({ entry, toolsCatalog, client, offline = false 
     };
   }
 
-  const repo = parseGithubOwnerRepo(entry?.source);
+  // WHICH repository gets observed is decided by the TRUSTED catalog, never
+  // by the watch config. An independent Security Reviewer reproduced the
+  // inversion this closes: the baseline ref came from tools.json while the
+  // repository came from upstream-watch.json, with nothing asserting they
+  // agree -- so a one-line edit to the "configuration-only, therefore
+  // low-stakes" file (a typo, a fork URL, or a hostile PR) pointed the watch
+  // at a different repository whose matching tag then reported an
+  // affirmative NO_DRIFT, silencing that integration permanently. That is
+  // the exact inversion of design Section 15.3: the separation exists to
+  // keep low-trust data from acquiring authority.
+  //
+  // A disagreement is surfaced rather than silently resolved in either
+  // direction: preferring the trusted source would hide a watch file that no
+  // longer describes what it claims to.
+  const trustedRepo = parseGithubOwnerRepo(baseline.source);
+  const declaredRepo = parseGithubOwnerRepo(entry?.source);
+  if (trustedRepo && declaredRepo && (trustedRepo.owner !== declaredRepo.owner || trustedRepo.repo !== declaredRepo.repo)) {
+    return {
+      ...base,
+      classification: 'SOURCE_UNAVAILABLE',
+      reviewedRef: baseline.ref,
+      observedRef: null,
+      detail: 'the watch policy names a different repository than the trusted catalog does for this id; refusing to observe either until they agree, since comparing a trusted ref against an untrusted repository can only produce a meaningless verdict.',
+    };
+  }
+
+  const repo = trustedRepo;
   if (!repo) {
     return {
       ...base,
       classification: 'SOURCE_UNAVAILABLE',
       reviewedRef: baseline.ref,
       observedRef: null,
-      detail: 'the watch entry has no parseable GitHub source; only GitHub-hosted sources are observable by this checker.',
+      detail: 'the trusted catalog records no parseable GitHub source for this id; only GitHub-hosted sources are observable by this checker.',
     };
   }
 
@@ -237,6 +305,26 @@ export async function watchEntry({ entry, toolsCatalog, client, offline = false 
       reviewedRef: baseline.ref,
       observedRef: summarizePath(observed.ref),
       detail: `upstream moved, but the change list could not be read (${String(compare.reason).slice(0, 60)}), so the delta is unanalyzed and a human must look.`,
+    };
+  }
+
+  // The refs differ as STRINGS but GitHub says they are the same commit --
+  // the `3.8.49` vs `v3.8.49` spelling case the fallback above exists for.
+  // Without this, such an entry reports REVIEW_REQUIRED every single week
+  // with a reason ("change list unavailable or truncated") that is simply
+  // untrue, which is the canonical way to train reviewers to stop reading
+  // the report. Found by an independent Security Reviewer, who noted the
+  // disambiguating data was already in hand and being discarded.
+  const identical = compare.json?.status === 'identical'
+    || (compare.json?.total_commits === 0 && compare.json?.ahead_by === 0 && compare.json?.behind_by === 0);
+  if (identical) {
+    return {
+      ...base,
+      classification: 'NO_DRIFT',
+      reviewedRef: baseline.ref,
+      ...(compared.baseRefUsed !== baseline.ref ? { comparedUsingRef: compared.baseRefUsed } : {}),
+      observedRef: summarizePath(observed.ref),
+      detail: `the observed ${observed.kind} is a different spelling of the reviewed ref, and upstream reports the two as the same commit.`,
     };
   }
 
@@ -285,7 +373,23 @@ export async function runUpstreamWatch({ repoRoot, client, offline = false } = {
   const entries = Array.isArray(watchRead.value?.entries) ? watchRead.value.entries : [];
   const results = [];
   for (const entry of entries) {
-    results.push(await watchEntry({ entry, toolsCatalog: toolsRead.value, client: effectiveClient, offline }));
+    // watchEntry's own contract is "never throws", which holds today only
+    // because fetchUpstreamJson never rejects. An independent Security
+    // Reviewer noted that an injected or future client that DOES throw would
+    // otherwise produce an unhandled rejection and lose every other entry's
+    // result with it. One failing entry must never blind the whole watch.
+    try {
+      results.push(await watchEntry({ entry, toolsCatalog: toolsRead.value, client: effectiveClient, offline }));
+    } catch {
+      results.push({
+        id: String(entry?.id ?? 'unknown').slice(0, 80),
+        riskClass: entry?.riskClass ?? 'unknown',
+        classification: 'SOURCE_UNAVAILABLE',
+        reviewedRef: null,
+        observedRef: null,
+        detail: 'the watch for this entry failed unexpectedly; reported unavailable rather than dropped, and the other entries were still evaluated.',
+      });
+    }
   }
 
   return {

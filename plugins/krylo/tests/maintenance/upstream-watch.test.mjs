@@ -45,9 +45,51 @@ test('upstream-watch: only design Section 15.6\'s five classifications exist', (
   ]);
 });
 
-test('classifyChangedPaths: a documentation-only delta is the ONLY thing that qualifies as low risk', () => {
+test('classifyChangedPaths: an inert-prose-only delta is the ONLY thing that qualifies as low risk', () => {
   assert.equal(classifyChangedPaths(['README.md', 'docs/guide.md', 'notes.txt']).classification, 'DRIFT_LOW_RISK');
   assert.equal(classifyChangedPaths(['README.md', 'src/index.js']).classification, 'REVIEW_REQUIRED');
+});
+
+// In this ecosystem a Markdown file is frequently an INSTRUCTION AN AGENT
+// EXECUTES, and the flagship watch entry (mattpocock/skills) is made almost
+// entirely of them -- so treating .md as documentation meant its single most
+// security-relevant change classified as "skip this". Reproduced by an
+// independent Security Reviewer; every row here was a DRIFT_LOW_RISK before.
+test('classifyChangedPaths: agent-executable Markdown escalates instead of passing as documentation', () => {
+  for (const p of [
+    'skills/my-skill/SKILL.md',
+    '.claude/agents/builder.md',
+    '.claude/commands/deploy.md',
+    'agents/reviewer.md',
+    'commands/run.mdx',
+    'CLAUDE.md',
+    'AGENTS.md',
+  ]) {
+    const res = classifyChangedPaths([p]);
+    assert.equal(res.classification, 'SECURITY_REVIEW_REQUIRED', `${p} must escalate, not read as documentation`);
+    assert.ok(res.reasons.includes('agent-instructions'), `${p} must name the agent-instructions signal`);
+  }
+  assert.equal(
+    classifyChangedPaths(['README.md', 'skills/evil/SKILL.md']).classification,
+    'SECURITY_REVIEW_REQUIRED',
+    'one agent-instruction file among ordinary docs must still escalate the whole delta',
+  );
+});
+
+// The old rule had a directory arm that matched ANY file under docs/ or
+// examples/, regardless of extension -- executable code behind a
+// documentation prefix, and in plugin repos examples/ routinely holds code
+// users copy verbatim.
+test('classifyChangedPaths: executable code under docs/ or examples/ is never low risk', () => {
+  for (const p of ['docs/build.sh', 'doc/scripts/entrypoint.sh', 'docs/tools/run.py', 'examples/server.js', 'example/app.ts']) {
+    assert.notEqual(classifyChangedPaths([p]).classification, 'DRIFT_LOW_RISK', `${p} must not be classified as documentation`);
+  }
+});
+
+test('classifyChangedPaths: an implausibly long path escalates rather than being silently shortened into an inert match', () => {
+  const res = classifyChangedPaths([`${'a'.repeat(600)}.md`]);
+  assert.equal(res.classification, 'SECURITY_REVIEW_REQUIRED');
+  assert.ok(res.reasons.includes('implausible-path-length'));
 });
 
 test('classifyChangedPaths: each security-sensitive path class escalates, and names why', () => {
@@ -128,14 +170,52 @@ test('watchEntry: offline never contacts upstream and never guesses a verdict', 
   assert.equal(res.classification, 'SOURCE_UNAVAILABLE');
 });
 
-test('watchEntry: a non-GitHub source is reported unobservable rather than silently skipped', async () => {
+test('watchEntry: a non-GitHub TRUSTED source is reported unobservable rather than silently skipped', async () => {
   const res = await watchEntry({
-    entry: { id: 'reviewed-by-commit', source: 'detected-locally' },
-    toolsCatalog: TOOLS,
+    entry: { id: 'locally-detected', source: 'detected-locally' },
+    toolsCatalog: { tools: [{ id: 'locally-detected', source: 'detected-locally', reviewedVersion: '1.0.0' }] },
     client: fakeClient(),
   });
   assert.equal(res.classification, 'SOURCE_UNAVAILABLE');
   assert.match(res.detail, /GitHub/);
+});
+
+// The trust boundary design Section 15.3 is built around. An independent
+// Security Reviewer reproduced the inversion: the baseline ref came from the
+// trusted catalog while the repository being observed came from the
+// low-trust watch config, so a one-line edit there (a typo, a fork URL, a
+// hostile PR to the "configuration-only" file) pointed the watch at a
+// different repository whose matching tag then reported NO_DRIFT -- silencing
+// that integration permanently with an affirmative healthy verdict.
+test('watchEntry: a watch policy naming a DIFFERENT repository than the trusted catalog can never produce NO_DRIFT', async () => {
+  const queried = [];
+  const client = {
+    ...fakeClient({ release: { ok: true, json: { tag_name: 'abc123' } } }),
+    getLatestGithubRelease: async (owner, repo) => { queried.push(`${owner}/${repo}`); return { ok: true, json: { tag_name: 'abc123' } }; },
+  };
+  const res = await watchEntry({
+    entry: { id: 'reviewed-by-commit', source: 'https://github.com/attacker/r' },
+    toolsCatalog: TOOLS, // trusted source is https://github.com/o/r
+    client,
+  });
+  assert.equal(res.classification, 'SOURCE_UNAVAILABLE');
+  assert.notEqual(res.classification, 'NO_DRIFT');
+  assert.deepEqual(queried, [], 'the attacker-named repository must never even be contacted');
+  assert.match(res.detail, /different repository/);
+});
+
+test('watchEntry: the repository actually observed is the TRUSTED catalog\'s, not the watch policy\'s', async () => {
+  const queried = [];
+  const client = {
+    ...fakeClient(),
+    getLatestGithubRelease: async (owner, repo) => { queried.push(`${owner}/${repo}`); return { ok: true, json: { tag_name: 'abc123' } }; },
+  };
+  await watchEntry({
+    entry: { id: 'reviewed-by-commit', source: 'https://github.com/o/r' },
+    toolsCatalog: TOOLS,
+    client,
+  });
+  assert.deepEqual(queried, ['o/r']);
 });
 
 test('watchEntry: real drift with a security-sensitive delta escalates and names the signals', async () => {
@@ -220,6 +300,107 @@ test('watchEntry: upstream-supplied paths are bounded and redacted before reachi
   assert.doesNotMatch(JSON.stringify(res), /ghp_0123456789abcdefghijklmnopqrstuvwxyzAB/, 'a token-shaped fragment must be redacted out of the report');
 });
 
+test('classifyChangedPaths: the extended escalation set covers the ecosystems this repository actually watches', () => {
+  const cases = [
+    ['Gemfile.lock', 'package-lifecycle'],
+    ['composer.json', 'package-lifecycle'],
+    ['go.sum', 'package-lifecycle'],
+    ['poetry.lock', 'package-lifecycle'],
+    ['krylo.gemspec', 'package-lifecycle'],
+    ['.yarnrc.yml', 'credentials-or-network-config'],
+    ['.pypirc', 'credentials-or-network-config'],
+    ['Dockerfile.prod', 'credentials-or-network-config'],
+    ['.github/workflows/release.yml', 'credentials-or-network-config'],
+    ['.claude/settings.json', 'credentials-or-network-config'],
+    ['dist/app.deb', 'binaries'],
+    ['lib/libfoo.so.1', 'binaries'],
+  ];
+  for (const [file, expectedSignal] of cases) {
+    const res = classifyChangedPaths([file]);
+    assert.equal(res.classification, 'SECURITY_REVIEW_REQUIRED', `${file} must escalate`);
+    assert.ok(res.reasons.includes(expectedSignal), `${file} must report ${expectedSignal}, got ${res.reasons.join(',')}`);
+  }
+});
+
+// Found by an independent Security Reviewer as the one credible source of
+// RECURRING noise: `3.8.49` vs `v3.8.49` is the same commit, but strict
+// string inequality treated it as drift, the compare returned an identical
+// (empty) result, and the empty-list rule then reported REVIEW_REQUIRED
+// every week with a reason that was simply untrue.
+test('watchEntry: refs that differ only in spelling are NO_DRIFT when upstream says they are the same commit', async () => {
+  const res = await watchEntry({
+    entry: { id: 'reviewed-by-version', source: 'https://github.com/o/r' },
+    toolsCatalog: TOOLS,
+    client: fakeClient({
+      release: { ok: true, json: { tag_name: 'v3.8.49' } },
+      compare: (base) => (base === 'v3.8.49'
+        ? { ok: true, json: { status: 'identical', total_commits: 0, ahead_by: 0, behind_by: 0, files: [] } }
+        : { ok: false, reason: 'not-found' }),
+    }),
+  });
+  assert.equal(res.classification, 'NO_DRIFT');
+  assert.equal(res.comparedUsingRef, 'v3.8.49');
+  assert.match(res.detail, /same commit/);
+});
+
+test('watchEntry: a genuinely empty file list on a NON-identical compare stays REVIEW_REQUIRED', async () => {
+  const res = await watchEntry({
+    entry: { id: 'reviewed-by-commit', source: 'https://github.com/o/r' },
+    toolsCatalog: TOOLS,
+    client: fakeClient({
+      release: { ok: true, json: { tag_name: 'v2.0.0' } },
+      compare: { ok: true, json: { status: 'ahead', total_commits: 40, files: [] } },
+    }),
+  });
+  assert.equal(res.classification, 'REVIEW_REQUIRED');
+});
+
+test('watchEntry: the v-prefix fallback refuses a single-component ref, which is often a MOVING alias tag', async () => {
+  const attempted = [];
+  await watchEntry({
+    entry: { id: 'major-only', source: 'https://github.com/o/r' },
+    toolsCatalog: { tools: [{ id: 'major-only', source: 'https://github.com/o/r', reviewedVersion: '3' }] },
+    client: fakeClient({
+      release: { ok: true, json: { tag_name: 'v4' } },
+      compare: (base) => { attempted.push(base); return { ok: false, reason: 'not-found' }; },
+    }),
+  });
+  assert.deepEqual(attempted, ['3'], 'a bare major version must never be retried as the v-prefixed moving alias');
+});
+
+// Git permits LF in a path name and the API returns it verbatim, so a
+// crafted filename could reproduce this report's own line format and inject
+// a fabricated status line into the rendered report and the job summary.
+test('watchEntry: control characters in upstream paths are neutralized, so a filename cannot forge a report line', async () => {
+  const forged = 'docs/a\n            NO DRIFT   everything-is-fine.md';
+  const res = await watchEntry({
+    entry: { id: 'reviewed-by-commit', source: 'https://github.com/o/r' },
+    toolsCatalog: TOOLS,
+    client: fakeClient({
+      release: { ok: true, json: { tag_name: 'v2.0.0' } },
+      compare: { ok: true, json: { status: 'ahead', total_commits: 1, files: [{ filename: forged }, { filename: 'docs/b.md' }] } },
+    }),
+  });
+  for (const sample of res.changedPathSample) {
+    assert.doesNotMatch(sample, /[\u0000-\u001F\u007F]/, 'no control character may survive into the report');
+    assert.doesNotMatch(sample, /\n/, 'a sampled path must never span lines');
+  }
+});
+
+test('runUpstreamWatch: one entry whose client throws never blinds the whole watch', async () => {
+  const throwing = {
+    getLatestGithubRelease: async () => { throw new Error('boom'); },
+    getGithubTags: async () => { throw new Error('boom'); },
+    getGithubCommitForRef: async () => { throw new Error('boom'); },
+    getGithubCompare: async () => { throw new Error('boom'); },
+  };
+  const report = await runUpstreamWatch({ repoRoot: REPO_ROOT, client: throwing });
+  assert.ok(report.results.length > 0, 'every entry must still be reported');
+  for (const r of report.results) {
+    assert.equal(r.classification, 'SOURCE_UNAVAILABLE');
+  }
+});
+
 test('worstClassification: SOURCE_UNAVAILABLE outranks NO_DRIFT so a blind run never looks healthy', () => {
   assert.equal(worstClassification(['NO_DRIFT', 'SOURCE_UNAVAILABLE']), 'SOURCE_UNAVAILABLE');
   assert.equal(worstClassification(['REVIEW_REQUIRED', 'SECURITY_REVIEW_REQUIRED']), 'SECURITY_REVIEW_REQUIRED');
@@ -268,6 +449,19 @@ test('upstream-watch: the checker has no process-execution capability at all', (
   const source = fs.readFileSync(path.join(PLUGIN_ROOT, 'scripts', 'maintenance', 'checks', 'upstream-watch.mjs'), 'utf8');
   for (const forbidden of ['child_process', 'execSync', 'execFileSync', 'spawnSync', 'spawn(']) {
     assert.doesNotMatch(source, new RegExp(forbidden.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `the watch checker must never reference ${forbidden}`);
+  }
+});
+
+// Complements the runtime refusal: the two shipped catalogs must actually
+// agree today, so the refusal never has to fire in normal operation and a
+// divergence shows up as a failing test rather than a silently skipped entry.
+test('upstream-watch: every shipped watch entry names the same repository the trusted catalog does', () => {
+  const watch = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, 'catalog', 'upstream-watch.json'), 'utf8'));
+  const tools = JSON.parse(fs.readFileSync(path.join(PLUGIN_ROOT, 'catalog', 'tools.json'), 'utf8'));
+  for (const entry of watch.entries) {
+    const trusted = tools.tools.find((t) => t.id === entry.id);
+    assert.ok(trusted, `watch entry ${entry.id} has no record in the trusted catalog`);
+    assert.equal(entry.source, trusted.source, `watch entry ${entry.id} names a different source than tools.json does`);
   }
 });
 
