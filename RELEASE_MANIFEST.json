@@ -2,7 +2,7 @@
   "name": "krylo-release",
   "version": "0.2.0",
   "note": "Per-file SHA-256 of every git-tracked file at HEAD (excluding this manifest itself). Hashed from the committed git blob content, not the working tree, so this is reproducible from a clean clone of the same commit. Deterministic: regenerating from an unchanged HEAD produces byte-identical output (no timestamp or other nondeterministic field is embedded). BLUEPRINT_MANIFEST.json remains the separate, immutable record of blueprint 0.1.2 as delivered in the baseline commit.",
-  "fileCount": 384,
+  "fileCount": 385,
   "files": [
     {
       "path": ".claude-plugin/marketplace.json",
@@ -710,6 +710,11 @@
       "sha256": "72637f4feda23171cfedbef80ca89e7526c46f9fac01d5f9b4e9ae9c225e6de9"
     },
     {
+      "path": "docs/adr/0040-windows-executable-resolution-order.md",
+      "bytes": 5835,
+      "sha256": "2cd0174fc2309cf9ad118364afe1a2e27874f8ec10575ae70ecb5819023761e8"
+    },
+    {
       "path": "docs/adr/README.md",
       "bytes": 451,
       "sha256": "8da79a6ef78e8f2cda90a7cc8e9109b5b4592cc68b2e42751b2b5b026de7a207"
@@ -1261,8 +1266,8 @@
     },
     {
       "path": "plugins/krylo/scripts/lib/spawn-platform.mjs",
-      "bytes": 15383,
-      "sha256": "5a55122058186f0439e1246f1c63fbcc30645cfb4a6972b5970db0f338503ce3"
+      "bytes": 18875,
+      "sha256": "8b9e63b878835bbe85d7160a1f848abe22ed97417dc64acc740817c2d4ed3e32"
     },
     {
       "path": "plugins/krylo/scripts/lib/state-migrations.mjs",
@@ -1906,8 +1911,8 @@
     },
     {
       "path": "plugins/krylo/tests/unit/spawn-platform.test.mjs",
-      "bytes": 19618,
-      "sha256": "82f584d0c7839cd9e601630aa1b5efb680df2cff60ef943b2f6bb188e7368f83"
+      "bytes": 25258,
+      "sha256": "8b61c7ef53e760ec084f46a2bbdd78b49a4ea8b164fde31e7c48c84ca1697730"
     },
     {
       "path": "plugins/krylo/tests/unit/state-migrations.test.mjs",
