@@ -219,15 +219,22 @@ function pathExtOrder(env = process.env) {
 export function selectAsWindowsWould(candidates, env = process.env) {
   const order = pathExtOrder(env);
   const rank = (file) => {
-    const ext = path.extname(file).toUpperCase();
+    const ext = path.win32.extname(file).toUpperCase();
     const i = order.indexOf(ext);
     return i === -1 ? Number.POSITIVE_INFINITY : i;
   };
 
   // Directory order, as `where` reported it -- that is PATH order.
+  //
+  // Parsed with `path.win32` EXPLICITLY, not with the ambient platform's
+  // parser. This function implements Windows resolution semantics, and its
+  // inputs are always Windows paths; on a POSIX host `path.dirname` does not
+  // treat a backslash as a separator, so every candidate collapsed into one
+  // directory and the PATH-order rule silently stopped applying. Caught by
+  // CI on ubuntu, where the unit tests exercise this pure function.
   const byDirectory = [];
   for (const candidate of candidates) {
-    const dir = canonicalDir(path.dirname(candidate));
+    const dir = canonicalDir(path.win32.dirname(candidate));
     let bucket = byDirectory.find((b) => b.dir === dir);
     if (!bucket) { bucket = { dir, files: [] }; byDirectory.push(bucket); }
     bucket.files.push(candidate);

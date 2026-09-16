@@ -429,7 +429,12 @@ test('end to end: a real .exe earlier on PATH beats a real .cmd later on PATH', 
     process.env.PATH = `${early};${late};${savedPath}`;
     const target = platformSpawnTarget(stem, ['--version']);
     assert.ok(target, 'the fixture must resolve at all');
-    assert.equal(target.command, path.join(early, `${stem}.exe`),
+    // Compared as REAL paths, not as raw strings: os.tmpdir() can return an
+    // 8.3 short path (RUNNER~1) on a GitHub Windows runner while `where`
+    // returns the long one, and an earlier version of this assertion failed
+    // on CI for that reason alone while the resolution itself was correct.
+    const real = (f) => fs.realpathSync.native(f).toLowerCase();
+    assert.equal(real(target.command), real(path.join(early, `${stem}.exe`)),
       'the earlier .exe is what Windows would run, so it is what KRYLO must verify');
   } finally {
     process.env.PATH = savedPath;
