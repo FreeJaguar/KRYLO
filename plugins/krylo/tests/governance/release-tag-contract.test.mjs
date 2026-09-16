@@ -48,17 +48,17 @@ function runTagCheck(tag) {
 }
 
 test('the real release.yml tag-check script accepts the correct tag for the current product version', () => {
-  const result = runTagCheck('krylo--v0.2.0');
+  const result = runTagCheck('krylo--v0.3.0');
   assert.equal(result.ok, true);
 });
 
-test('v0.2.1 with package 0.2.0 -> fail', () => {
-  const result = runTagCheck('krylo--v0.2.1');
+test('v0.3.1 with package 0.3.0 -> fail', () => {
+  const result = runTagCheck('krylo--v0.3.1');
   assert.equal(result.ok, false);
 });
 
-test('v0.1.1 with package 0.2.0 -> fail', () => {
-  const result = runTagCheck('krylo--v0.1.1');
+test('a stale, already-released tag no longer matching the current package version -> fail', () => {
+  const result = runTagCheck('krylo--v0.2.0');
   assert.equal(result.ok, false);
 });
 
