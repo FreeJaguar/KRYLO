@@ -17,6 +17,7 @@
 // task's own instruction, KRYLO Codex code prefers the native variables and
 // never reads the Claude-named aliases.
 
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,6 +26,58 @@ import { createHostIdentity } from '../../lib/host-context.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PLUGIN_ROOT_FROM_SOURCE = path.resolve(HERE, '..', '..', '..');
+
+// Best-effort derivation of the real Codex-native data root from the
+// self-derived plugin root above, with NO input from the model at all.
+//
+// This exists because the obvious fix -- have the UserPromptSubmit hook hand
+// the model the literal resolved data-root path, and instruct it to set
+// KRYLO_DATA_ROOT inline on every runtime CLI call -- is UNUSABLE: a live
+// verification session found that any Bash/PowerShell command whose text
+// contains the real data-root path is unconditionally denied by this
+// project's own sensitive-path protection (risk-policy.mjs's
+// touchesDataRoot(), a deliberately blunt "deny outright rather than
+// attempting to classify" control that exists to stop a model from
+// bypassing the runtime scripts and manipulating control-plane state files
+// directly). That control is correct to keep exactly as blunt as it is --
+// carving a safe exception into it is its own security review, not a
+// side-effect of this fix. So the model must never be told the literal data
+// root at all, and the runtime scripts must find it themselves.
+//
+// The plugin root is self-derivable with zero env vars (PLUGIN_ROOT_FROM_SOURCE
+// above, from this file's own on-disk location) because the model already
+// needs SOME absolute path to construct `node "<path>/scripts/runtime/..."`
+// in the first place -- that need can never be removed. The data root has no
+// equivalent unavoidable need, so it should have no equivalent requirement.
+//
+// Empirically observed on a real installation (Codex CLI 0.154.0, plugin
+// installed via `codex plugin add`):
+//   plugin root: .../plugins/cache/<marketplace>/<plugin>/<version>
+//   data root:   .../plugins/data/<plugin>-<marketplace>
+// This is an assumption about Codex's own undocumented on-disk layout, not
+// a contract KRYLO controls, so it is treated as a best-effort HINT, never
+// as ground truth: the derived path is used only when it names a directory
+// that genuinely already exists (fs.existsSync), so a layout that does not
+// match this pattern (a different install method, a future Codex version)
+// falls straight through to the pre-existing home-directory default rather
+// than silently pointing at a wrong, possibly-nonexistent location.
+export function deriveCodexDataRootFromPluginRoot(pluginRoot) {
+  const segments = pluginRoot.split(path.sep);
+  const cacheIndex = segments.lastIndexOf('cache');
+  // Expect at least: [..., 'plugins', 'cache', marketplace, plugin, version].
+  if (cacheIndex < 1 || segments.length < cacheIndex + 4) return null;
+  if (segments[cacheIndex - 1] !== 'plugins') return null;
+  const marketplace = segments[cacheIndex + 1];
+  const plugin = segments[cacheIndex + 2];
+  if (!marketplace || !plugin) return null;
+  const pluginsDir = segments.slice(0, cacheIndex).join(path.sep);
+  const candidate = path.join(pluginsDir, 'data', `${plugin}-${marketplace}`);
+  try {
+    return fs.existsSync(candidate) && fs.statSync(candidate).isDirectory() ? candidate : null;
+  } catch {
+    return null;
+  }
+}
 
 // A KRYLO Codex run is only ever CREATED by the UserPromptSubmit hook
 // (scripts/security/user-prompt-submit-codex.mjs), bound to payload.session_id
@@ -66,6 +119,13 @@ export function resolveCodexDataRoot(env = process.env) {
   if (typeof env.PLUGIN_DATA === 'string' && env.PLUGIN_DATA.trim() !== '') {
     return path.resolve(env.PLUGIN_DATA);
   }
+  // Neither env var is available: exactly the model's own `exec` shell
+  // environment (see deriveCodexDataRootFromPluginRoot's comment above).
+  // Try to find the SAME real data root a hook invocation for this same
+  // plugin install would have used, before falling back to the
+  // non-plugin-specific home directory default.
+  const derived = deriveCodexDataRootFromPluginRoot(resolveCodexPluginRoot(env));
+  if (derived) return derived;
   return path.join(os.homedir(), '.krylo', 'data');
 }
 

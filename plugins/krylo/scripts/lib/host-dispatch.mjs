@@ -23,6 +23,31 @@
 // preserving every existing direct/manual invocation (a developer running a
 // runtime CLI by hand with no host env vars set) exactly as it behaved
 // before Codex support existed.
+//
+// CODEX_THREAD_ID is also checked, and this is a live-verification fix, not
+// a design preference: PLUGIN_ROOT/PLUGIN_DATA are populated only inside the
+// environment Codex builds for its OWN registered hook commands
+// (hooks/codex-hooks.json's command/commandWindows templating) -- NEVER in
+// the shell the model's own `exec` tool calls run in, which is a materially
+// different execution context this module's original design did not
+// distinguish. A real, hook-trust-enabled `$krylo-run` session was driven
+// live end to end: `read-state.mjs`, invoked exactly as the krylo-run Skill
+// instructs (via the real absolute script path, no env vars, no --session),
+// silently resolved to the CLAUDE host and read back a COMPLETELY UNRELATED
+// Claude-host run's state -- because neither PLUGIN_ROOT nor PLUGIN_DATA
+// reaches that shell. The follow-on `update-state.mjs --terminal` call in
+// that same session would have silently overwritten that unrelated run's
+// terminal state had a concurrent file lock not happened to block it --
+// cross-run state corruption, confirmed reachable, not merely theoretical.
+// CODEX_THREAD_ID, by contrast, was directly confirmed present in that same
+// model exec environment (it is the platform-injected shell-execution
+// variable resolveCodexSessionId() already trusts as a session-identity
+// fallback for the identical reason), so it closes exactly the gap
+// PLUGIN_ROOT/PLUGIN_DATA cannot reach. Like the native variables above, it
+// is Codex-specific and never set by Claude Code under ordinary use; the one
+// acknowledged residual risk is a Claude session launched FROM WITHIN an
+// active Codex terminal inheriting a stray value, a narrow, disclosed edge
+// case no variable-presence check can fully rule out.
 
 import {
   bootstrapClaudeRuntimeEnvironment,
@@ -39,6 +64,7 @@ export function detectHost(env = process.env) {
   if (env.KRYLO_HOST === 'codex' || env.KRYLO_HOST === 'claude') return env.KRYLO_HOST;
   if (typeof env.PLUGIN_ROOT === 'string' && env.PLUGIN_ROOT.trim() !== '') return 'codex';
   if (typeof env.PLUGIN_DATA === 'string' && env.PLUGIN_DATA.trim() !== '') return 'codex';
+  if (typeof env.CODEX_THREAD_ID === 'string' && env.CODEX_THREAD_ID.trim() !== '') return 'codex';
   return 'claude';
 }
 
