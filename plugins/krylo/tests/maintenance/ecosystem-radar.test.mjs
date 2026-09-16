@@ -42,14 +42,14 @@ function repoFixture(over = {}) {
 }
 
 // Both probes answered.
-const DEEP_FULL = { ciInspected: true, packageInspected: true, packagePresent: true, hasCiWorkflows: true, hasInstallLifecycleScripts: false, dependencyCount: 0, hasTests: true, probeFailures: [] };
+const DEEP_FULL = { ciInspected: true, packageInspected: true, packagePresent: true, scopeLimited: false, hasCiWorkflows: true, hasInstallLifecycleScripts: false, dependencyCount: 0, hasTests: true, probeFailures: [] };
 // No deep-inspection slot at all: neither probe ran.
-const DEEP_NONE = { ciInspected: false, packageInspected: false, packagePresent: false, hasCiWorkflows: false, hasInstallLifecycleScripts: false, dependencyCount: null, hasTests: false, probeFailures: [] };
+const DEEP_NONE = { ciInspected: false, packageInspected: false, packagePresent: false, scopeLimited: false, hasCiWorkflows: false, hasInstallLifecycleScripts: false, dependencyCount: null, hasTests: false, probeFailures: [] };
 // The shape the whole split exists for: CI was read, package.json was not.
 // Every Python or Go candidate whose package.json fetch is rate-limited
 // lands here, and the single-flag version called it "inspected".
 const DEEP_HALF = {
-  ciInspected: true, packageInspected: false, packagePresent: false,
+  ciInspected: true, packageInspected: false, packagePresent: false, scopeLimited: false,
   hasCiWorkflows: true, hasInstallLifecycleScripts: false, dependencyCount: null, hasTests: false,
   probeFailures: [{ probe: 'package.json', reason: 'rate-limited' }],
 };
@@ -223,7 +223,7 @@ test('ecosystem-radar: a 404 answers the REQUEST without measuring the candidate
 // ROOT package.json is not a missing manifest: monorepos, Python and Go
 // candidates all take this path, and `topic:mcp-server` is a shipped query.
 const DEEP_NO_MANIFEST = {
-  ciInspected: true, packageInspected: true, packagePresent: false,
+  ciInspected: true, packageInspected: true, packagePresent: false, scopeLimited: false,
   hasCiWorkflows: true, hasInstallLifecycleScripts: false, dependencyCount: null, hasTests: false,
   probeFailures: [],
 };
@@ -482,4 +482,171 @@ test('ecosystem-radar: a hard disqualifier outranks catalog membership, and says
   assert.equal(res.classification, 'REJECT', 'an archived repository is REJECT even when already reviewed');
   assert.match(res.rationale, /already in catalog\/tools\.json as omniroute/,
     'the verdict must not be misreadable as being about a fresh candidate');
+});
+
+
+// ---------------------------------------------------------------------------
+// REGRESSIONS from the THIRD independent review, which ran on a different
+// model family. It found the SAME over-claim family in five more places,
+// none of which the two prior reviews had reached. Each test below is one of
+// them, and each was reproduced against the shipped code before being fixed.
+//
+// The unifying rule, now encoded once in the checker's validator helpers
+// instead of being improvised at each call site: transport success is not
+// data validity, a successful parse is not a schema check, and an absent
+// field is not a zero.
+// ---------------------------------------------------------------------------
+
+/** Drive a full run with a chosen package.json body and repo metadata. */
+async function runWith({ pkg = '{}', repo: over = {}, ci = [{ name: 'ci.yml' }] } = {}) {
+  const client = {
+    searchGithubRepositories: async () => ({ ok: true, json: { items: [repoFixture(over)] } }),
+    getGithubFileContent: async (o, r, p) => (p === 'package.json'
+      ? (pkg === null
+        ? { ok: false, reason: 'not-found' }
+        : { ok: true, json: { content: Buffer.from(pkg).toString('base64'), encoding: 'base64' } })
+      : { ok: true, json: ci }),
+  };
+  const report = await runEcosystemRadar({ repoRoot: REPO_ROOT, client });
+  return report.candidates[0];
+}
+
+// A publisher controls their own package.json byte for byte. All four of
+// these parse cleanly, and the old `typeof x === 'object'` guards then
+// substituted `{}` and reported a confident "zero runtime dependencies"
+// worth a full 5/5, plus a measured "declares no test script".
+test('ecosystem-radar: a package.json that PARSES but is not a valid manifest measures nothing', async () => {
+  for (const body of ['null', 'false', '[]', '{"dependencies":false,"scripts":42}']) {
+    const c = await runWith({ pkg: body });
+    assert.ok(c.score.unknownDimensions.includes('dependency-footprint'), `${body}: footprint must be unknown`);
+    assert.ok(c.score.unknownDimensions.includes('declared-test-script'), `${body}: test script must be unknown`);
+    for (const penalty of ['install-lifecycle-scripts', 'excessive-dependency-footprint']) {
+      assert.ok(c.riskPenalties.undetectable.includes(penalty), `${body}: ${penalty} must be undetectable`);
+      assert.ok(!c.riskPenalties.applied.includes(penalty), `${body}: ${penalty} cannot be applied`);
+    }
+  }
+});
+
+// A workspace root is a valid manifest describing the repository's LAYOUT.
+// Its own empty dependency list says nothing about packages/*, which this
+// Radar never fetches -- yet it scored a perfect 5/5.
+test('ecosystem-radar: a workspace root manifest does not measure the repository it points at', async () => {
+  const c = await runWith({ pkg: '{"private":true,"workspaces":["packages/*"]}' });
+  assert.ok(c.score.unknownDimensions.includes('dependency-footprint'));
+  assert.ok(c.riskPenalties.undetectable.includes('install-lifecycle-scripts'),
+    'a postinstall hook in packages/server is not excluded by an empty root manifest');
+  assert.match(c.score.breakdown['dependency-footprint'].signal, /workspaces/);
+});
+
+// optionalDependencies are installed by default and run the same install
+// hooks, so excluding them let 31 of them score as dependency-free.
+test('ecosystem-radar: optionalDependencies count toward the dependency footprint', async () => {
+  const pkg = JSON.stringify({ optionalDependencies: Object.fromEntries(Array.from({ length: 31 }, (_, i) => [`d${i}`, '1.0.0'])) });
+  const c = await runWith({ pkg });
+  assert.equal(c.score.breakdown['dependency-footprint'].points, 0);
+  assert.match(c.score.breakdown['dependency-footprint'].signal, /31 runtime dependencies/);
+  assert.ok(c.riskPenalties.applied.includes('excessive-dependency-footprint'),
+    'the penalty must be APPLIED, not merely reflected in a lower score');
+});
+
+// The signal string said "unknown-last-push" while the points sat in the
+// denominator as a measured zero. Printing the word does not repair the sum.
+test('ecosystem-radar: an unusable last-push date is unknown, not a measured zero', async () => {
+  for (const pushed_at of [undefined, null, 'not-a-date']) {
+    const c = await runWith({ repo: { pushed_at } });
+    assert.ok(c.score.unknownDimensions.includes('maintenance-activity'), `pushed_at=${pushed_at}`);
+    assert.ok(c.score.maxAvailable < 40, 'an unmeasured dimension must leave the denominator');
+  }
+});
+
+// `{spdx_id: {}}` scored 2/5 as "declared ([object Object])" AND cleared the
+// unclear-licensing penalty: points and a clean bill for an unreadable value.
+test('ecosystem-radar: malformed licence metadata earns no points and clears no penalty', async () => {
+  for (const license of [{ spdx_id: {} }, { spdx_id: 42 }, { spdx_id: [] }]) {
+    const c = await runWith({ repo: { license } });
+    assert.ok(c.score.unknownDimensions.includes('license-and-provenance'), JSON.stringify(license));
+    assert.ok(c.riskPenalties.undetectable.includes('unclear-licensing'),
+      'an unreadable licence is not a licence we checked');
+    assert.ok(!c.riskPenalties.applied.includes('unclear-licensing'),
+      'nor is it a licence we established to be missing');
+  }
+});
+
+// GitHub sends `license: null` for a genuinely unlicensed repository. That
+// IS an answer, and must stay a REJECT rather than becoming unknown --
+// honesty about ignorance must not erase the facts actually established.
+test('ecosystem-radar: an explicit null licence remains a measured disqualifier', async () => {
+  const c = await runWith({ repo: { license: null } });
+  assert.ok(c.riskPenalties.applied.includes('unclear-licensing'));
+  assert.equal(c.classification, 'REJECT');
+  assert.ok(!c.score.unknownDimensions.includes('license-and-provenance'));
+});
+
+test('ecosystem-radar: absent topics and an absent archived flag are unknowns, not negatives', async () => {
+  const noTopics = await runWith({ repo: { topics: undefined } });
+  assert.ok(noTopics.score.unknownDimensions.includes('host-compatibility'),
+    'a topics array we never received is not a repository that declared no host');
+
+  const noArchived = await runWith({ repo: { archived: undefined } });
+  assert.ok(noArchived.riskPenalties.undetectable.includes('abandoned-maintenance'),
+    'an absent archived flag does not establish that a repository is maintained');
+  assert.ok(!noArchived.riskPenalties.applied.includes('abandoned-maintenance'));
+});
+
+// The client validates JSON syntax, not schema. A 200 carrying the wrong
+// shape was read as data: a measured absence of CI, and a source that
+// "found zero results" while `sourcesUnavailable` stayed at zero.
+test('ecosystem-radar: a valid response of the wrong SHAPE is a failed probe, not a measurement', async () => {
+  const c = await runWith({ ci: { unexpected: true } });
+  assert.ok(c.score.unknownDimensions.includes('ci-presence'));
+  assert.ok(c.probeFailures.some((f) => f.reason === 'unexpected-response-shape'));
+
+  const report = await runEcosystemRadar({
+    repoRoot: REPO_ROOT,
+    client: {
+      searchGithubRepositories: async () => ({ ok: true, json: { unexpected: true } }),
+      getGithubFileContent: async () => ({ ok: false, reason: 'not-found' }),
+    },
+  });
+  assert.equal(report.candidates.length, 0);
+  assert.ok(report.summary.sourcesUnavailable > 0,
+    'a source that returned something unreadable is unavailable, not empty');
+  assert.ok(report.sources.every((s) => s.status === 'SOURCE_UNAVAILABLE'));
+});
+
+// A bidi override survived into JSON.stringify(report) through the licence
+// breakdown signal while the top-level `license` beside it was sanitised.
+test('ecosystem-radar: every breakdown signal is sanitised and bounded, including in JSON output', async () => {
+  const RLO = '\u202E';
+  const report = await runEcosystemRadar({
+    repoRoot: REPO_ROOT,
+    client: {
+      searchGithubRepositories: async () => ({
+        ok: true,
+        json: { items: [repoFixture({ license: { spdx_id: `MIT${RLO}${'word '.repeat(200)}` } })] },
+      }),
+      getGithubFileContent: async () => ({ ok: false, reason: 'not-found' }),
+    },
+  });
+  const serialised = JSON.stringify(report);
+  assert.ok(!serialised.includes(RLO), 'no bidi override may reach the JSON output');
+  for (const r of Object.values(report.candidates[0].score.breakdown)) {
+    assert.ok(r.signal.length <= 90, 'every signal must be bounded');
+  }
+});
+
+// The code words host points as "declares ... as a target" precisely to mark
+// them as self-reported intent. That qualification lived only in a field the
+// report never printed.
+test('ecosystem-radar report: the per-dimension signals reach the text a human reads', async () => {
+  const client = {
+    searchGithubRepositories: async () => ({ ok: true, json: { items: [repoFixture()] } }),
+    getGithubFileContent: async (o, r, p) => (p === 'package.json'
+      ? { ok: true, json: { content: Buffer.from('{"scripts":{"test":"node --test"}}').toString('base64'), encoding: 'base64' } }
+      : { ok: true, json: [{ name: 'ci.yml' }] }),
+  };
+  const text = renderText(await runEcosystemRadar({ repoRoot: REPO_ROOT, client }));
+  assert.match(text, /host-compatibility: {0,2}\d+ \(declares Claude as a target/,
+    'ten points of SELF-DECLARED host affinity must not render as an unqualified total');
+  assert.match(text, /ci-presence: 6 \(CI workflows present\)/);
 });

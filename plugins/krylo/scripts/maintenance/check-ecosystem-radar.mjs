@@ -48,6 +48,17 @@ export function renderText(report) {
     lines.push(`         publisher: ${c.publisher} (${c.publisherType})   license: ${c.license}   stars: ${c.stars ?? 'n/a'}`);
     lines.push(`         maintenance: ${c.maintenanceSignal}`);
     lines.push(`         score: ${c.score.scored}/${c.score.maxAvailable} on measurable dimensions${c.deepInspected ? '' : ' (not deep-inspected)'}`);
+    // The per-dimension signals, not just the total. A review found that the
+    // code carefully words host compatibility as "declares Claude as a
+    // target" -- precisely to mark those ten points as SELF-REPORTED intent
+    // rather than verified compatibility -- and then the only output the
+    // workflow produces showed the aggregate and dropped every signal. A
+    // qualification that exists solely in a field nobody prints is not a
+    // qualification.
+    for (const [dim, r] of Object.entries(c.score.breakdown ?? {})) {
+      if (r.unknown) continue; // already listed under "not measurable here"
+      lines.push(`           - ${dim}: ${r.points} (${r.signal})`);
+    }
     if (c.score.unknownDimensions.length) lines.push(`         not measurable here: ${c.score.unknownDimensions.join(', ')}`);
     if (c.riskPenalties.applied.length) lines.push(`         risk: ${c.riskPenalties.applied.join(', ')}`);
     // Rendered right beside `risk:`, and deliberately so. The checker has

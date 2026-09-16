@@ -71,6 +71,33 @@ export const HUMAN_JUDGEMENT_DIMENSIONS = {
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /**
+ * One shared vocabulary for "is this value usable as a measurement?".
+ *
+ * Three independent reviews found the same defect seven times, and the
+ * reason it kept recurring is that there was no single place that answered
+ * this question: every scorer improvised its own check, and every
+ * improvisation defaulted to a confident value. `repo.topics` missing became
+ * "declares no host affinity". `pushed_at` unparseable became a measured
+ * zero in the denominator. `license.spdx_id` as an object became "declared
+ * ([object Object])" AND cleared the unclear-licensing penalty. A
+ * `package.json` containing the four bytes `null` parsed successfully and
+ * became "zero runtime dependencies".
+ *
+ * The rule these encode: transport success is not data validity, a parse is
+ * not a schema check, and an absent field is not a zero. A caller that
+ * cannot get a usable value from these must report `unknown`, never a
+ * number it made up.
+ */
+const usableString = (v) => (typeof v === 'string' && v.trim() !== '' ? v : null);
+const usableBoolean = (v) => (typeof v === 'boolean' ? v : null);
+const usableArray = (v) => (Array.isArray(v) ? v : null);
+/** A JSON object proper: not null, not an array, not a primitive. */
+const usableObject = (v) => (v !== null && typeof v === 'object' && !Array.isArray(v) ? v : null);
+
+/** The standard shape for a dimension that could not be measured. */
+const unmeasured = (why) => ({ points: 0, signal: why, unknown: true });
+
+/**
  * Risk penalties from design Section 16.4 that are undetectable for EVERY
  * candidate, because establishing them means reading a candidate's actual
  * runtime behaviour -- which this Radar deliberately never does, and which
@@ -134,11 +161,23 @@ function daysSince(iso) {
   return Number.isFinite(t) ? Math.floor((Date.now() - t) / MS_PER_DAY) : null;
 }
 
-/** Maintenance: recency of the last push, and whether the repo is archived. */
+/**
+ * Maintenance: recency of the last push, and whether the repo is archived.
+ *
+ * An absent or unparseable `pushed_at` is UNKNOWN, not a measured zero. The
+ * previous version returned `{points: 0, signal: 'unknown-last-push'}`
+ * without the `unknown` flag, so the honest-looking signal string sat on top
+ * of a fabricated denominator: an otherwise strong candidate scored 26/40
+ * where excluding the dimension it never measured gives 26/30, which clears
+ * the audit threshold. Printing the word "unknown" does not repair a number
+ * that should not have been in the total.
+ */
 function scoreMaintenance(repo) {
-  if (repo.archived) return { points: 0, signal: 'archived' };
+  // `archived === true` is a measurement. A non-boolean `archived` is not,
+  // and must not be read as "not archived" -- see detectRiskPenalties.
+  if (usableBoolean(repo.archived) === true) return { points: 0, signal: 'archived' };
   const age = daysSince(repo.pushed_at);
-  if (age === null) return { points: 0, signal: 'unknown-last-push' };
+  if (age === null) return unmeasured('last-push date absent or unparseable');
   if (age <= 30) return { points: 10, signal: `pushed ${age}d ago` };
   if (age <= 90) return { points: 7, signal: `pushed ${age}d ago` };
   if (age <= 365) return { points: 3, signal: `pushed ${age}d ago` };
@@ -151,7 +190,7 @@ function scoreMaintenance(repo) {
  * 16.4's dimension stays with the human reviewer.
  */
 function scoreCiPresence(deep) {
-  if (!deep.ciInspected) return { points: 0, signal: 'not inspected', unknown: true };
+  if (!deep.ciInspected) return unmeasured('CI probe did not run');
   return deep.hasCiWorkflows
     ? { points: 6, signal: 'CI workflows present' }
     : { points: 0, signal: 'no CI workflows detected' };
@@ -164,8 +203,11 @@ function scoreCiPresence(deep) {
  * mirror image of crediting it for dependencies nobody read.
  */
 function scoreDeclaredTestScript(deep) {
-  if (!deep.packageInspected || !deep.packagePresent) {
-    return { points: 0, signal: 'no root package.json to read', unknown: true };
+  if (!deep.packageInspected || !deep.packagePresent || usableBoolean(deep.hasTests) === null) {
+    return unmeasured('no readable root manifest');
+  }
+  if (deep.scopeLimited) {
+    return unmeasured('root manifest declares workspaces; member manifests are not read');
   }
   return deep.hasTests
     ? { points: 4, signal: 'declares a test script' }
@@ -187,27 +229,71 @@ function scoreDeclaredTestScript(deep) {
  * declared `krylo-architectural-fit` weight instead.
  */
 function scoreHostCompatibility(repo) {
-  const topics = Array.isArray(repo.topics) ? repo.topics.map((t) => String(t).toLowerCase()) : [];
+  // An ABSENT topics field and an EMPTY topics list are different facts. A
+  // repository that published no topics has told us nothing; one whose
+  // topics array we never received has told us nothing either, but the
+  // earlier code collapsed both into a measured zero via `: []`.
+  const topics = usableArray(repo.topics);
+  if (!topics) return unmeasured('topics unavailable');
+  const lowered = topics.map((t) => String(t).toLowerCase());
   let points = 0;
   const signals = [];
-  if (topics.some((t) => t.includes('claude'))) { points += 5; signals.push('declares Claude as a target'); }
-  if (topics.some((t) => t.includes('codex'))) { points += 5; signals.push('declares Codex as a target'); }
+  if (lowered.some((t) => t.includes('claude'))) { points += 5; signals.push('declares Claude as a target'); }
+  if (lowered.some((t) => t.includes('codex'))) { points += 5; signals.push('declares Codex as a target'); }
   if (points === 0) signals.push('declares no host affinity (silence, not a negative finding)');
   return { points, signal: signals.join(', ') };
 }
 
+/**
+ * Resolve the licence field into one of three states, because the code that
+ * consumed it was treating all three as the same thing.
+ *
+ * GitHub sends `license: null` for a repository with no detected licence --
+ * that is an ANSWER. A field that is absent entirely, or present but shaped
+ * wrongly (`{spdx_id: {}}`, `{spdx_id: 42}`), is NOT an answer, and the
+ * previous code scored the malformed case 2/5 as `declared ([object
+ * Object])` while also clearing the `unclear-licensing` penalty -- awarding
+ * points and a clean bill for a value it could not read.
+ */
+function resolveLicense(repo) {
+  if (!('license' in repo)) return { state: 'unavailable' };
+  if (repo.license === null) return { state: 'none' };
+  const obj = usableObject(repo.license);
+  if (!obj) return { state: 'unavailable' };
+  if (!('spdx_id' in obj) || obj.spdx_id === null) return { state: 'none' };
+  const spdx = usableString(obj.spdx_id);
+  if (!spdx) return { state: 'unavailable' };
+  if (spdx === 'NOASSERTION') return { state: 'none' };
+  return { state: 'declared', spdx };
+}
+
+const PERMISSIVE_SPDX = ['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', 'ISC'];
+
 function scoreLicense(repo) {
-  const spdx = repo.license?.spdx_id;
-  if (!spdx || spdx === 'NOASSERTION') return { points: 0, signal: 'no clear license' };
-  const permissive = ['MIT', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', 'ISC'];
-  return permissive.includes(spdx)
+  const license = resolveLicense(repo);
+  if (license.state === 'unavailable') return unmeasured('license metadata unavailable or malformed');
+  if (license.state === 'none') return { points: 0, signal: 'no clear license' };
+  // boundedText here too: this signal is built from a third-party string and
+  // is carried into the report's JSON output, which a review found was the
+  // one path where an unsanitised upstream value still survived.
+  const spdx = boundedText(license.spdx, 40);
+  return PERMISSIVE_SPDX.includes(license.spdx)
     ? { points: 5, signal: `permissive (${spdx})` }
     : { points: 2, signal: `declared (${spdx})` };
 }
 
 function scoreDependencyFootprint(deep) {
   if (!deep.packageInspected || !deep.packagePresent || deep.dependencyCount === null) {
-    return { points: 0, signal: 'not inspected', unknown: true };
+    return unmeasured('no readable root manifest');
+  }
+  // A workspace root declares the repository's LAYOUT, not its dependencies:
+  // `{"private": true, "workspaces": ["packages/*"]}` is a complete, valid
+  // manifest with zero dependencies of its own, while `packages/server`
+  // may declare a hundred and a postinstall hook. Scoring that a perfect
+  // 5/5 for "zero runtime dependencies" was the third recurrence of this
+  // whole family, found by a reviewer running the actual code.
+  if (deep.scopeLimited) {
+    return unmeasured('root manifest declares workspaces; member manifests are not read');
   }
   const n = deep.dependencyCount;
   if (n === 0) return { points: 5, signal: 'zero runtime dependencies' };
@@ -226,8 +312,16 @@ export function detectRiskPenalties(repo, deep) {
   const applied = [];
   const undetectable = [];
 
-  if (repo.archived) applied.push('abandoned-maintenance');
-  if (!repo.license?.spdx_id || repo.license.spdx_id === 'NOASSERTION') applied.push('unclear-licensing');
+  // Each penalty is THREE-state, not two. "Applied", "checked and absent",
+  // and "could not be checked" are different claims, and collapsing the
+  // last two is the single defect three reviews kept finding.
+  const archived = usableBoolean(repo.archived);
+  if (archived === true) applied.push('abandoned-maintenance');
+  else if (archived === null) undetectable.push('abandoned-maintenance');
+
+  const license = resolveLicense(repo);
+  if (license.state === 'none') applied.push('unclear-licensing');
+  else if (license.state === 'unavailable') undetectable.push('unclear-licensing');
 
   // Both of these are derived ONLY from package.json. An independent
   // Security Reviewer reproduced the bug this replaces: the old single
@@ -236,11 +330,21 @@ export function detectRiskPenalties(repo, deep) {
   // `undetectable` -- reading to a human as "checked, and clean". The
   // difference between "we checked" and "we never looked" is the entire
   // point of this function.
-  if (deep.packageInspected && deep.packagePresent) {
+  // Checked SEPARATELY per penalty rather than behind one shared condition:
+  // a review found that a payload with the manifest flags set but
+  // `dependencyCount === null` made the footprint DIMENSION unknown while
+  // this function silently cleared the footprint PENALTY. Two answers to
+  // the same question, from the same data, in the same run.
+  const manifestRead = Boolean(deep.packageInspected && deep.packagePresent);
+  if (manifestRead && usableBoolean(deep.hasInstallLifecycleScripts) !== null && !deep.scopeLimited) {
     if (deep.hasInstallLifecycleScripts) applied.push('install-lifecycle-scripts');
-    if (deep.dependencyCount !== null && deep.dependencyCount > 30) applied.push('excessive-dependency-footprint');
   } else {
-    undetectable.push('install-lifecycle-scripts', 'excessive-dependency-footprint');
+    undetectable.push('install-lifecycle-scripts');
+  }
+  if (manifestRead && deep.dependencyCount !== null && !deep.scopeLimited) {
+    if (deep.dependencyCount > 30) applied.push('excessive-dependency-footprint');
+  } else {
+    undetectable.push('excessive-dependency-footprint');
   }
 
   undetectable.push(...BEHAVIOURAL_PENALTIES);
@@ -335,6 +439,10 @@ async function deepInspect(owner, repo, client) {
     // root manifest", which is an answer about the REQUEST and not a
     // measurement of the candidate. See the not-found branch below.
     packagePresent: false,
+    // The manifest was read and is valid, but describes a workspace root
+    // rather than the code: its own dependency and script declarations say
+    // nothing about the member packages, which this Radar never fetches.
+    scopeLimited: false,
     hasCiWorkflows: false,
     hasInstallLifecycleScripts: false,
     dependencyCount: null,
@@ -344,8 +452,18 @@ async function deepInspect(owner, repo, client) {
 
   const workflows = await client.getGithubFileContent(owner, repo, '.github/workflows');
   if (workflows.ok) {
-    result.ciInspected = true;
-    result.hasCiWorkflows = Array.isArray(workflows.json) && workflows.json.length > 0;
+    // A 200 is not a valid response. The client validates JSON SYNTAX, not
+    // its schema, so `{ok: true, json: {unexpected: true}}` used to set
+    // ciInspected and report a measured ABSENCE of CI -- transport success
+    // read as data. A directory listing is an array or it is not a
+    // directory listing.
+    const listing = Array.isArray(workflows.json) ? workflows.json : null;
+    if (listing) {
+      result.ciInspected = true;
+      result.hasCiWorkflows = listing.length > 0;
+    } else {
+      result.probeFailures.push({ probe: '.github/workflows', reason: 'unexpected-response-shape' });
+    }
   } else if (workflows.reason === 'not-found') {
     result.ciInspected = true; // Answered: the directory does not exist.
   } else {
@@ -362,12 +480,38 @@ async function deepInspect(owner, repo, client) {
       result.probeFailures.push({ probe: 'package.json', reason: 'unparseable' });
       return result;
     }
-    const scripts = parsed && typeof parsed.scripts === 'object' && parsed.scripts !== null ? parsed.scripts : {};
-    const deps = parsed && typeof parsed.dependencies === 'object' && parsed.dependencies !== null ? parsed.dependencies : {};
+
+    // A PARSE is not a SCHEMA CHECK. Anyone can commit a package.json whose
+    // entire content is `null`, `false`, `[]`, or
+    // `{"dependencies": false, "scripts": 42}` -- all four parse cleanly,
+    // and the previous code's `typeof x === 'object'` guards then quietly
+    // substituted `{}` and reported a confident "zero runtime dependencies"
+    // and "declares no test script". That is a fabricated measurement from
+    // a file whose structure was never established, and it is directly
+    // publishable by any candidate.
+    const manifest = usableObject(parsed);
+    if (!manifest) {
+      result.probeFailures.push({ probe: 'package.json', reason: 'not-a-json-object' });
+      return result;
+    }
+
+    const scripts = 'scripts' in manifest ? usableObject(manifest.scripts) : {};
+    const deps = 'dependencies' in manifest ? usableObject(manifest.dependencies) : {};
+    const optionalDeps = 'optionalDependencies' in manifest ? usableObject(manifest.optionalDependencies) : {};
+    if (scripts === null || deps === null || optionalDeps === null) {
+      result.probeFailures.push({ probe: 'package.json', reason: 'malformed-manifest-fields' });
+      return result;
+    }
+
     result.packageInspected = true;
     result.packagePresent = true;
+    // A workspace root's own declarations do not describe the repository.
+    result.scopeLimited = Array.isArray(manifest.workspaces) && manifest.workspaces.length > 0;
     result.hasInstallLifecycleScripts = ['preinstall', 'install', 'postinstall', 'prepare'].some((k) => typeof scripts[k] === 'string');
-    result.dependencyCount = Object.keys(deps).length;
+    // optionalDependencies are installed by default and run the same install
+    // hooks; excluding them let a manifest with 31 of them and no
+    // `dependencies` score a perfect "zero runtime dependencies".
+    result.dependencyCount = new Set([...Object.keys(deps), ...Object.keys(optionalDeps)]).size;
     result.hasTests = typeof scripts.test === 'string' && scripts.test.trim() !== '';
   } else if (pkg.reason === 'not-found') {
     // The REQUEST was answered, but nothing about the candidate's
@@ -440,6 +584,14 @@ export function scoreCandidate(repo, deep) {
     maxAvailable += max;
   }
 
+  // Every `signal` is carried verbatim into the report's JSON output, and
+  // one of them (the licence) interpolates a third-party string. A review
+  // showed a bidi override surviving into `JSON.stringify(report)` through
+  // that path while the top-level `license` field beside it was sanitised.
+  // Bound them all here rather than trusting each producer to remember.
+  for (const key of Object.keys(breakdown)) {
+    breakdown[key] = { ...breakdown[key], signal: boundedText(breakdown[key].signal, 90) };
+  }
   return { scored, maxAvailable, breakdown, unknownDimensions };
 }
 
@@ -486,7 +638,17 @@ export async function runEcosystemRadar({ repoRoot, client, offline = false } = 
       sources.push({ id: q.id, status: 'SOURCE_UNAVAILABLE', detail: `search failed (${String(res.reason).slice(0, 40)})` });
       continue;
     }
-    const items = Array.isArray(res.json?.items) ? res.json.items : [];
+    // Same rule as the CI probe: transport success is not a valid response.
+    // `{ok: true, json: {unexpected: true}}` used to coerce to `[]` and be
+    // reported as a source that answered with zero results -- a source that
+    // returned something unreadable counted as a source that found nothing,
+    // and `sourcesUnavailable` stayed at zero so nothing in the report said
+    // the survey was incomplete.
+    const items = Array.isArray(res.json?.items) ? res.json.items : null;
+    if (!items) {
+      sources.push({ id: q.id, status: 'SOURCE_UNAVAILABLE', detail: 'search returned an unexpected response shape' });
+      continue;
+    }
     sources.push({ id: q.id, status: 'ok', found: items.length });
     for (const repo of items) {
       const key = String(repo?.full_name ?? '').toLowerCase();
@@ -507,7 +669,7 @@ export async function runEcosystemRadar({ repoRoot, client, offline = false } = 
     const name = String(repo?.name ?? '');
     const deep = (owner && name && index < maxDeep)
       ? await deepInspect(owner, name, effectiveClient)
-      : { ciInspected: false, packageInspected: false, packagePresent: false, hasCiWorkflows: false, hasInstallLifecycleScripts: false, dependencyCount: null, hasTests: false, probeFailures: [] };
+      : { ciInspected: false, packageInspected: false, packagePresent: false, scopeLimited: false, hasCiWorkflows: false, hasInstallLifecycleScripts: false, dependencyCount: null, hasTests: false, probeFailures: [] };
 
     const overlap = computeOverlap(repo, toolsRead.value);
     const penalties = detectRiskPenalties(repo, deep);
