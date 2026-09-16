@@ -173,6 +173,84 @@ function pathDirectorySet() {
  * location not itself listed in PATH -- is rejected outright, regardless
  * of where `where` was run from or what it returned first.
  */
+/**
+ * Windows' DEFAULT PATHEXT, used when the variable is absent or unusable.
+ * Order is significant: it is the precedence Windows applies when one
+ * directory holds several files with the same stem.
+ */
+const DEFAULT_PATHEXT = ['.COM', '.EXE', '.BAT', '.CMD'];
+
+function pathExtOrder(env = process.env) {
+  const raw = typeof env.PATHEXT === 'string' ? env.PATHEXT : '';
+  const parsed = raw.split(';').map((e) => e.trim().toUpperCase()).filter((e) => e.startsWith('.'));
+  return parsed.length > 0 ? parsed : DEFAULT_PATHEXT;
+}
+
+/**
+ * Choose the candidate Windows itself would execute.
+ *
+ * This replaces a rule that preferred `.cmd` over `.exe` unconditionally,
+ * which inverted Windows' own precedence and was found live: on a machine
+ * with both a standalone `codex.exe` (first on PATH) and an npm-installed
+ * `codex.cmd` (later on PATH), KRYLO resolved the `.cmd`, followed its shim
+ * to the npm package, and reported that package's version. The Codex
+ * runtime compatibility gate (docs/adr/0034) therefore VERIFIED one binary
+ * while the host would RUN a different one -- and, because the verified one
+ * happened to be a reviewed version, returned `trusted: true`. A control
+ * that validates an artefact other than the one in use is not a control,
+ * and this one failed open rather than closed.
+ *
+ * Windows resolves in two nested orders, and both matter:
+ *   1. PATH directory order -- the first directory holding any executable
+ *      match wins outright, whatever later directories contain.
+ *   2. PATHEXT order WITHIN that directory -- `.EXE` precedes `.CMD` under
+ *      the default `.COM;.EXE;.BAT;.CMD`, so a stem present as both is
+ *      executed as the `.exe`.
+ *
+ * `where` lists every name match, including extensionless files that
+ * Windows would never execute (npm ships a bash shim beside its `.cmd`),
+ * and its within-directory order is not PATHEXT order. So directory order
+ * is taken from `where`, and extension precedence is applied explicitly.
+ *
+ * The caller's PATH-membership filter is applied BEFORE this function and
+ * is deliberately untouched: a decoy in a non-PATH directory is already
+ * gone by the time these candidates arrive.
+ */
+export function selectAsWindowsWould(candidates, env = process.env) {
+  const order = pathExtOrder(env);
+  const rank = (file) => {
+    const ext = path.win32.extname(file).toUpperCase();
+    const i = order.indexOf(ext);
+    return i === -1 ? Number.POSITIVE_INFINITY : i;
+  };
+
+  // Directory order, as `where` reported it -- that is PATH order.
+  //
+  // Parsed with `path.win32` EXPLICITLY, not with the ambient platform's
+  // parser. This function implements Windows resolution semantics, and its
+  // inputs are always Windows paths; on a POSIX host `path.dirname` does not
+  // treat a backslash as a separator, so every candidate collapsed into one
+  // directory and the PATH-order rule silently stopped applying. Caught by
+  // CI on ubuntu, where the unit tests exercise this pure function.
+  const byDirectory = [];
+  for (const candidate of candidates) {
+    const dir = canonicalDir(path.win32.dirname(candidate));
+    let bucket = byDirectory.find((b) => b.dir === dir);
+    if (!bucket) { bucket = { dir, files: [] }; byDirectory.push(bucket); }
+    bucket.files.push(candidate);
+  }
+
+  for (const { files } of byDirectory) {
+    // Only extensions Windows would actually execute; an extensionless
+    // shim in this directory does not make the directory a match.
+    const runnable = files.filter((f) => Number.isFinite(rank(f)));
+    if (runnable.length === 0) continue;
+    runnable.sort((a, b) => rank(a) - rank(b));
+    return runnable[0];
+  }
+  return null;
+}
+
 function resolveOnPath(command) {
   if (path.isAbsolute(command) && fs.existsSync(command)) return command;
   try {
@@ -182,9 +260,7 @@ function resolveOnPath(command) {
     const pathDirs = pathDirectorySet();
     const candidates = allCandidates.filter((c) => pathDirs.has(canonicalDir(path.dirname(c))));
     if (candidates.length === 0) return null;
-    const cmdCandidate = candidates.find((c) => c.toLowerCase().endsWith('.cmd'));
-    const exeCandidate = candidates.find((c) => c.toLowerCase().endsWith('.exe'));
-    return cmdCandidate || exeCandidate || candidates[0] || null;
+    return selectAsWindowsWould(candidates);
   } catch {
     return null;
   }

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { platformSpawnTarget, resolveWindowsShimTarget } from '../../scripts/lib/spawn-platform.mjs';
+import { platformSpawnTarget, resolveWindowsShimTarget, selectAsWindowsWould } from '../../scripts/lib/spawn-platform.mjs';
 
 test('on POSIX, the command and args pass through unchanged', { skip: os.platform() === 'win32' }, () => {
   const result = platformSpawnTarget('claude', ['--version']);
@@ -323,5 +323,121 @@ test('resolveWindowsShimTarget fails closed (returns null) on an unrecognized sh
     assert.equal(resolveWindowsShimTarget(badShim), null);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+
+// ---------------------------------------------------------------------------
+// Windows executable-resolution ORDER.
+//
+// Found live: on a machine with a standalone `codex.exe` first on PATH and an
+// npm-installed `codex.cmd` later on PATH, this module preferred the `.cmd`
+// unconditionally, followed its shim to the npm package, and reported that
+// package's version. The Codex runtime compatibility gate
+// (docs/adr/0034-codex-runtime-compatibility-gate.md) therefore VERIFIED one
+// binary while the host would RUN another, and returned `trusted: true`
+// because the binary it happened to verify carried a reviewed version.
+//
+// These tests pin the ORDERING RULE rather than today's outcome, because a
+// resolver that merely happens to agree with Windows on one machine is
+// exactly what produced the defect.
+// ---------------------------------------------------------------------------
+
+test('PATH directory order decides first: the earliest directory wins outright', () => {
+  const chosen = selectAsWindowsWould([
+    'C:\\first\\tool.exe',
+    'C:\\second\\tool.com',
+  ], { PATHEXT: '.COM;.EXE;.BAT;.CMD' });
+  assert.equal(chosen, 'C:\\first\\tool.exe',
+    'a .com later on PATH must not beat a .exe in an earlier directory, even though .COM outranks .EXE');
+});
+
+test('PATHEXT precedence decides within one directory, and .EXE outranks .CMD', () => {
+  // The exact shape of the live defect: both files in one directory.
+  const chosen = selectAsWindowsWould([
+    'C:\\tools\\tool.cmd',
+    'C:\\tools\\tool.exe',
+  ], { PATHEXT: '.COM;.EXE;.BAT;.CMD' });
+  assert.equal(chosen, 'C:\\tools\\tool.exe',
+    'the previous rule returned the .cmd here regardless of PATHEXT');
+});
+
+test('a file with no runnable extension does not make its directory a match', () => {
+  // npm ships an extensionless bash shim beside its .cmd, and `where` lists
+  // it. Windows will not execute it, so it must not shadow a later .exe.
+  const chosen = selectAsWindowsWould([
+    'C:\\npmdir\\tool',
+    'C:\\other\\tool.exe',
+  ], { PATHEXT: '.COM;.EXE;.BAT;.CMD' });
+  assert.equal(chosen, 'C:\\other\\tool.exe');
+});
+
+test('an extensionless file alongside a runnable one in the same directory is skipped', () => {
+  const chosen = selectAsWindowsWould([
+    'C:\\npmdir\\tool',
+    'C:\\npmdir\\tool.cmd',
+  ], { PATHEXT: '.COM;.EXE;.BAT;.CMD' });
+  assert.equal(chosen, 'C:\\npmdir\\tool.cmd');
+});
+
+test('the host PATHEXT is honoured, not a hardcoded order', () => {
+  const candidates = ['C:\\tools\\tool.cmd', 'C:\\tools\\tool.exe'];
+  assert.equal(selectAsWindowsWould(candidates, { PATHEXT: '.CMD;.EXE' }), 'C:\\tools\\tool.cmd',
+    'a host that really does rank .CMD first must be followed');
+  assert.equal(selectAsWindowsWould(candidates, { PATHEXT: '.EXE;.CMD' }), 'C:\\tools\\tool.exe');
+});
+
+test('an absent or unusable PATHEXT falls back to the Windows default, not to nothing', () => {
+  const candidates = ['C:\\tools\\tool.cmd', 'C:\\tools\\tool.exe'];
+  for (const env of [{}, { PATHEXT: '' }, { PATHEXT: 'garbage;;;' }]) {
+    assert.equal(selectAsWindowsWould(candidates, env), 'C:\\tools\\tool.exe',
+      `PATHEXT=${JSON.stringify(env.PATHEXT)} must still resolve using the documented default order`);
+  }
+});
+
+test('no runnable candidate resolves to null rather than to a guess', () => {
+  assert.equal(selectAsWindowsWould([], { PATHEXT: '.EXE' }), null);
+  assert.equal(selectAsWindowsWould(['C:\\dir\\tool', 'C:\\dir\\tool.txt'], { PATHEXT: '.EXE' }), null,
+    'a name match Windows would not execute is not a resolution');
+});
+
+test('directory comparison is case-insensitive, as Windows paths are', () => {
+  const chosen = selectAsWindowsWould([
+    'C:\\Tools\\tool.cmd',
+    'C:\\TOOLS\\tool.exe',
+  ], { PATHEXT: '.COM;.EXE;.BAT;.CMD' });
+  assert.equal(chosen, 'C:\\TOOLS\\tool.exe',
+    'these are one directory, so PATHEXT precedence applies rather than directory order');
+});
+
+// End to end through the real `where` lookup and the real PATH-membership
+// filter, with disposable fixtures -- the same pattern the shim test above
+// uses, and the only way to prove the production path agrees with the rule.
+test('end to end: a real .exe earlier on PATH beats a real .cmd later on PATH', { skip: os.platform() !== 'win32' }, () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-resolve-order-'));
+  const early = path.join(root, 'early');
+  const late = path.join(root, 'late');
+  fs.mkdirSync(early);
+  fs.mkdirSync(late);
+  const stem = `krylo-order-probe-${process.pid}`;
+  // Contents are irrelevant: nothing is executed, only resolved.
+  fs.writeFileSync(path.join(early, `${stem}.exe`), '');
+  fs.writeFileSync(path.join(late, `${stem}.cmd`), `@echo off\r\n"${process.execPath}" %*\r\n`);
+
+  const savedPath = process.env.PATH;
+  try {
+    process.env.PATH = `${early};${late};${savedPath}`;
+    const target = platformSpawnTarget(stem, ['--version']);
+    assert.ok(target, 'the fixture must resolve at all');
+    // Compared as REAL paths, not as raw strings: os.tmpdir() can return an
+    // 8.3 short path (RUNNER~1) on a GitHub Windows runner while `where`
+    // returns the long one, and an earlier version of this assertion failed
+    // on CI for that reason alone while the resolution itself was correct.
+    const real = (f) => fs.realpathSync.native(f).toLowerCase();
+    assert.equal(real(target.command), real(path.join(early, `${stem}.exe`)),
+      'the earlier .exe is what Windows would run, so it is what KRYLO must verify');
+  } finally {
+    process.env.PATH = savedPath;
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
