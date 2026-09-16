@@ -706,8 +706,8 @@
     },
     {
       "path": "docs/adr/0039-monthly-ecosystem-radar.md",
-      "bytes": 14213,
-      "sha256": "f88d61db106d3e08c93ac3d8712683d2c4dc87f36a30bf7b5db86ca2857db0d2"
+      "bytes": 17266,
+      "sha256": "72e94be39740bbc2f9e995ca530bf1193a9e7a340bca48879024684dd254454c"
     },
     {
       "path": "docs/adr/README.md",
@@ -1291,8 +1291,8 @@
     },
     {
       "path": "plugins/krylo/scripts/maintenance/check-ecosystem-radar.mjs",
-      "bytes": 6369,
-      "sha256": "95b79c6afa10d4166ba529ac5586a2f392d2b988ab88711d6070d5ac61bde404"
+      "bytes": 7061,
+      "sha256": "8da84d47778ecce7907ad767e012d338f3eee9b2f7ea2a943555fe810b8deafa"
     },
     {
       "path": "plugins/krylo/scripts/maintenance/check-ecosystem.mjs",
@@ -1326,8 +1326,8 @@
     },
     {
       "path": "plugins/krylo/scripts/maintenance/checks/ecosystem-radar.mjs",
-      "bytes": 27471,
-      "sha256": "01ce4a00c38aefeb79435d276618128a82694e99f868f3e71cff2b3211a7bfe3"
+      "bytes": 36327,
+      "sha256": "3230964a9e15a038e4cd1fb8f2b8416c40d2582085fb24998fae3cb0b2fc01e0"
     },
     {
       "path": "plugins/krylo/scripts/maintenance/checks/internal-drift.mjs",
@@ -1731,8 +1731,8 @@
     },
     {
       "path": "plugins/krylo/tests/maintenance/ecosystem-radar.test.mjs",
-      "bytes": 28234,
-      "sha256": "d80a0ca0a89090369670b940fbca14ab9c4ec2aa8d34eb5ab2824bbdd6f702e6"
+      "bytes": 37733,
+      "sha256": "fabbb1d9d53241fae3ee72fb055cd1b29daed321fa69bd4761d3d41e7248dfa5"
     },
     {
       "path": "plugins/krylo/tests/maintenance/internal-drift.test.mjs",
