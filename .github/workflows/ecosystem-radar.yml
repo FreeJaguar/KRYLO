@@ -1,0 +1,66 @@
+name: ecosystem-radar
+
+# Monthly Ecosystem Radar (docs/adr/0039-monthly-ecosystem-radar.md,
+# docs/process/MULTI_HOST_CODEX_MAINTENANCE_DESIGN.md Section 16).
+#
+# Looks for tools that might materially improve KRYLO and triages WHICH ONES
+# A HUMAN SHOULD LOOK AT. Strictly read-only: it never installs, executes,
+# clones, or builds a candidate, never writes a repository file, never opens
+# a pull request or an issue, and never changes catalog/tools.json.
+# Discovery is not review, and nothing this workflow emits confers trust.
+#
+# Deliberately monthly rather than weekly: unlike upstream-watch.yml, which
+# tracks projects KRYLO has already reviewed, this one surveys the wider
+# ecosystem, where a month's change is the smallest interval that carries
+# real signal instead of noise.
+#
+# Never triggered by push or pull_request, and exits 0 even when candidates
+# are found -- a candidate is an input to human review, never a build
+# failure, so this can never block a PR or a release.
+
+on:
+  schedule:
+    - cron: "40 6 2 * *" # monthly, 2nd of the month, 06:40 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecosystem-radar-${{ github.workflow }}
+  cancel-in-progress: true
+
+jobs:
+  radar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Run Monthly Ecosystem Radar (read-only)
+        # Explicit exit-code capture rather than relying on the shell's
+        # pipefail default, for the reason ecosystem-maintenance.yml
+        # documents: piping into tee reports tee's status and would mask a
+        # real internal failure.
+        run: |
+          set +e
+          node plugins/krylo/scripts/maintenance/check-ecosystem-radar.mjs > radar.txt
+          code=$?
+          # Fenced: the report embeds candidate repository names and
+          # descriptions written by third parties, and the job summary
+          # renders as Markdown. Same hardening upstream-watch.yml applies
+          # for the same reason.
+          { echo '```text'; cat radar.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          cat radar.txt
+          exit "$code"
+      - name: Upload radar report artifact
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ecosystem-radar-report
+          path: radar.txt
+          if-no-files-found: error
+          retention-days: 90

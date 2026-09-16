@@ -106,7 +106,19 @@ async function fetchOnce(url, { acceptHeader }) {
       currentUrl = new URL(location, currentUrl).toString();
       continue;
     }
-    if (response.status === 429) { clearTimeout(timer); return { ok: false, reason: 'rate-limited', status: response.status }; }
+    // GitHub reports an exhausted PRIMARY rate limit as 403 with
+    // x-ratelimit-remaining: 0, and only secondary limits as 429. Without
+    // this branch the single most likely failure mode for an
+    // unauthenticated scheduled job -- running out of anonymous quota --
+    // surfaced as the catch-all `unexpected-status`, which reads like a
+    // broken endpoint rather than "come back later". The distinction
+    // matters downstream: a rate limit means the probe did not run, which
+    // the Ecosystem Radar must report as an unknown rather than a finding.
+    if (response.status === 429
+      || (response.status === 403 && response.headers.get('x-ratelimit-remaining') === '0')) {
+      clearTimeout(timer);
+      return { ok: false, reason: 'rate-limited', status: response.status };
+    }
     if (response.status >= 500) { clearTimeout(timer); return { ok: false, reason: 'server-error', status: response.status }; }
     if (response.status === 404) { clearTimeout(timer); return { ok: false, reason: 'not-found', status: response.status }; }
     if (response.status !== 200) { clearTimeout(timer); return { ok: false, reason: 'unexpected-status', status: response.status }; }
@@ -153,24 +165,82 @@ function encodeRepoSegment(segment) {
   return encodeURIComponent(segment);
 }
 
+/**
+ * Reject a path segment that could change which ENDPOINT is addressed.
+ *
+ * `encodeURIComponent('..')` returns `'..'` unchanged, because a dot is an
+ * unreserved character -- so a dot-segment survives encoding and the URL
+ * parser then normalises it away, walking the request out of `/repos/`
+ * entirely. Measured: owner `..` and repo `..` turn
+ * `/repos/{owner}/{repo}/contents/x` into `/contents/x`, a different API
+ * endpoint. The host allowlist still holds, so this is not an SSRF, but the
+ * request no longer asks what the caller asked.
+ *
+ * These names arrive from third-party search results and, for the Weekly
+ * Upstream Watch, from `uses:` text in workflow files this project treats
+ * as untrusted input. No real GitHub owner or repository is named `.` or
+ * `..`, so refusing costs nothing and closes the class rather than the
+ * instance: any segment that is only dots is rejected.
+ */
+function invalidRepoSegment(...segments) {
+  return segments.some((seg) => {
+    const value = String(seg ?? '');
+    return value === '' || /^\.+$/.test(value);
+  });
+}
+
 /** GET /repos/{owner}/{repo}/releases/latest -- the newest non-prerelease, non-draft release. */
 export async function getLatestGithubRelease(owner, repo) {
+  if (invalidRepoSegment(owner, repo)) return { ok: false, reason: 'invalid-repo-segment' };
   return fetchUpstreamJson(`https://api.github.com/repos/${encodeRepoSegment(owner)}/${encodeRepoSegment(repo)}/releases/latest`);
 }
 
 /** GET /repos/{owner}/{repo}/tags -- used when a repo has no formal "release", only tags. */
 export async function getGithubTags(owner, repo) {
+  if (invalidRepoSegment(owner, repo)) return { ok: false, reason: 'invalid-repo-segment' };
   return fetchUpstreamJson(`https://api.github.com/repos/${encodeRepoSegment(owner)}/${encodeRepoSegment(repo)}/tags`);
 }
 
 /** GET /repos/{owner}/{repo}/releases/tags/{tag} -- resolve one exact known tag (e.g. the pinned floor). */
 export async function getGithubReleaseByTag(owner, repo, tag) {
+  if (invalidRepoSegment(owner, repo)) return { ok: false, reason: 'invalid-repo-segment' };
   return fetchUpstreamJson(`https://api.github.com/repos/${encodeRepoSegment(owner)}/${encodeRepoSegment(repo)}/releases/tags/${encodeURIComponent(tag)}`);
 }
 
 /** GET /repos/{owner}/{repo}/commits/{ref} -- resolve a tag/branch ref to its exact commit SHA. */
 export async function getGithubCommitForRef(owner, repo, ref) {
+  if (invalidRepoSegment(owner, repo)) return { ok: false, reason: 'invalid-repo-segment' };
   return fetchUpstreamJson(`https://api.github.com/repos/${encodeRepoSegment(owner)}/${encodeRepoSegment(repo)}/commits/${encodeURIComponent(ref)}`);
+}
+
+/**
+ * GET /search/repositories -- candidate DISCOVERY for the Monthly Ecosystem
+ * Radar (docs/adr/0039-monthly-ecosystem-radar.md). The query comes from the
+ * reviewed source catalog, never from arbitrary input, and is
+ * percent-encoded regardless. Unauthenticated search is rate-limited to 10
+ * requests per minute, which a monthly job with a handful of reviewed
+ * queries stays far inside; exceeding it surfaces as a normal
+ * `{ok:false, reason}` rather than an empty result set.
+ */
+export async function searchGithubRepositories(query, { perPage = 20, sort = 'updated' } = {}) {
+  const bounded = Math.min(Math.max(Number(perPage) || 1, 1), 50);
+  const url = `https://api.github.com/search/repositories?q=${encodeURIComponent(query)}`
+    + `&sort=${encodeURIComponent(sort)}&order=desc&per_page=${bounded}`;
+  return fetchUpstreamJson(url);
+}
+
+/**
+ * GET /repos/{owner}/{repo}/contents/{path} -- used only to read a
+ * candidate's own `package.json` METADATA (its declared lifecycle scripts
+ * and dependency count). The file is parsed as data and never executed, and
+ * nothing else about a candidate is ever fetched.
+ */
+export async function getGithubFileContent(owner, repo, filePath) {
+  if (invalidRepoSegment(owner, repo)) return { ok: false, reason: 'invalid-repo-segment' };
+  const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+  return fetchUpstreamJson(
+    `https://api.github.com/repos/${encodeRepoSegment(owner)}/${encodeRepoSegment(repo)}/contents/${encodedPath}`,
+  );
 }
 
 /**
@@ -184,6 +254,7 @@ export async function getGithubCommitForRef(owner, repo, ref) {
  * percent-encoded, so each ref is encoded separately around it.
  */
 export async function getGithubCompare(owner, repo, base, head) {
+  if (invalidRepoSegment(owner, repo)) return { ok: false, reason: 'invalid-repo-segment' };
   const range = `${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
   return fetchUpstreamJson(`https://api.github.com/repos/${encodeRepoSegment(owner)}/${encodeRepoSegment(repo)}/compare/${range}`);
 }
