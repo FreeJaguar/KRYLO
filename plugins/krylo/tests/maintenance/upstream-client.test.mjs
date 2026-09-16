@@ -5,7 +5,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { fetchUpstreamJson, getGithubCommitForRef } from '../../scripts/lib/upstream-client.mjs';
+import {
+  fetchUpstreamJson,
+  getGithubCommitForRef,
+  searchGithubRepositories,
+  getGithubFileContent,
+} from '../../scripts/lib/upstream-client.mjs';
 
 test('allowed domain (api.github.com): a normal 200 JSON response is returned', async (t) => {
   t.mock.method(globalThis, 'fetch', async () => new Response(JSON.stringify({ tag_name: 'v1.0.0' }), { status: 200 }));
@@ -265,4 +270,87 @@ test('a rate-limited response is not retried', async (t) => {
   }));
   await fetchUpstreamJson('https://api.github.com/repos/x/y/contents/package.json');
   assert.equal(fetchMock.mock.callCount(), 1, 'no retry may follow an actual HTTP response');
+});
+
+
+// The two functions the Ecosystem Radar added to this client had no tests at
+// all, although `searchGithubRepositories` carries the only numeric bound in
+// that entire subsystem and both build URLs from candidate-controlled
+// strings. A review named the gap; these close it.
+
+test('searchGithubRepositories clamps perPage, so a policy cannot widen the blast radius', async (t) => {
+  const seen = [];
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    seen.push(String(url));
+    return new Response(JSON.stringify({ items: [] }), { status: 200 });
+  });
+  for (const [requested, expected] of [[15, 15], [0, 1], [-5, 1], [999, 50], [Number.NaN, 1], [undefined, 20]]) {
+    seen.length = 0;
+    await searchGithubRepositories('topic:mcp-server', { perPage: requested });
+    const got = new URL(seen[0]).searchParams.get('per_page');
+    assert.equal(got, String(expected), `perPage=${requested} must resolve to ${expected}`);
+  }
+});
+
+test('searchGithubRepositories percent-encodes the query rather than splicing it into the URL', async (t) => {
+  let seen = '';
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    seen = String(url);
+    return new Response(JSON.stringify({ items: [] }), { status: 200 });
+  });
+  await searchGithubRepositories('topic:x&per_page=100&q=evil', { perPage: 5 });
+  const parsed = new URL(seen);
+  assert.equal(parsed.searchParams.get('per_page'), '5',
+    'a query string cannot smuggle its own per_page past the clamp');
+  assert.equal(parsed.searchParams.get('q'), 'topic:x&per_page=100&q=evil',
+    'the whole query must arrive as ONE parameter value');
+});
+
+// owner/repo reach this function from third-party search results, so a
+// candidate chooses them. They must not be able to leave their path segment.
+test('getGithubFileContent keeps candidate-controlled names inside their path segment', async (t) => {
+  let seen = '';
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    seen = String(url);
+    return new Response(JSON.stringify({ content: '' }), { status: 200 });
+  });
+  // A dot-only segment survives encodeURIComponent unchanged and is then
+  // normalised away by the URL parser, walking the request out of /repos/.
+  // Measured before the fix: owner `..` + repo `..` turned
+  // /repos/{owner}/{repo}/contents/x into /contents/x.
+  const escaped = await getGithubFileContent('..', '..', 'package.json');
+  assert.equal(escaped.ok, false);
+  assert.equal(escaped.reason, 'invalid-repo-segment');
+  assert.equal(seen, '', 'and the request must never be made at all');
+
+  await getGithubFileContent('owner', 'repo', 'package.json');
+  const parsed = new URL(seen);
+  assert.equal(parsed.hostname, 'api.github.com', 'the host must not move');
+  assert.ok(parsed.pathname.startsWith('/repos/'), 'nor may the path escape /repos/');
+});
+
+test('every /repos endpoint refuses a dot-only owner or repository name', async (t) => {
+  const fetchMock = t.mock.method(globalThis, 'fetch', async () => new Response('{}', { status: 200 }));
+  const calls = [
+    () => getGithubFileContent('..', 'repo', 'package.json'),
+    () => getGithubFileContent('owner', '.', 'package.json'),
+    () => getGithubCommitForRef('...', 'repo', 'main'),
+  ];
+  for (const call of calls) {
+    const res = await call();
+    assert.equal(res.ok, false);
+    assert.equal(res.reason, 'invalid-repo-segment');
+  }
+  assert.equal(fetchMock.mock.callCount(), 0, 'no request may leave the process for any of them');
+});
+
+test('getGithubFileContent encodes a nested file path segment by segment', async (t) => {
+  let seen = '';
+  t.mock.method(globalThis, 'fetch', async (url) => {
+    seen = String(url);
+    return new Response(JSON.stringify([]), { status: 200 });
+  });
+  await getGithubFileContent('owner', 'repo', '.github/workflows');
+  assert.ok(String(seen).endsWith('/repos/owner/repo/contents/.github/workflows'),
+    'the separator between segments must stay a real path separator');
 });

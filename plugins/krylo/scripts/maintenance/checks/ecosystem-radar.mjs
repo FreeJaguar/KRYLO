@@ -206,8 +206,10 @@ function scoreDeclaredTestScript(deep) {
   if (!deep.packageInspected || !deep.packagePresent || usableBoolean(deep.hasTests) === null) {
     return unmeasured('no readable root manifest');
   }
-  if (deep.scopeLimited) {
-    return unmeasured('root manifest declares workspaces; member manifests are not read');
+  if (deep.scopeLimited || deep.scopeUnverified) {
+    return unmeasured(deep.scopeLimited
+      ? 'workspace root: member manifests are not read'
+      : 'workspace markers unreadable, so the root manifest scope is unestablished');
   }
   return deep.hasTests
     ? { points: 4, signal: 'declares a test script' }
@@ -292,8 +294,10 @@ function scoreDependencyFootprint(deep) {
   // may declare a hundred and a postinstall hook. Scoring that a perfect
   // 5/5 for "zero runtime dependencies" was the third recurrence of this
   // whole family, found by a reviewer running the actual code.
-  if (deep.scopeLimited) {
-    return unmeasured('root manifest declares workspaces; member manifests are not read');
+  if (deep.scopeLimited || deep.scopeUnverified) {
+    return unmeasured(deep.scopeLimited
+      ? 'workspace root: member manifests are not read'
+      : 'workspace markers unreadable, so the root manifest scope is unestablished');
   }
   const n = deep.dependencyCount;
   if (n === 0) return { points: 5, signal: 'zero runtime dependencies' };
@@ -336,12 +340,12 @@ export function detectRiskPenalties(repo, deep) {
   // this function silently cleared the footprint PENALTY. Two answers to
   // the same question, from the same data, in the same run.
   const manifestRead = Boolean(deep.packageInspected && deep.packagePresent);
-  if (manifestRead && usableBoolean(deep.hasInstallLifecycleScripts) !== null && !deep.scopeLimited) {
+  if (manifestRead && usableBoolean(deep.hasInstallLifecycleScripts) !== null && !deep.scopeLimited && !deep.scopeUnverified) {
     if (deep.hasInstallLifecycleScripts) applied.push('install-lifecycle-scripts');
   } else {
     undetectable.push('install-lifecycle-scripts');
   }
-  if (manifestRead && deep.dependencyCount !== null && !deep.scopeLimited) {
+  if (manifestRead && deep.dependencyCount !== null && !deep.scopeLimited && !deep.scopeUnverified) {
     if (deep.dependencyCount > 30) applied.push('excessive-dependency-footprint');
   } else {
     undetectable.push('excessive-dependency-footprint');
@@ -365,7 +369,7 @@ export function detectRiskPenalties(repo, deep) {
  *
  * WATCH is the honest default for everything else.
  */
-export function classifyCandidate({ scored, maxAvailable, penalties, overlap, fullyInspected = false }) {
+export function classifyCandidate({ scored, maxAvailable, penalties, overlap, fullyInspected = false, unknownDimensions = ['unspecified'] }) {
   // A hard disqualifier is checked BEFORE trust-catalog membership, and on
   // purpose: an already-reviewed tool that has since been archived or lost
   // its license is the most important thing this run could tell a human, and
@@ -387,21 +391,48 @@ export function classifyCandidate({ scored, maxAvailable, penalties, overlap, fu
   if (penalties.applied.includes('install-lifecycle-scripts')) {
     return { classification: 'WATCH', rationale: 'declares install lifecycle scripts, which this project treats as a material supply-chain concern; not rejected outright, but not worth a human audit slot ahead of cleaner candidates' };
   }
+  // Nothing measurable at all. The fall-through used to describe this as
+  // "scores 0/0 ... recorded but not worth a human audit slot yet", which
+  // reads as a candidate that did poorly rather than one nothing is known
+  // about -- the same over-claim as everywhere else in this module, in
+  // prose rather than in a number. Reachable now that the metadata
+  // dimensions can also be unmeasured.
+  if (maxAvailable === 0) {
+    return {
+      classification: 'WATCH',
+      rationale: 'none of the measurable dimensions could be measured for this candidate, so this is a record that it was seen, not an assessment of it',
+    };
+  }
   const ratio = maxAvailable > 0 ? scored / maxAvailable : 0;
   if (ratio >= 0.7) {
     // A ratio over FEWER dimensions is easier to max out, so without this
-    // guard the un-inspected candidates outrank the inspected ones -- a
-    // scoring model that rewards knowing less about a candidate, which is
-    // the opposite of triage. A candidate whose inspection did not COMPLETE
-    // -- including one where only half the probes succeeded -- can reach
-    // WATCH on what was measured, never AUDIT_RECOMMENDED. The parameter
-    // defaults to the restrictive value on purpose: this function is
-    // exported, and a caller that forgets the field must not silently
-    // disable the guard that exists to stop exactly this.
-    if (!fullyInspected) {
+    // guard the candidates we know LESS about outrank the ones we know
+    // more about -- a scoring model that rewards ignorance, which is the
+    // opposite of triage.
+    //
+    // The guard keys on MEASUREMENT completeness, not probe completion, and
+    // that distinction is the whole finding. An earlier version checked only
+    // whether the two network probes had run. Then a later fix correctly
+    // made the metadata dimensions (maintenance, host, licence) capable of
+    // being unknown too -- and instantly reopened the hole through a new
+    // door: a candidate with both probes green but three metadata
+    // dimensions missing scored a perfect 15/15 and outranked a
+    // fully-measured 39/40. Reproduced, not reasoned about.
+    //
+    // Keying on `unknownDimensions` closes the family rather than the
+    // instance: it no longer matters WHICH dimension becomes unmeasurable,
+    // now or in any future change. An unknown can never buy a promotion.
+    // Both parameters default to the restrictive value because this
+    // function is exported, and a caller that forgets a field must not
+    // silently disable the guard that exists to stop exactly this.
+    const unknowns = Array.isArray(unknownDimensions) ? unknownDimensions : ['unspecified'];
+    if (!fullyInspected || unknowns.length > 0) {
+      const missing = unknowns.length > 0
+        ? `${unknowns.length} of the measurable dimensions could not be measured here (${unknowns.join(', ')})`
+        : 'the deep inspection did not complete';
       return {
         classification: 'WATCH',
-        rationale: `scores ${scored}/${maxAvailable}, but only on the dimensions available without a deep inspection; a partial look cannot justify spending a human audit slot, so this is held at WATCH rather than promoted on thinner evidence`,
+        rationale: `scores ${scored}/${maxAvailable}, but ${missing}; a ratio computed over fewer dimensions is easier to max out, so this is held at WATCH rather than promoted above candidates that were measured in full`,
       };
     }
     return { classification: 'AUDIT_RECOMMENDED', rationale: `scores ${scored}/${maxAvailable} on the measurable dimensions; worth a human look, which is the strongest claim this triage can make` };
@@ -443,6 +474,10 @@ async function deepInspect(owner, repo, client) {
     // rather than the code: its own dependency and script declarations say
     // nothing about the member packages, which this Radar never fetches.
     scopeLimited: false,
+    // A monorepo marker file could not be read, so we do not know whether
+    // the root manifest represents the repository. Treated exactly like
+    // scopeLimited by every consumer -- unknown, not absent.
+    scopeUnverified: false,
     hasCiWorkflows: false,
     hasInstallLifecycleScripts: false,
     dependencyCount: null,
@@ -506,7 +541,14 @@ async function deepInspect(owner, repo, client) {
     result.packageInspected = true;
     result.packagePresent = true;
     // A workspace root's own declarations do not describe the repository.
-    result.scopeLimited = Array.isArray(manifest.workspaces) && manifest.workspaces.length > 0;
+    // ANY shape, not just npm's array. yarn uses
+    // `{"workspaces": {"packages": [...]}}`, and a review showed the
+    // array-only check handing yarn, pnpm and lerna roots a perfect 5/5
+    // "zero runtime dependencies" -- the same over-claim as before, narrower
+    // and directly declarable by the candidate. pnpm and lerna keep the
+    // declaration outside package.json entirely, which is why the two
+    // marker files are probed below rather than inferred from here.
+    result.scopeLimited = 'workspaces' in manifest;
     result.hasInstallLifecycleScripts = ['preinstall', 'install', 'postinstall', 'prepare'].some((k) => typeof scripts[k] === 'string');
     // optionalDependencies are installed by default and run the same install
     // hooks; excluding them let a manifest with 31 of them and no
@@ -541,6 +583,24 @@ async function deepInspect(owner, repo, client) {
     result.probeFailures.push({ probe: 'package.json', reason: pkg.reason ?? 'unknown' });
   }
 
+  // pnpm and lerna declare their workspaces in their OWN files, so no
+  // inspection of package.json can see them. Two bounded extra reads, only
+  // for candidates that already earned a deep-inspection slot, turn "we
+  // assumed this root represents the repository" into something checked.
+  // A failure here is not treated as absence: an unreadable marker leaves
+  // the scope unestablished, which is what `scopeUnverified` records.
+  if (result.packagePresent && !result.scopeLimited) {
+    for (const marker of ['pnpm-workspace.yaml', 'lerna.json']) {
+      const found = await client.getGithubFileContent(owner, repo, marker);
+      if (found.ok) { result.scopeLimited = true; break; }
+      if (found.reason !== 'not-found') {
+        result.scopeUnverified = true;
+        result.probeFailures.push({ probe: marker, reason: found.reason ?? 'unknown' });
+        break;
+      }
+    }
+  }
+
   return result;
 }
 
@@ -552,6 +612,12 @@ export function isFullyInspected(deep) {
 /** Overlap with what KRYLO has already reviewed (design Section 16.5). */
 export function computeOverlap(repo, toolsCatalog) {
   const full = String(repo.full_name ?? '').toLowerCase();
+  // `''.endsWith('')` is always true, so an empty name claimed membership of
+  // whichever catalog entry came first -- fabricating a trust tier and a
+  // catalog id for a candidate that matched nothing. The pipeline happens to
+  // filter empty names upstream, but this function is exported and the guard
+  // belongs with the logic it protects, not in a different module.
+  if (!full.includes('/')) return { alreadyInTrustCatalog: false };
   const entry = (toolsCatalog?.tools ?? []).find((t) => String(t?.source ?? '').toLowerCase().includes(`/${full}`)
     || String(t?.source ?? '').toLowerCase().endsWith(full));
   return {
@@ -606,12 +672,23 @@ export async function runEcosystemRadar({ repoRoot, client, offline = false } = 
   }
 
   const policy = sourcesRead.value;
+  // A file can be valid JSON and still not be a source policy. `queries: 7`
+  // parsed cleanly and then threw `TypeError: number 7 is not iterable` out
+  // of the for-of below, breaking this function's documented "never throws"
+  // contract: the workflow would emit an empty radar.txt and a stack trace
+  // into the job summary instead of a report saying the catalog is
+  // unreadable. Validated once, here, ahead of every consumer -- the offline
+  // branch read `policy.queries ?? []` and had the same weakness.
+  const queries = Array.isArray(policy.queries) ? policy.queries : null;
+  if (!queries) {
+    return { radarSchemaVersion: 1, mode: offline ? 'offline' : 'live', candidates: [], sources: [], error: 'catalog-unreadable' };
+  }
   const limits = policy.limits ?? {};
   const maxResults = Number.isInteger(limits.maxResultsPerQuery) ? limits.maxResultsPerQuery : 15;
   const maxDeep = Number.isInteger(limits.maxDeepInspections) ? limits.maxDeepInspections : 12;
 
   if (offline) {
-    const sources = (policy.queries ?? []).map((q) => ({ id: q.id, status: 'SOURCE_UNAVAILABLE', detail: 'offline mode: upstream was never contacted' }));
+    const sources = queries.map((q) => ({ id: q.id, status: 'SOURCE_UNAVAILABLE', detail: 'offline mode: upstream was never contacted' }));
     return {
       radarSchemaVersion: policy.radarSchemaVersion ?? 1,
       mode: 'offline',
@@ -629,7 +706,7 @@ export async function runEcosystemRadar({ repoRoot, client, offline = false } = 
   const seen = new Set();
   const rawCandidates = [];
 
-  for (const q of policy.queries ?? []) {
+  for (const q of queries) {
     const res = await effectiveClient.searchGithubRepositories(q.query, { perPage: maxResults });
     if (!res.ok) {
       // An unreachable or rate-limited source is reported as such. It must
@@ -669,12 +746,16 @@ export async function runEcosystemRadar({ repoRoot, client, offline = false } = 
     const name = String(repo?.name ?? '');
     const deep = (owner && name && index < maxDeep)
       ? await deepInspect(owner, name, effectiveClient)
-      : { ciInspected: false, packageInspected: false, packagePresent: false, scopeLimited: false, hasCiWorkflows: false, hasInstallLifecycleScripts: false, dependencyCount: null, hasTests: false, probeFailures: [] };
+      : { ciInspected: false, packageInspected: false, packagePresent: false, scopeLimited: false, scopeUnverified: false, hasCiWorkflows: false, hasInstallLifecycleScripts: false, dependencyCount: null, hasTests: false, probeFailures: [] };
 
     const overlap = computeOverlap(repo, toolsRead.value);
     const penalties = detectRiskPenalties(repo, deep);
     const score = scoreCandidate(repo, deep);
-    const { classification, rationale } = classifyCandidate({ ...score, penalties, overlap, fullyInspected: isFullyInspected(deep) });
+    const { classification, rationale } = classifyCandidate({
+      ...score, penalties, overlap,
+      fullyInspected: isFullyInspected(deep),
+      unknownDimensions: score.unknownDimensions,
+    });
 
     candidates.push({
       source: `https://github.com/${boundedText(repo.full_name, 120)}`,
@@ -683,7 +764,16 @@ export async function runEcosystemRadar({ repoRoot, client, offline = false } = 
       publisher: boundedText(repo.owner?.login, 80),
       publisherType: boundedText(repo.owner?.type, 20),
       observedRef: boundedText(repo.default_branch, 60),
-      license: boundedText(repo.license?.spdx_id ?? 'none', 40),
+      // Routed through the same resolver the scorer uses. This line was
+      // left behind when the three-state resolver landed, so the most
+      // prominent line for every candidate printed `none` where the scorer
+      // had concluded `unavailable`, and `[object Object]` for a malformed
+      // value -- the header contradicting the dimension directly beneath it.
+      license: (() => {
+        const l = resolveLicense(repo);
+        if (l.state === 'declared') return boundedText(l.spdx, 40);
+        return l.state === 'none' ? 'none' : 'unavailable';
+      })(),
       description: boundedText(repo.description, 200),
       maintenanceSignal: score.breakdown['maintenance-activity'].signal,
       stars: Number.isInteger(repo.stargazers_count) ? repo.stargazers_count : null,

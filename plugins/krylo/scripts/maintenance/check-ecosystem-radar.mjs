@@ -59,7 +59,19 @@ export function renderText(report) {
       if (r.unknown) continue; // already listed under "not measurable here"
       lines.push(`           - ${dim}: ${r.points} (${r.signal})`);
     }
-    if (c.score.unknownDimensions.length) lines.push(`         not measurable here: ${c.score.unknownDimensions.join(', ')}`);
+    if (c.score.unknownDimensions.length) {
+      // With the REASON, not just the dimension name. "we never received
+      // topics", "this is a monorepo root", and "the licence metadata is
+      // malformed" are three different facts, and printing only the
+      // dimension name collapsed them into one word -- the same
+      // computed-but-never-rendered defect this renderer was already fixed
+      // for once, reintroduced by the commit that added the reasons.
+      lines.push('         not measurable here:');
+      for (const dim of c.score.unknownDimensions) {
+        const why = c.score.breakdown?.[dim]?.signal;
+        lines.push(`           - ${dim}${why ? `: ${why}` : ''}`);
+      }
+    }
     if (c.riskPenalties.applied.length) lines.push(`         risk: ${c.riskPenalties.applied.join(', ')}`);
     // Rendered right beside `risk:`, and deliberately so. The checker has
     // always computed `undetectable`, but an earlier version of this

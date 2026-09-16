@@ -85,8 +85,20 @@ test('ecosystem-radar: an unmeasured dimension is excluded from numerator AND de
   const full = scoreCandidate(repoFixture(), DEEP_FULL);
   const shallow = scoreCandidate(repoFixture(), DEEP_NONE);
   assert.equal(full.maxAvailable, 40);
-  assert.equal(shallow.maxAvailable, 25, 'testing and dependency-footprint drop out of the denominator when not inspected');
+  assert.equal(shallow.maxAvailable, 25, 'the three probe-derived dimensions drop out of the denominator');
   assert.deepEqual(shallow.unknownDimensions.sort(), ['ci-presence', 'declared-test-script', 'dependency-footprint']);
+
+  // The 25 is only correct BECAUSE the three metadata dimensions were
+  // genuinely measured on this fixture. Asserting the number alone would
+  // enshrine the defect a later review found: absent metadata silently
+  // sitting in the denominator as a measured zero.
+  for (const measured of ['maintenance-activity', 'host-compatibility', 'license-and-provenance']) {
+    assert.ok(!shallow.unknownDimensions.includes(measured), `${measured} is present in this fixture and must be measured`);
+    assert.ok(!shallow.breakdown[measured].unknown);
+  }
+  const starved = scoreCandidate(repoFixture({ pushed_at: null, topics: undefined, license: { spdx_id: {} } }), DEEP_NONE);
+  assert.equal(starved.maxAvailable, 0, 'with nothing measurable, the denominator is empty rather than fabricated');
+  assert.equal(starved.scored, 0);
 });
 
 test('ecosystem-radar: an undetectable risk penalty is reported as undetectable, never as absent', () => {
@@ -106,14 +118,14 @@ test('ecosystem-radar: detectable penalties are applied from real signals', () =
 });
 
 test('ecosystem-radar: hard disqualifiers REJECT, and nothing outweighs them', () => {
-  const strong = { scored: 40, maxAvailable: 40, overlap: { alreadyInTrustCatalog: false }, fullyInspected: true };
+  const strong = { scored: 40, maxAvailable: 40, overlap: { alreadyInTrustCatalog: false }, fullyInspected: true, unknownDimensions: [] };
   assert.equal(classifyCandidate({ ...strong, penalties: { applied: ['abandoned-maintenance'], undetectable: [] } }).classification, 'REJECT');
   assert.equal(classifyCandidate({ ...strong, penalties: { applied: ['unclear-licensing'], undetectable: [] } }).classification, 'REJECT');
 });
 
 test('ecosystem-radar: a candidate already in the trust catalog is WATCH -- its drift is the Upstream Watch\'s job', () => {
   const res = classifyCandidate({
-    scored: 40, maxAvailable: 40, fullyInspected: true,
+    scored: 40, maxAvailable: 40, fullyInspected: true, unknownDimensions: [],
     penalties: { applied: [], undetectable: [] },
     overlap: { alreadyInTrustCatalog: true, catalogId: 'omniroute' },
   });
@@ -127,11 +139,11 @@ test('ecosystem-radar: a candidate already in the trust catalog is WATCH -- its 
 // live before the guard existed.
 test('ecosystem-radar: a high ratio earned without a deep inspection cannot reach AUDIT_RECOMMENDED', () => {
   const base = { penalties: { applied: [], undetectable: [] }, overlap: { alreadyInTrustCatalog: false } };
-  const inspected = classifyCandidate({ ...base, scored: 28, maxAvailable: 40, fullyInspected: true });
-  const notInspected = classifyCandidate({ ...base, scored: 25, maxAvailable: 25, fullyInspected: false });
+  const inspected = classifyCandidate({ ...base, scored: 28, maxAvailable: 40, fullyInspected: true, unknownDimensions: [] });
+  const notInspected = classifyCandidate({ ...base, scored: 25, maxAvailable: 25, fullyInspected: false, unknownDimensions: ['dependency-footprint'] });
   assert.equal(inspected.classification, 'AUDIT_RECOMMENDED');
   assert.equal(notInspected.classification, 'WATCH', 'a perfect score over fewer dimensions must not outrank a real one');
-  assert.match(notInspected.rationale, /partial look/);
+  assert.match(notInspected.rationale, /easier to max out/);
 });
 
 // REGRESSION (independent security review, F1). A deep inspection whose CI
@@ -244,17 +256,34 @@ test('ecosystem-radar: an absent root package.json establishes nothing about dep
   assert.ok(!score.unknownDimensions.includes('ci-presence'), 'the CI half was genuinely measured');
 });
 
-test('ecosystem-radar: a non-Node candidate is still fully inspected and can still earn an audit', () => {
-  // Honesty must not degrade into uselessness: the absence of a manifest is
-  // not a failed inspection, so such a candidate is still ranked on what was
-  // actually measured rather than being held at WATCH for being non-Node.
-  assert.equal(isFullyInspected(DEEP_NO_MANIFEST), true);
+// Rewritten twice, and the history is the point. It began as
+// `assert.ok(['WATCH','AUDIT_RECOMMENDED'].includes(...))`, which fails only
+// on REJECT and therefore asserted nothing about the claim in its own name.
+// Its premise was also wrong: an earlier round argued a non-Node candidate
+// "can still earn an audit", and a later review showed where that reasoning
+// leads -- a candidate with three unmeasured dimensions scoring a perfect
+// 15/15 and outranking a measured 39/40.
+//
+// The resolved position, asserted here as ONE definite outcome: a candidate
+// with unmeasured dimensions is still fully ranked and reported, and can
+// never be promoted ABOVE candidates that were measured in full. WATCH is
+// not a refusal to rank; it is "recorded, but not worth a human audit slot
+// ahead of candidates we actually measured."
+test('ecosystem-radar: a non-Node candidate is ranked on what was measured, and capped below measured ones', () => {
+  assert.equal(isFullyInspected(DEEP_NO_MANIFEST), true, 'two answered probes are a completed inspection');
   const score = scoreCandidate(repoFixture(), DEEP_NO_MANIFEST);
+  assert.ok(score.unknownDimensions.length > 0, 'its manifest-derived dimensions are genuinely unmeasured');
+
   const res = classifyCandidate({
     ...score, penalties: detectRiskPenalties(repoFixture(), DEEP_NO_MANIFEST),
     overlap: { alreadyInTrustCatalog: false }, fullyInspected: true,
+    unknownDimensions: score.unknownDimensions,
   });
-  assert.ok(['WATCH', 'AUDIT_RECOMMENDED'].includes(res.classification));
+  assert.equal(res.classification, 'WATCH', 'exactly one outcome, not a set of acceptable ones');
+  assert.match(res.rationale, /could not be measured here/, 'and it must say which dimensions were missing');
+
+  // Still ranked: it keeps a real score over the dimensions it did measure.
+  assert.ok(score.scored > 0 && score.maxAvailable > 0);
 });
 
 // S3. Bidi overrides and zero-width characters do not merely forge a line;
@@ -299,7 +328,9 @@ test('ecosystem-radar report: an unchecked penalty is visible in the text a huma
     'a penalty unchecked for THIS candidate must appear beside its entry');
   assert.match(text, /inspection incomplete: package\.json \(rate-limited\)/,
     'a probe that did not run must be named, not silently omitted');
-  assert.match(text, /not measurable here: dependency-footprint/);
+  assert.match(text, /not measurable here:/);
+  assert.match(text, /^ +- dependency-footprint/m,
+    'each unmeasured dimension is listed on its own line, with its reason when one exists');
   for (const behavioural of BEHAVIOURAL_PENALTIES) {
     assert.ok(text.includes(behavioural), `${behavioural} must still appear somewhere in the report`);
   }
@@ -475,7 +506,7 @@ test('ecosystem-radar: every shipped query declares a rationale, so the source p
 // was found.
 test('ecosystem-radar: a hard disqualifier outranks catalog membership, and says which entry it concerns', () => {
   const res = classifyCandidate({
-    scored: 40, maxAvailable: 40, fullyInspected: true,
+    scored: 40, maxAvailable: 40, fullyInspected: true, unknownDimensions: [],
     penalties: { applied: ['abandoned-maintenance'], undetectable: [] },
     overlap: { alreadyInTrustCatalog: true, catalogId: 'omniroute', trustTier: 'B' },
   });
@@ -498,14 +529,24 @@ test('ecosystem-radar: a hard disqualifier outranks catalog membership, and says
 // ---------------------------------------------------------------------------
 
 /** Drive a full run with a chosen package.json body and repo metadata. */
-async function runWith({ pkg = '{}', repo: over = {}, ci = [{ name: 'ci.yml' }] } = {}) {
+async function runWith({ pkg = '{}', repo: over = {}, ci = [{ name: 'ci.yml' }], markers = [] } = {}) {
+  // Every path is answered EXPLICITLY. An earlier version of this helper
+  // returned `ok` for anything that was not package.json, so when the
+  // monorepo marker probes were added they "found" pnpm-workspace.yaml in
+  // every scenario -- a harness that silently invented upstream state and
+  // would have hidden the very behaviour these tests exist to pin.
   const client = {
     searchGithubRepositories: async () => ({ ok: true, json: { items: [repoFixture(over)] } }),
-    getGithubFileContent: async (o, r, p) => (p === 'package.json'
-      ? (pkg === null
-        ? { ok: false, reason: 'not-found' }
-        : { ok: true, json: { content: Buffer.from(pkg).toString('base64'), encoding: 'base64' } })
-      : { ok: true, json: ci }),
+    getGithubFileContent: async (o, r, p) => {
+      if (p === 'package.json') {
+        return pkg === null
+          ? { ok: false, reason: 'not-found' }
+          : { ok: true, json: { content: Buffer.from(pkg).toString('base64'), encoding: 'base64' } };
+      }
+      if (p === '.github/workflows') return { ok: true, json: ci };
+      if (markers.includes(p)) return { ok: true, json: { content: '' } };
+      return { ok: false, reason: 'not-found' };
+    },
   };
   const report = await runEcosystemRadar({ repoRoot: REPO_ROOT, client });
   return report.candidates[0];
@@ -535,7 +576,7 @@ test('ecosystem-radar: a workspace root manifest does not measure the repository
   assert.ok(c.score.unknownDimensions.includes('dependency-footprint'));
   assert.ok(c.riskPenalties.undetectable.includes('install-lifecycle-scripts'),
     'a postinstall hook in packages/server is not excluded by an empty root manifest');
-  assert.match(c.score.breakdown['dependency-footprint'].signal, /workspaces/);
+  assert.match(c.score.breakdown['dependency-footprint'].signal, /workspace root/);
 });
 
 // optionalDependencies are installed by default and run the same install
@@ -649,4 +690,150 @@ test('ecosystem-radar report: the per-dimension signals reach the text a human r
   assert.match(text, /host-compatibility: {0,2}\d+ \(declares Claude as a target/,
     'ten points of SELF-DECLARED host affinity must not render as an unqualified total');
   assert.match(text, /ci-presence: 6 \(CI workflows present\)/);
+});
+
+
+// ---------------------------------------------------------------------------
+// REGRESSIONS from the FOURTH review, which found the same family inside the
+// fix for the third. Three of these were introduced by that fix.
+// ---------------------------------------------------------------------------
+
+// The array-only check saw npm's form and missed every other one. yarn
+// declares {"workspaces": {"packages": [...]}}, and pnpm and lerna keep the
+// declaration outside package.json entirely -- all three roots scored a
+// perfect 5/5 "zero runtime dependencies", declarable by the candidate.
+test('ecosystem-radar: every monorepo declaration form limits the manifest scope, not only npm form', async () => {
+  const forms = [
+    ['npm array', '{"workspaces":["packages/*"]}', []],
+    ['yarn object', '{"workspaces":{"packages":["packages/*"]}}', []],
+    ['pnpm marker', '{"name":"root","private":true}', ['pnpm-workspace.yaml']],
+    ['lerna marker', '{"name":"root","private":true}', ['lerna.json']],
+  ];
+  for (const [label, pkg, markers] of forms) {
+    const c = await runWith({ pkg, markers });
+    assert.ok(c.score.unknownDimensions.includes('dependency-footprint'), `${label}: footprint unknown`);
+    assert.ok(c.riskPenalties.undetectable.includes('install-lifecycle-scripts'), `${label}: lifecycle undetectable`);
+    assert.ok(c.riskPenalties.undetectable.includes('excessive-dependency-footprint'), `${label}: footprint undetectable`);
+  }
+  // And the discrimination still works: an ordinary package is measured.
+  const plain = await runWith({ pkg: '{"dependencies":{"a":"1","b":"2"},"scripts":{"test":"t"}}' });
+  assert.equal(plain.score.breakdown['dependency-footprint'].points, 4);
+  assert.equal(plain.score.unknownDimensions.length, 0);
+  assert.equal(plain.classification, 'AUDIT_RECOMMENDED');
+});
+
+// A monorepo marker that could not be READ leaves the scope unestablished,
+// which is not the same as establishing there is no marker.
+test('ecosystem-radar: an unreadable monorepo marker leaves the manifest scope unknown', async () => {
+  const client = {
+    searchGithubRepositories: async () => ({ ok: true, json: { items: [repoFixture()] } }),
+    getGithubFileContent: async (o, r, p) => {
+      if (p === 'package.json') return { ok: true, json: { content: Buffer.from('{"dependencies":{"a":"1"}}').toString('base64'), encoding: 'base64' } };
+      if (p === '.github/workflows') return { ok: true, json: [{ name: 'ci.yml' }] };
+      return { ok: false, reason: 'rate-limited' };
+    },
+  };
+  const c = (await runEcosystemRadar({ repoRoot: REPO_ROOT, client })).candidates[0];
+  assert.ok(c.score.unknownDimensions.includes('dependency-footprint'));
+  assert.ok(c.riskPenalties.undetectable.includes('excessive-dependency-footprint'));
+  assert.ok(c.probeFailures.some((f) => f.reason === 'rate-limited'));
+});
+
+// THE structural guard. The previous version keyed on probe completion, so
+// when a fix correctly made the metadata dimensions unmeasurable too, a
+// candidate with both probes green and three metadata dimensions missing
+// scored a perfect 15/15 and outranked a fully-measured 39/40. Keying on
+// measurement closes the family: it no longer matters WHICH dimension
+// becomes unknown, now or in any future change.
+test('ecosystem-radar: an unknown dimension can never buy a promotion, whichever dimension it is', async () => {
+  const starved = await runWith({
+    pkg: '{"dependencies":{},"scripts":{"test":"t"}}',
+    repo: { pushed_at: null, topics: undefined, license: { spdx_id: {} } },
+  });
+  const full = await runWith({ pkg: '{"dependencies":{"a":"1"},"scripts":{"test":"t"}}' });
+
+  assert.equal(starved.score.scored, starved.score.maxAvailable, 'a perfect ratio over the few dimensions it measured');
+  assert.equal(starved.classification, 'WATCH', 'and it still cannot be promoted');
+  assert.equal(full.classification, 'AUDIT_RECOMMENDED');
+  assert.ok(full.score.scored > starved.score.scored,
+    'raw score, not ratio, orders them: a ratio tiebreak would restore the very inversion this guard closes');
+  assert.match(starved.rationale, /could not be measured here/);
+});
+
+test('ecosystem-radar: a candidate with nothing measurable is recorded as unassessed, not as scoring badly', () => {
+  const res = classifyCandidate({
+    scored: 0, maxAvailable: 0, fullyInspected: true, unknownDimensions: ['a', 'b'],
+    penalties: { applied: [], undetectable: [] }, overlap: { alreadyInTrustCatalog: false },
+  });
+  assert.equal(res.classification, 'WATCH');
+  assert.match(res.rationale, /none of the measurable dimensions could be measured/);
+  assert.doesNotMatch(res.rationale, /0\/0/, 'a score of 0 out of 0 describes a bad candidate, not an unknown one');
+});
+
+// Empty-string endsWith is always true, so an empty name claimed membership
+// of whichever catalog entry came first, fabricating a trust tier.
+test('ecosystem-radar: an empty repository name claims no trust-catalog membership', () => {
+  const tools = { tools: [{ id: 'first', source: 'https://github.com/x/y', trustTier: 'A' }] };
+  for (const full_name of ['', null, undefined, 'no-slash']) {
+    assert.equal(computeOverlap({ full_name }, tools).alreadyInTrustCatalog, false, String(full_name));
+  }
+  assert.equal(computeOverlap({ full_name: 'x/y' }, tools).alreadyInTrustCatalog, true, 'a real match still matches');
+});
+
+// The module documents "never throws". A JSON-VALID but schema-invalid
+// policy ("queries": 7) threw TypeError out of the for-of, which in the
+// workflow means an empty radar.txt and a stack trace in the job summary.
+test('ecosystem-radar: a policy that is valid JSON but not a policy is reported, not thrown', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-radar-policy-'));
+  try {
+    fs.mkdirSync(path.join(dir, 'plugins', 'krylo', 'catalog'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'plugins', 'krylo', 'catalog', 'radar-sources.json'), '{"queries": 7}');
+    fs.writeFileSync(path.join(dir, 'plugins', 'krylo', 'catalog', 'tools.json'), '{"tools": []}');
+    for (const offline of [false, true]) {
+      const report = await runEcosystemRadar({ repoRoot: dir, offline });
+      assert.equal(report.error, 'catalog-unreadable', `offline=${offline}`);
+      assert.equal(computeRadarExitCode(report), 2);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The header line is the most prominent thing printed for each candidate,
+// and it was left behind when the three-state licence resolver landed: it
+// said "none" where the scorer had concluded "unavailable", and
+// "[object Object]" for a malformed value.
+test('ecosystem-radar: the candidate header agrees with the licence dimension beneath it', async () => {
+  const cases = [
+    [{ spdx_id: 'MIT' }, 'MIT', false],
+    [null, 'none', false],
+    [{ spdx_id: {} }, 'unavailable', true],
+    [undefined, 'unavailable', true],
+  ];
+  for (const [license, expected, expectUnknown] of cases) {
+    const c = await runWith({ repo: { license } });
+    assert.equal(c.license, expected, JSON.stringify(license));
+    assert.equal(c.score.unknownDimensions.includes('license-and-provenance'), expectUnknown);
+  }
+});
+
+// Each unmeasured dimension is named WITH its reason. "we never received
+// topics", "this is a monorepo root" and "the licence is malformed" are
+// three different facts that the name-only list collapsed into one word --
+// the same computed-but-never-rendered defect, reintroduced by the commit
+// that created the reasons.
+test('ecosystem-radar report: each unmeasured dimension is printed with WHY, not just its name', async () => {
+  const client = {
+    searchGithubRepositories: async () => ({
+      ok: true,
+      json: { items: [repoFixture({ pushed_at: null, topics: undefined, license: { spdx_id: {} } })] },
+    }),
+    getGithubFileContent: async (o, r, p) => (p === '.github/workflows'
+      ? { ok: true, json: [{ name: 'ci.yml' }] }
+      : { ok: false, reason: 'not-found' }),
+  };
+  const text = renderText(await runEcosystemRadar({ repoRoot: REPO_ROOT, client }));
+  assert.match(text, /- maintenance-activity: last-push date absent or unparseable/);
+  assert.match(text, /- host-compatibility: topics unavailable/);
+  assert.match(text, /- license-and-provenance: license metadata unavailable or malformed/);
 });

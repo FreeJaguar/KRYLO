@@ -165,23 +165,51 @@ function encodeRepoSegment(segment) {
   return encodeURIComponent(segment);
 }
 
+/**
+ * Reject a path segment that could change which ENDPOINT is addressed.
+ *
+ * `encodeURIComponent('..')` returns `'..'` unchanged, because a dot is an
+ * unreserved character -- so a dot-segment survives encoding and the URL
+ * parser then normalises it away, walking the request out of `/repos/`
+ * entirely. Measured: owner `..` and repo `..` turn
+ * `/repos/{owner}/{repo}/contents/x` into `/contents/x`, a different API
+ * endpoint. The host allowlist still holds, so this is not an SSRF, but the
+ * request no longer asks what the caller asked.
+ *
+ * These names arrive from third-party search results and, for the Weekly
+ * Upstream Watch, from `uses:` text in workflow files this project treats
+ * as untrusted input. No real GitHub owner or repository is named `.` or
+ * `..`, so refusing costs nothing and closes the class rather than the
+ * instance: any segment that is only dots is rejected.
+ */
+function invalidRepoSegment(...segments) {
+  return segments.some((seg) => {
+    const value = String(seg ?? '');
+    return value === '' || /^\.+$/.test(value);
+  });
+}
+
 /** GET /repos/{owner}/{repo}/releases/latest -- the newest non-prerelease, non-draft release. */
 export async function getLatestGithubRelease(owner, repo) {
+  if (invalidRepoSegment(owner, repo)) return { ok: false, reason: 'invalid-repo-segment' };
   return fetchUpstreamJson(`https://api.github.com/repos/${encodeRepoSegment(owner)}/${encodeRepoSegment(repo)}/releases/latest`);
 }
 
 /** GET /repos/{owner}/{repo}/tags -- used when a repo has no formal "release", only tags. */
 export async function getGithubTags(owner, repo) {
+  if (invalidRepoSegment(owner, repo)) return { ok: false, reason: 'invalid-repo-segment' };
   return fetchUpstreamJson(`https://api.github.com/repos/${encodeRepoSegment(owner)}/${encodeRepoSegment(repo)}/tags`);
 }
 
 /** GET /repos/{owner}/{repo}/releases/tags/{tag} -- resolve one exact known tag (e.g. the pinned floor). */
 export async function getGithubReleaseByTag(owner, repo, tag) {
+  if (invalidRepoSegment(owner, repo)) return { ok: false, reason: 'invalid-repo-segment' };
   return fetchUpstreamJson(`https://api.github.com/repos/${encodeRepoSegment(owner)}/${encodeRepoSegment(repo)}/releases/tags/${encodeURIComponent(tag)}`);
 }
 
 /** GET /repos/{owner}/{repo}/commits/{ref} -- resolve a tag/branch ref to its exact commit SHA. */
 export async function getGithubCommitForRef(owner, repo, ref) {
+  if (invalidRepoSegment(owner, repo)) return { ok: false, reason: 'invalid-repo-segment' };
   return fetchUpstreamJson(`https://api.github.com/repos/${encodeRepoSegment(owner)}/${encodeRepoSegment(repo)}/commits/${encodeURIComponent(ref)}`);
 }
 
@@ -208,6 +236,7 @@ export async function searchGithubRepositories(query, { perPage = 20, sort = 'up
  * nothing else about a candidate is ever fetched.
  */
 export async function getGithubFileContent(owner, repo, filePath) {
+  if (invalidRepoSegment(owner, repo)) return { ok: false, reason: 'invalid-repo-segment' };
   const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
   return fetchUpstreamJson(
     `https://api.github.com/repos/${encodeRepoSegment(owner)}/${encodeRepoSegment(repo)}/contents/${encodedPath}`,
@@ -225,6 +254,7 @@ export async function getGithubFileContent(owner, repo, filePath) {
  * percent-encoded, so each ref is encoded separately around it.
  */
 export async function getGithubCompare(owner, repo, base, head) {
+  if (invalidRepoSegment(owner, repo)) return { ok: false, reason: 'invalid-repo-segment' };
   const range = `${encodeURIComponent(base)}...${encodeURIComponent(head)}`;
   return fetchUpstreamJson(`https://api.github.com/repos/${encodeRepoSegment(owner)}/${encodeRepoSegment(repo)}/compare/${range}`);
 }
