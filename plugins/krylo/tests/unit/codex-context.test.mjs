@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 import {
   resolveCodexSessionId,
@@ -193,16 +196,67 @@ test('deriveCodexDataRootFromPluginRoot: returns null for a path that does not m
   }
 });
 
-test('resolveCodexDataRoot: uses the derived data root as a fallback tier BELOW the explicit overrides', () => {
-  const { root, pluginRoot, dataRoot } = makeFakeInstall();
+test('resolveCodexDataRoot: KRYLO_DATA_ROOT and PLUGIN_DATA each still win outright over derivation', () => {
+  const { root, pluginRoot } = makeFakeInstall();
   try {
-    // KRYLO_DATA_ROOT and PLUGIN_DATA each still win outright over derivation.
     assert.equal(resolveCodexDataRoot({ PLUGIN_ROOT: pluginRoot, KRYLO_DATA_ROOT: '/explicit' }), path.resolve('/explicit'));
     assert.equal(resolveCodexDataRoot({ PLUGIN_ROOT: pluginRoot, PLUGIN_DATA: '/explicit-2' }), path.resolve('/explicit-2'));
-    // With neither present -- the real shape of the model's own exec
-    // environment, confirmed live -- derivation from PLUGIN_ROOT alone kicks
-    // in and finds the real data root with no other input at all.
-    assert.equal(resolveCodexDataRoot({ PLUGIN_ROOT: pluginRoot }), dataRoot);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// REGRESSION (independent review, F2). resolveCodexDataRoot() originally
+// derived from resolveCodexPluginRoot(env), which honours env.PLUGIN_ROOT --
+// so an attacker-controlled PLUGIN_ROOT (a generic-sounding variable name
+// unrelated tooling might set) pointing at a directory shaped like a real
+// Codex install could redirect KRYLO's entire control plane (run state,
+// question grants, risk approvals) to a location the attacker controls. The
+// derivation now always uses the module's own self-derived
+// PLUGIN_ROOT_FROM_SOURCE, so env.PLUGIN_ROOT is not merely a lower
+// priority than KRYLO_DATA_ROOT/PLUGIN_DATA -- it has NO effect on
+// derivation at all. Proven here directly: a correctly-shaped, genuinely
+// EXISTING attacker-controlled install must not be found.
+test('resolveCodexDataRoot: env.PLUGIN_ROOT can never redirect derivation, even when it names a real, correctly-shaped directory', () => {
+  const { root, pluginRoot, dataRoot } = makeFakeInstall();
+  try {
+    const result = resolveCodexDataRoot({ PLUGIN_ROOT: pluginRoot });
+    assert.notEqual(result, dataRoot, 'an attacker-shaped PLUGIN_ROOT must never be trusted for derivation');
+    assert.equal(result, path.join(os.homedir(), '.krylo', 'data'), 'must fall through to the safe default instead');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The genuine, non-attacker success path: a REAL install whose own on-disk
+// location matches Codex's layout, exercised with NO environment override at
+// all -- the actual shape of the model's own exec environment, confirmed
+// live in docs/adr/0041-codex-live-hook-verification-round-two.md. Copies
+// context.mjs and its one real dependency into a fixture shaped exactly like
+// a real Codex plugin-cache install, then dynamically imports the COPY so
+// its own self-derived PLUGIN_ROOT_FROM_SOURCE (computed from where that
+// file actually lives on disk) genuinely matches the pattern -- proving the
+// real mechanism, not a stand-in for it.
+test('resolveCodexDataRoot: a genuine install location self-derives the correct data root with zero environment input', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-real-layout-'));
+  try {
+    const fixturePluginRoot = path.join(root, 'plugins', 'cache', 'krylo-marketplace', 'krylo', '0.2.0');
+    const fixtureDataRoot = path.join(root, 'plugins', 'data', 'krylo-krylo-marketplace');
+    fs.mkdirSync(path.join(fixturePluginRoot, 'scripts', 'host', 'codex'), { recursive: true });
+    fs.mkdirSync(path.join(fixturePluginRoot, 'scripts', 'lib'), { recursive: true });
+    fs.mkdirSync(fixtureDataRoot, { recursive: true });
+    fs.copyFileSync(
+      path.resolve(__dirname, '..', '..', 'scripts', 'host', 'codex', 'context.mjs'),
+      path.join(fixturePluginRoot, 'scripts', 'host', 'codex', 'context.mjs'),
+    );
+    fs.copyFileSync(
+      path.resolve(__dirname, '..', '..', 'scripts', 'lib', 'host-context.mjs'),
+      path.join(fixturePluginRoot, 'scripts', 'lib', 'host-context.mjs'),
+    );
+    const copiedContextUrl = pathToFileURL(path.join(fixturePluginRoot, 'scripts', 'host', 'codex', 'context.mjs'));
+    const copied = await import(copiedContextUrl.href);
+    // No env at all: the exact shape of the model's own exec environment.
+    assert.equal(copied.resolveCodexDataRoot({}), fixtureDataRoot);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

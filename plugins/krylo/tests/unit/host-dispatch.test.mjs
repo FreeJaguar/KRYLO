@@ -51,3 +51,27 @@ test('detectHost: KRYLO_HOST is checked before any inferred signal, in either di
   assert.equal(detectHost({ KRYLO_HOST: 'claude', CODEX_THREAD_ID: 'x' }), 'claude');
   assert.equal(detectHost({ KRYLO_HOST: 'codex' }), 'codex');
 });
+
+// REGRESSION (independent review, F1). Adding CODEX_THREAD_ID as a signal
+// closed one gap and opened its mirror: CODEX_THREAD_ID is Codex-exclusive
+// under ORDINARY use, but nothing rules out a Claude session inheriting a
+// stray value (a nested terminal opened from inside an active Codex thread,
+// a devcontainer or tmux session that forwards its environment). Claude's
+// own hooks bootstrap directly through the Claude adapter and never call
+// detectHost() at all, but the shared runtime CLIs (read-state.mjs,
+// update-state.mjs, init-run.mjs, cleanup.mjs) do -- so a leaked
+// CODEX_THREAD_ID would route a genuine Claude session's own CLI calls to
+// the Codex adapter's data root, find no active run there, and the risk and
+// stop gates would then silently stop enforcing: a governed session with
+// dead enforcement, the same failure shape ADR-0041 closed, in the opposite
+// direction. A genuine Claude-native signal must win.
+test('detectHost: a genuine Claude-native signal outranks a merely-present CODEX_THREAD_ID', () => {
+  assert.equal(
+    detectHost({ CODEX_THREAD_ID: 'leaked-from-a-parent-codex-thread', CLAUDE_SESSION_ID: 'real-claude-session' }),
+    'claude',
+    'CLAUDE_SESSION_ID is the same signal resolveClaudeSessionId() already trusts for identity; it must also win host detection',
+  );
+  // Without a Claude-native signal alongside it, CODEX_THREAD_ID alone is
+  // still trusted -- this must not become impossible to satisfy.
+  assert.equal(detectHost({ CODEX_THREAD_ID: 'genuine-codex-session' }), 'codex');
+});

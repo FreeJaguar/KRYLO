@@ -53,6 +53,7 @@ import {
   bootstrapClaudeRuntimeEnvironment,
   bootstrapClaudeStorageEnvironment,
   resolveClaudeSessionId,
+  hasNativeClaudeSignal,
 } from '../host/claude/context.mjs';
 import {
   bootstrapCodexRuntimeEnvironment,
@@ -64,7 +65,29 @@ export function detectHost(env = process.env) {
   if (env.KRYLO_HOST === 'codex' || env.KRYLO_HOST === 'claude') return env.KRYLO_HOST;
   if (typeof env.PLUGIN_ROOT === 'string' && env.PLUGIN_ROOT.trim() !== '') return 'codex';
   if (typeof env.PLUGIN_DATA === 'string' && env.PLUGIN_DATA.trim() !== '') return 'codex';
-  if (typeof env.CODEX_THREAD_ID === 'string' && env.CODEX_THREAD_ID.trim() !== '') return 'codex';
+  // CODEX_THREAD_ID is weaker evidence than the two native variables above,
+  // and an independent review of the commit that added it found the gap
+  // that weakness leaves open: it is Codex-exclusive under ORDINARY use, but
+  // nothing rules out a Claude session inheriting a stray value (a nested
+  // terminal opened from inside an active Codex thread, a devcontainer or
+  // tmux session that forwards its environment). Confirmed reachable
+  // consequence: Claude's own hooks never call detectHost() at all (they
+  // bootstrap directly via the Claude adapter), but the shared runtime CLIs
+  // (read-state.mjs, update-state.mjs, init-run.mjs, cleanup.mjs) do -- so a
+  // leaked CODEX_THREAD_ID would route a genuine Claude session's own CLI
+  // calls to the Codex adapter's data root, find no active run there, and
+  // the risk/stop gates would then silently stop enforcing, exactly the
+  // "governed session with dead enforcement" failure this whole checkpoint
+  // exists to close, in the opposite direction. A genuine signal that this
+  // IS really the other host -- via hasNativeClaudeSignal(), which reads
+  // that host's own env vars from the one file (host/claude/context.mjs)
+  // this module's own governance guard (validate-runtime.mjs's
+  // hostIsolation check) allows to -- must win over CODEX_THREAD_ID alone,
+  // since a real session on that host is what actually sets it.
+  if (typeof env.CODEX_THREAD_ID === 'string' && env.CODEX_THREAD_ID.trim() !== '') {
+    if (hasNativeClaudeSignal(env)) return 'claude';
+    return 'codex';
+  }
   return 'claude';
 }
 

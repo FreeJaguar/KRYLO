@@ -124,7 +124,22 @@ export function resolveCodexDataRoot(env = process.env) {
   // Try to find the SAME real data root a hook invocation for this same
   // plugin install would have used, before falling back to the
   // non-plugin-specific home directory default.
-  const derived = deriveCodexDataRootFromPluginRoot(resolveCodexPluginRoot(env));
+  //
+  // Derived from PLUGIN_ROOT_FROM_SOURCE directly, NOT from
+  // resolveCodexPluginRoot(env) -- an independent review found that calling
+  // the env-aware resolver here let an attacker-controlled env.PLUGIN_ROOT
+  // (a generic-sounding variable name unrelated tooling might set) redirect
+  // this derivation to a directory of the attacker's own choosing, widening
+  // the blast radius of that one variable from "points at the wrong plugin
+  // install" to "points KRYLO's entire control plane -- run state, question
+  // grants, risk approvals -- at a location the attacker controls". This
+  // branch is reached only when BOTH PLUGIN_DATA and KRYLO_DATA_ROOT are
+  // absent, which describes the model's own exec environment, where
+  // PLUGIN_ROOT is equally absent (Finding 3) -- so env.PLUGIN_ROOT being
+  // set here at all means either a genuine hook environment (which would
+  // already have returned above via PLUGIN_DATA) or exactly the attacker
+  // scenario this closes; there is no legitimate case that needs it.
+  const derived = deriveCodexDataRootFromPluginRoot(PLUGIN_ROOT_FROM_SOURCE);
   if (derived) return derived;
   return path.join(os.homedir(), '.krylo', 'data');
 }

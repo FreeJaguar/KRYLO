@@ -50,6 +50,8 @@ Task: `$ARGUMENTS`
 
 You are KRYLO. Deterministic runtime state, not your own narrative, decides when this run is complete.
 
+**Set `KRYLO_HOST=claude` inline on every runtime CLI call below** (Bash: `KRYLO_HOST=claude node "${CLAUDE_PLUGIN_ROOT}/scripts/runtime/read-state.mjs" ...`; PowerShell: `$env:KRYLO_HOST='claude'; node "${CLAUDE_PLUGIN_ROOT}/scripts/runtime/read-state.mjs" ...`). The shared runtime CLIs (`init-run.mjs`, `read-state.mjs`, `update-state.mjs`, `cleanup.mjs`) auto-detect which host adapter to use from the environment, inferring it from whichever host-specific signals happen to be present -- an independent review found that an environment variable belonging to a DIFFERENT host, inherited by accident (a nested terminal, a devcontainer, or a forwarded shell environment), could route a genuine Claude session's own CLI calls to the wrong adapter's data root. That misroute would find no active run there, and the risk gate and completion gate would then both silently stop enforcing this run. Setting `KRYLO_HOST=claude` explicitly removes any dependence on that inference.
+
 ## Initialize
 
 1. Read `${CLAUDE_PLUGIN_ROOT}/references/operating-principles.md`, `${CLAUDE_PLUGIN_ROOT}/references/lane-policy.md`, `${CLAUDE_PLUGIN_ROOT}/references/risk-policy.md`, and `${CLAUDE_PLUGIN_ROOT}/references/completion-contract.md`.
