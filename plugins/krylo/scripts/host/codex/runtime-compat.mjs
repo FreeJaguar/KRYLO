@@ -32,7 +32,10 @@ const SUPPORTED_CONTRACT_SCHEMA_VERSION = 1;
 // runs once per invocation, never per ordinary prompt (see the bootstrap
 // hook's own call site) -- a 5s bound is generous without risking a long
 // stall on a genuinely hung/unresponsive binary.
-const PROBE_TIMEOUT_MS = 5000;
+// Exported so tests/unit/runtime-compat.test.mjs can pin the budget
+// inequality this gate must satisfy inside the UserPromptSubmit hook,
+// rather than restating the number and drifting from it.
+export const PROBE_TIMEOUT_MS = 5000;
 const PROBE_MAX_BUFFER_BYTES = 64 * 1024;
 
 /**

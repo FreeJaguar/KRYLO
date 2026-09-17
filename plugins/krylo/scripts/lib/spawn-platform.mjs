@@ -252,51 +252,115 @@ export function selectAsWindowsWould(candidates, env = process.env) {
 }
 
 /**
- * How long the `where` lookup subprocess may take before it is abandoned.
+ * How long ONE `where` lookup subprocess may take before it is abandoned.
  *
  * This is an anti-hang guard, not a control: a lookup that never finishes
  * tells us nothing, and every caller already treats an unresolved command as
- * capability-unavailable (fail-closed). It was 5s, and CI proved that too
- * tight. On a 4-core Windows runner the suite executes test FILES in
- * parallel, each spawning its own child processes; two tests that resolve a
- * `.cmd` fixture down to a bare `node` reproducibly exceeded 5s for this one
- * subprocess -- twice, on identical runner images and an identical cached
- * Node build -- while the same tests cost well under a second when the
- * machine was not contended. Process creation is the contended resource on
- * Windows, so the ceiling has to sit far above a load spike rather than just
- * above the happy path. A genuinely absent command still fails promptly:
- * `where` reports "not found" and exits, it does not hang.
+ * capability-unavailable (fail-closed).
+ *
+ * The value is not free to choose, and an earlier version of this commit
+ * chose it as if it were -- setting it to 15s because CI had exceeded 5s.
+ * Two independent reviews caught that 15s is exactly the Codex
+ * `UserPromptSubmit` hook's own registered budget (hooks/codex-hooks.json),
+ * and the ADR-0034 compatibility gate runs inside that hook BEFORE
+ * writeBootstrapFailureMarker(). A hook killed at its budget writes no
+ * marker, and risk-gate-codex.mjs then reads "no active run, no marker" as
+ * an ordinary ungoverned session and silently allows every later tool call
+ * -- reopening, through timing, the exact gap a prior review round closed by
+ * adding the marker at all. lib/lock.mjs already states this convention for
+ * the same reason: an internal wait must stay comfortably under the
+ * enclosing hook's budget.
+ *
+ * The arithmetic that constrains it, worst case, in ONE UserPromptSubmit:
+ *   - a bare `codex` costs one lookup;
+ *   - resolving to the npm `codex.cmd` shape costs a SECOND lookup, for the
+ *     bare `node` its invocation line names (resolveWindowsShimTargetDetailed
+ *     below) -- so two, not one;
+ *   - a successful resolution is then followed by probeCodexVersion's own
+ *     `codex --version` spawn, PROBE_TIMEOUT_MS (5s).
+ * So 2 * this + 5s must leave real room inside 15s. At 4s that is 13s, and
+ * the remaining 2s covers node start, stdin, identity, state reads and the
+ * marker write. At the previous 5s it was exactly 15s -- the whole budget,
+ * with nothing left for the fail-closed bookkeeping.
+ *
+ * What this does NOT do is guarantee CI never sees a stall again. The
+ * original failure was inferred from duration arithmetic; `res.error` and
+ * `res.signal` were never captured from those runs, so "the lookup timed
+ * out" is strong circumstantial inference, not proof, and a less contended
+ * runner explains a green run equally well. A value that fits the hook
+ * budget is required regardless of what the stall really was, and the fail
+ * direction of getting it wrong is the safe one: an early give-up is
+ * reported as the transient probe-timeout and refuses the run, whereas
+ * overrunning the budget risks a session that believes it is governed and is
+ * not. If stalls recur, the fix is to stop spawning a subprocess for this at
+ * all (PATH membership and PATHEXT precedence are already computed in-process
+ * below; `where` is no longer the authority, only the candidate source), not
+ * to raise this number again.
  */
-const PATH_LOOKUP_TIMEOUT_MS = 15_000;
+export const PATH_LOOKUP_TIMEOUT_MS = 4000;
+
+/**
+ * Bounds `where`'s output the same way probeCodexVersion bounds its own
+ * probe. The spawn was previously unbounded, so Node's 1MiB default applied
+ * and an oversized result surfaced as ENOBUFS -- which the first version of
+ * the classifier below misread as a timeout.
+ */
+const PATH_LOOKUP_MAX_BUFFER_BYTES = 64 * 1024;
 
 /**
  * Resolve `command` via PATH, reporting WHY it failed as well as that it did.
  *
  * The distinction is the point. Until this function existed, a transient
- * environmental stall and "this executable does not exist" were the same
- * `null`, so the Codex runtime gate reported `probe-executable-unresolved`
- * -- "the binary is not there" -- for a machine that was merely busy. That is
- * the same unavailable-versus-absent conflation this codebase keeps closing
- * elsewhere (a failed probe is not a measurement), and here it cost a full
- * forensic pass across two CI runs to establish that the binary had been
- * present the whole time.
+ * environmental stall and "this executable does not exist" collapsed into the
+ * same `null`, so the ADR-0034 gate reported `probe-executable-unresolved`
+ * for a machine that was merely busy. That is the same unavailable-versus-
+ * absent conflation this codebase keeps closing elsewhere (a failed probe is
+ * not a measurement). To be accurate about the size of that defect: the
+ * shipped sentence carried the reason code rather than a plain claim that the
+ * binary was missing, so what a human actually lost was the ability to tell a
+ * retryable stall from a real absence -- not a sentence asserting something
+ * false.
  *
  * `failure` is null on success, otherwise:
  *   'not-found'      -- the lookup ran and genuinely matched nothing in PATH
  *   'lookup-timeout' -- the lookup did not finish; existence is UNKNOWN
- *   'lookup-failed'  -- the lookup could not be run at all; existence UNKNOWN
+ *   'lookup-failed'  -- the lookup could not be run or read; existence UNKNOWN
  */
-function resolveOnPathDetailed(command, { timeoutMs = PATH_LOOKUP_TIMEOUT_MS } = {}) {
+function resolveOnPathDetailed(command, { timeoutMs } = {}) {
+  // Clamp rather than trust: `timeoutMs` is a plain parameter, and Node
+  // treats 0, a negative, or null as "no timeout at all" -- which would turn
+  // this anti-hang guard into an unbounded hang inside a hook.
+  const budgetMs = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : PATH_LOOKUP_TIMEOUT_MS;
   if (path.isAbsolute(command) && fs.existsSync(command)) return { path: command, failure: null };
   try {
-    const res = spawnSync('where', [command], { encoding: 'utf8', shell: false, timeout: timeoutMs, cwd: os.tmpdir() });
+    const res = spawnSync('where', [command], {
+      encoding: 'utf8',
+      shell: false,
+      timeout: budgetMs,
+      maxBuffer: PATH_LOOKUP_MAX_BUFFER_BYTES,
+      cwd: os.tmpdir(),
+    });
     // Ordering mirrors probeCodexVersion()'s own reviewed spawnSync result
-    // handling: a timeout kill surfaces as ETIMEDOUT and/or a SIGTERM signal
-    // depending on platform, and either one means the lookup was abandoned
-    // rather than answered, so it must be classified before the status check
-    // below (a killed process also reports a non-zero status).
+    // handling, and mirrors it for the reason that review gave: an
+    // oversized-output result ALSO reports signal 'SIGTERM', so checking the
+    // timeout first misreports it as a timeout. An earlier version of this
+    // function claimed this ordering in its comment while implementing the
+    // very bug the comment describes; an independent review reproduced the
+    // misclassification directly. Output size and ENOBUFS therefore come
+    // first, and only then the timeout.
+    if (typeof res.stdout === 'string' && res.stdout.length >= PATH_LOOKUP_MAX_BUFFER_BYTES) {
+      return { path: null, failure: 'lookup-failed' };
+    }
+    if (res.error?.code === 'ENOBUFS') return { path: null, failure: 'lookup-failed' };
+    // No killProcessTree() here, deliberately. spawnSync has already killed
+    // and REAPED the child by the time it returns, so `res.pid` names a dead
+    // process whose id the OS may have recycled -- and this file records an
+    // independent Security Reviewer making the POSIX branch of
+    // killProcessTree a no-op for exactly that reason. `where.exe` also
+    // spawns no children, so a tree kill has no legitimate target here; it
+    // would only add another process launch in the situation where process
+    // creation is already the contended resource.
     if (res.error?.code === 'ETIMEDOUT' || res.signal === 'SIGTERM') {
-      killProcessTree(res.pid);
       return { path: null, failure: 'lookup-timeout' };
     }
     if (res.error || typeof res.stdout !== 'string') return { path: null, failure: 'lookup-failed' };
