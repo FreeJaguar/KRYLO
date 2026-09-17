@@ -55,7 +55,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
-const RULES_VERSION = '0.2.0';
+const RULES_VERSION = '0.3.0';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
 function homeDir() {
@@ -394,7 +394,7 @@ function removeRules(apply, projectDir) {
 // actually live (hand-edited or partially removed), setup refuses to touch
 // that event automatically rather than guess.
 
-const HOOKS_VERSION = '0.2.0';
+const HOOKS_VERSION = '0.3.0';
 // docs/adr/0033-codex-lifecycle-enforcement.md adds Stop/SessionStart/
 // SessionEnd to the original ADR-0032 set. classifyEventOwnership()/
 // planHooksInstall()/removeHooks() below are already generic over this

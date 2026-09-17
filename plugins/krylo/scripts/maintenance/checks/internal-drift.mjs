@@ -38,6 +38,20 @@ function extractLatestReleasedChangelogVersion(changelogText) {
   return null;
 }
 
+/** A `const NAME = 'X.Y.Z';` version stamp declared in a setup script. */
+function extractDeclaredVersion(scriptText, constName) {
+  if (!scriptText) return null;
+  const m = new RegExp(`const\\s+${constName}\\s*=\\s*['"](\\d+\\.\\d+\\.\\d+)['"]`).exec(scriptText);
+  return m ? m[1] : null;
+}
+
+/** The launcher stamps its own version in a comment, not a constant. */
+function extractHookLauncherVersion(scriptText) {
+  if (!scriptText) return null;
+  const m = /krylo-hook-launcher-version:\s*(\d+\.\d+\.\d+)/.exec(scriptText);
+  return m ? m[1] : null;
+}
+
 export async function runInternalDriftChecks({ repoRoot }) {
   const results = [];
 
@@ -47,12 +61,35 @@ export async function runInternalDriftChecks({ repoRoot }) {
   const marketplaceJson = readJson(repoRoot, '.claude-plugin/marketplace.json');
   const changelogText = readText(repoRoot, 'CHANGELOG.md');
 
+  // Version stamps EMBEDDED in generated, user-facing artifacts. These are
+  // not manifests -- they are constants the setup scripts write into files a
+  // user ends up with on disk (an installed alias, a Codex rules file, a
+  // project hook launcher), so a stale one is a false provenance claim in
+  // something the user can read.
+  //
+  // They are checked here because leaving them out is exactly how they went
+  // stale twice. RELEASE_READINESS.md records the first time: both were
+  // found still hardcoded to 0.1.1 during the 0.2.0 checkpoint, caught only
+  // by a full-suite test failure. That test asserts the stamp against a
+  // hardcoded literal, so it catches a drift between the script and the
+  // TEST, never a drift between the script and the real product version --
+  // which is why the identical mistake recurred at 0.3.0 with every test
+  // still green. Covering them here is the only form of this check that
+  // cannot go quiet the same way a third time.
+  const aliasScript = readText(repoRoot, 'plugins/krylo/scripts/setup/install-alias.mjs');
+  const codexInstallScript = readText(repoRoot, 'plugins/krylo/scripts/setup/install-codex.mjs');
+  const hookLauncherScript = readText(repoRoot, 'plugins/krylo/codex/project-hooks/codex-project-hook-launcher.mjs');
+
   const sources = [
     { label: 'package.json', value: pkgJson?.version ?? null },
     { label: 'plugins/krylo/.claude-plugin/plugin.json', value: claudePluginJson?.version ?? null },
     { label: 'plugins/krylo/.codex-plugin/plugin.json', value: codexPluginJson?.version ?? null },
     { label: '.claude-plugin/marketplace.json (plugins[0].version)', value: marketplaceJson?.plugins?.[0]?.version ?? null },
     { label: 'CHANGELOG.md (latest released heading)', value: extractLatestReleasedChangelogVersion(changelogText) },
+    { label: 'install-alias.mjs (ALIAS_VERSION)', value: extractDeclaredVersion(aliasScript, 'ALIAS_VERSION') },
+    { label: 'install-codex.mjs (RULES_VERSION)', value: extractDeclaredVersion(codexInstallScript, 'RULES_VERSION') },
+    { label: 'install-codex.mjs (HOOKS_VERSION)', value: extractDeclaredVersion(codexInstallScript, 'HOOKS_VERSION') },
+    { label: 'codex-project-hook-launcher.mjs (krylo-hook-launcher-version)', value: extractHookLauncherVersion(hookLauncherScript) },
   ];
 
   const presentValues = sources.map((s) => s.value).filter((v) => v !== null);

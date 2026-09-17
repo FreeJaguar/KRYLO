@@ -61,33 +61,67 @@ import {
   resolveCodexSessionId,
 } from '../host/codex/context.mjs';
 
+// A genuine signal that this session really IS the other host, read through
+// hasNativeClaudeSignal() -- the one file (host/claude/context.mjs) this
+// module's own governance guard (validate-runtime.mjs's hostIsolation
+// check) allows to touch those variables. It outranks EVERY Codex-inferred
+// signal below, and contradicting it explicitly is refused rather than
+// silently honored.
+//
+// The reasoning, from two successive independent reviews. CODEX_THREAD_ID is
+// Codex-exclusive under ORDINARY use, but nothing rules out a Claude session
+// inheriting a stray value (a nested terminal opened inside an active Codex
+// thread, a devcontainer or tmux session that forwards its environment).
+// Claude's own hooks never call detectHost() at all -- they bootstrap
+// directly through the Claude adapter -- but the shared runtime CLIs
+// (read-state.mjs, update-state.mjs, init-run.mjs, cleanup.mjs) do. So a
+// misrouted detection sends a genuine session's own CLI calls to the other
+// adapter's data root, finds no active run there, and the risk and stop
+// gates then silently stop enforcing: a governed session with dead
+// enforcement, which is the exact failure this whole checkpoint exists to
+// close.
+//
+// KRYLO_HOST gets the same treatment, and that is the later of the two
+// findings. It is the highest-priority branch, and this checkpoint newly
+// instructs the model to set it inline on every runtime CLI call -- which
+// makes a model-controllable value the first thing a security-relevant
+// routing decision consults. Untrusted content (issue text, PR comments,
+// generated wikis, web content -- all explicitly untrusted per CLAUDE.md)
+// carrying a prompt-injection payload could set it to the opposite host and
+// reach the same dead-enforcement state on purpose. It cannot be dropped
+// (the host adapters set it themselves after bootstrap, and tests and a
+// future host rely on it), so instead a contradiction is now a loud,
+// deterministic failure rather than a silent choice. Every legitimate use
+// stays intact: an adapter's own bootstrap sets it consistently with that
+// host's signals, the Codex-only test helper deletes the conflicting
+// variable, and cross-harness workers inherit a strict allowlist (PATH,
+// HOME, USERPROFILE, TEMP, TMP) that carries neither variable.
+function refuseContradiction(requested) {
+  throw new Error(
+    `KRYLO_HOST=${requested} contradicts a genuine ${requested === 'codex' ? 'Claude' : 'Codex'}-native session signal in the same environment. `
+    + 'Refusing to route this call rather than silently operating on the wrong host\'s run state. '
+    + 'If this is a deliberate cross-host diagnostic, run it in an environment without the conflicting host signal.',
+  );
+}
+
 export function detectHost(env = process.env) {
-  if (env.KRYLO_HOST === 'codex' || env.KRYLO_HOST === 'claude') return env.KRYLO_HOST;
-  if (typeof env.PLUGIN_ROOT === 'string' && env.PLUGIN_ROOT.trim() !== '') return 'codex';
-  if (typeof env.PLUGIN_DATA === 'string' && env.PLUGIN_DATA.trim() !== '') return 'codex';
-  // CODEX_THREAD_ID is weaker evidence than the two native variables above,
-  // and an independent review of the commit that added it found the gap
-  // that weakness leaves open: it is Codex-exclusive under ORDINARY use, but
-  // nothing rules out a Claude session inheriting a stray value (a nested
-  // terminal opened from inside an active Codex thread, a devcontainer or
-  // tmux session that forwards its environment). Confirmed reachable
-  // consequence: Claude's own hooks never call detectHost() at all (they
-  // bootstrap directly via the Claude adapter), but the shared runtime CLIs
-  // (read-state.mjs, update-state.mjs, init-run.mjs, cleanup.mjs) do -- so a
-  // leaked CODEX_THREAD_ID would route a genuine Claude session's own CLI
-  // calls to the Codex adapter's data root, find no active run there, and
-  // the risk/stop gates would then silently stop enforcing, exactly the
-  // "governed session with dead enforcement" failure this whole checkpoint
-  // exists to close, in the opposite direction. A genuine signal that this
-  // IS really the other host -- via hasNativeClaudeSignal(), which reads
-  // that host's own env vars from the one file (host/claude/context.mjs)
-  // this module's own governance guard (validate-runtime.mjs's
-  // hostIsolation check) allows to -- must win over CODEX_THREAD_ID alone,
-  // since a real session on that host is what actually sets it.
-  if (typeof env.CODEX_THREAD_ID === 'string' && env.CODEX_THREAD_ID.trim() !== '') {
-    if (hasNativeClaudeSignal(env)) return 'claude';
-    return 'codex';
+  const claudeNative = hasNativeClaudeSignal(env);
+
+  if (env.KRYLO_HOST === 'codex' || env.KRYLO_HOST === 'claude') {
+    if (env.KRYLO_HOST === 'codex' && claudeNative) refuseContradiction('codex');
+    return env.KRYLO_HOST;
   }
+
+  // Every inferred Codex signal yields to a genuine Claude-native one. An
+  // earlier version applied that rule to CODEX_THREAD_ID alone, leaving the
+  // two stronger variables inconsistent with it -- a review pointed out
+  // that this module's own new comment describes PLUGIN_ROOT as "a
+  // generic-sounding variable name unrelated tooling might set", which is
+  // precisely the case for guarding it too.
+  const codexInferred = ['PLUGIN_ROOT', 'PLUGIN_DATA', 'CODEX_THREAD_ID']
+    .some((name) => typeof env[name] === 'string' && env[name].trim() !== '');
+  if (codexInferred) return claudeNative ? 'claude' : 'codex';
+
   return 'claude';
 }
 

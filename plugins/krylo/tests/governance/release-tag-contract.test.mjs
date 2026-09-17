@@ -18,6 +18,15 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..');
 const RELEASE_WORKFLOW = path.join(REPO_ROOT, '.github', 'workflows', 'release.yml');
 
+// Read from the real manifest rather than hardcoding. An independent review
+// found the wrong-plugin-name negative control below had silently lost its
+// discriminating power at the 0.3.0 bump: it passed `wrong-name--v0.2.0`,
+// which after the bump is wrong in BOTH the name and the version, so it
+// would still fail even if the script's name comparison were removed
+// entirely -- passing for the wrong reason. Deriving the version here keeps
+// each negative control isolating exactly one variable, permanently.
+const CURRENT_VERSION = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, 'package.json'), 'utf8')).version;
+
 /** Extract the `run: |` block immediately following the named step. */
 function extractStepScript(workflowText, stepName) {
   const stepIdx = workflowText.indexOf(`name: ${stepName}`);
@@ -62,8 +71,11 @@ test('a stale, already-released tag no longer matching the current package versi
   assert.equal(result.ok, false);
 });
 
-test('a tag with the wrong plugin name prefix fails', () => {
-  const result = runTagCheck('wrong-name--v0.2.0');
+// Isolates exactly one variable: the version matches the real current one,
+// so ONLY the plugin name is wrong. If the script's name comparison were
+// ever dropped, this test fails -- which is the whole point of it.
+test('a tag with the wrong plugin name prefix fails, with the version deliberately correct', () => {
+  const result = runTagCheck(`wrong-name--v${CURRENT_VERSION}`);
   assert.equal(result.ok, false);
 });
 

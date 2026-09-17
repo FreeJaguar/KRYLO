@@ -65,6 +65,51 @@ test('detectHost: KRYLO_HOST is checked before any inferred signal, in either di
 // stop gates would then silently stop enforcing: a governed session with
 // dead enforcement, the same failure shape ADR-0041 closed, in the opposite
 // direction. A genuine Claude-native signal must win.
+// REGRESSION (fourth independent review, F1). KRYLO_HOST is the
+// highest-priority branch, and this checkpoint newly instructs the model to
+// set it inline on every runtime CLI call -- making a model-controllable
+// value the first input to a security-relevant routing decision. Untrusted
+// content carrying a prompt-injection payload could set it to the opposite
+// host and reach the same dead-enforcement state the rest of this work
+// exists to prevent. A contradiction is now refused loudly instead.
+test('detectHost: an explicit KRYLO_HOST contradicting a genuine native signal is refused, not silently honored', () => {
+  assert.throws(
+    () => detectHost({ KRYLO_HOST: 'codex', CLAUDE_SESSION_ID: 'a-real-claude-session' }),
+    /contradicts a genuine Claude-native session signal/,
+    'a prompt-injected KRYLO_HOST=codex inside a real Claude session must fail loudly, never route',
+  );
+  assert.throws(
+    () => detectHost({ KRYLO_HOST: 'codex', CLAUDE_PLUGIN_ROOT: '/x' }),
+    /contradicts/,
+    'any native signal counts, not just the session id',
+  );
+});
+
+test('detectHost: every legitimate KRYLO_HOST use still works, with no conflicting signal present', () => {
+  // A Codex adapter's own bootstrap, and the Codex-only test helper, both
+  // set KRYLO_HOST=codex in an environment with no Claude signal at all.
+  assert.equal(detectHost({ KRYLO_HOST: 'codex' }), 'codex');
+  assert.equal(detectHost({ KRYLO_HOST: 'codex', CODEX_THREAD_ID: 'x' }), 'codex', 'agreeing signals are not a contradiction');
+  // KRYLO_HOST=claude alongside Claude's own signals is the normal Claude
+  // bootstrap and must never be treated as a conflict.
+  assert.equal(detectHost({ KRYLO_HOST: 'claude', CLAUDE_SESSION_ID: 'x' }), 'claude');
+  assert.equal(detectHost({ KRYLO_HOST: 'claude' }), 'claude');
+});
+
+// REGRESSION (fourth independent review, F7). The Claude-native override was
+// originally applied to the CODEX_THREAD_ID branch alone, leaving the two
+// stronger Codex variables inconsistent with it -- even though this
+// codebase's own comment describes PLUGIN_ROOT as a generic-sounding name
+// unrelated tooling might set. All three now yield to a genuine native
+// signal uniformly.
+test('detectHost: PLUGIN_ROOT and PLUGIN_DATA also yield to a genuine Claude-native signal', () => {
+  assert.equal(detectHost({ PLUGIN_ROOT: '/x', CLAUDE_SESSION_ID: 'real' }), 'claude');
+  assert.equal(detectHost({ PLUGIN_DATA: '/x', CLAUDE_SESSION_ID: 'real' }), 'claude');
+  // Without a Claude signal they still select codex, as before.
+  assert.equal(detectHost({ PLUGIN_ROOT: '/x' }), 'codex');
+  assert.equal(detectHost({ PLUGIN_DATA: '/x' }), 'codex');
+});
+
 test('detectHost: a genuine Claude-native signal outranks a merely-present CODEX_THREAD_ID', () => {
   assert.equal(
     detectHost({ CODEX_THREAD_ID: 'leaked-from-a-parent-codex-thread', CLAUDE_SESSION_ID: 'real-claude-session' }),
