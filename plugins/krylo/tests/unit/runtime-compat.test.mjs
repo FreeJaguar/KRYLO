@@ -9,7 +9,9 @@ import {
   loadCompatibilityContract,
   probeCodexVersion,
   evaluateCodexRuntimeCompatibility,
+  PROBE_TIMEOUT_MS,
 } from '../../scripts/host/codex/runtime-compat.mjs';
+import { PATH_LOOKUP_TIMEOUT_MS } from '../../scripts/lib/spawn-platform.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const FIXTURES = path.resolve(__dirname, '..', 'fixtures', 'codex-runtime-compat');
@@ -101,7 +103,11 @@ test('loadCompatibilityContract: the real, shipped contract file is itself well-
 
 test('probeCodexVersion: a well-formed "codex-cli X.Y.Z" response parses successfully', () => {
   const result = probeCodexVersion({ cliPath: FAKE_CLI, env: { ...process.env, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 0.120.0' } });
-  assert.equal(result.ok, true);
+  // The message matters: this is one of the two tests that failed in CI, and
+  // a bare 'expected false to equal true' is exactly what made diagnosing it
+  // cost two full runs. The reason field says whether the fixture was absent,
+  // stalled, or answered and rejected.
+  assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(result.version, '0.120.0');
   assert.ok(typeof result.executablePath === 'string' && result.executablePath !== '');
   // Regression (found by a fresh independent Reviewer): on the Windows-shim
@@ -153,7 +159,7 @@ test('evaluateCodexRuntimeCompatibility: an exact-match supported version is tru
     env: { ...process.env, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 0.120.0' },
     contractPath,
   });
-  assert.equal(result.trusted, true);
+  assert.equal(result.trusted, true, JSON.stringify(result));
   assert.equal(result.status, 'supported');
   assert.equal(result.version, '0.120.0');
 });
@@ -312,4 +318,73 @@ test('evaluateCodexRuntimeCompatibility: never throws for any combination of mal
     env: {},
     contractPath,
   }));
+});
+
+// REGRESSION (CI, Windows). The gate told a human the Codex binary was not
+// installed on a machine where it demonstrably was: the PATH lookup the
+// resolution step runs is itself a subprocess, that subprocess exceeded its
+// own timeout under runner load, and "we could not ask" was returned as the
+// same value as "we asked and it is absent". Both still refuse the run, so
+// nothing failed open -- but one of the two reasons is a false factual claim
+// about the user's machine, which is exactly what this repository forbids.
+test('probeCodexVersion: an abandoned PATH lookup is reported as transient, never as a missing executable', { skip: os.platform() !== 'win32' }, () => {
+  // 1ms cannot outlast process creation, so the lookup is always abandoned.
+  const stalled = probeCodexVersion({ cliPath: FAKE_CLI, resolutionTimeoutMs: 1 });
+  assert.equal(stalled.ok, false);
+  assert.equal(stalled.reason, 'probe-timeout', 'a lookup that never answered must not be reported as an absent binary');
+
+  // The genuinely-absent case must keep its own distinct reason, or the fix
+  // above would have traded one false claim for the opposite one.
+  const absent = probeCodexVersion({ cliPath: 'krylo-no-such-codex-cli-xyz' });
+  assert.equal(absent.ok, false);
+  assert.equal(absent.reason, 'probe-executable-unresolved');
+
+  // And the same fixture resolves normally when the lookup is left alone,
+  // proving the two cases above differ only in the lookup's fate.
+  const healthy = probeCodexVersion({
+    cliPath: FAKE_CLI,
+    env: { ...process.env, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 0.120.0' },
+  });
+  assert.equal(healthy.ok, true, JSON.stringify(healthy));
+});
+
+// REGRESSION (two independent reviews, HIGH). This gate runs inside the
+// Codex UserPromptSubmit hook, and it runs BEFORE that hook writes its
+// bootstrap-failure marker. A hook killed at its registered budget therefore
+// writes no marker, and risk-gate-codex.mjs reads "no active run and no
+// marker" as an ordinary ungoverned session and silently allows every later
+// tool call -- reopening, purely through timing, the gap a prior review round
+// closed by introducing the marker. An earlier version of this work set the
+// PATH lookup ceiling to 15s, which is exactly the registered budget.
+//
+// The inequality is asserted against the REGISTERED timeout read from
+// hooks/codex-hooks.json, not a copy of it, so changing either side moves
+// this test rather than leaving it agreeing with a stale number -- the same
+// defect class already recorded for the version stamps in internal-drift.
+test('the compatibility gate\'s worst-case internal budget fits inside the registered UserPromptSubmit hook timeout', () => {
+  const hooks = JSON.parse(fs.readFileSync(
+    path.resolve(__dirname, '..', '..', 'hooks', 'codex-hooks.json'), 'utf8',
+  ));
+  const registered = hooks.hooks.UserPromptSubmit
+    .flatMap((group) => group.hooks ?? [])
+    .map((hook) => hook.timeout)
+    .filter((t) => typeof t === 'number');
+  assert.ok(registered.length > 0, 'UserPromptSubmit must declare a timeout for this bound to mean anything');
+  const budgetMs = Math.min(...registered) * 1000;
+
+  // Two lookups, not one: a bare `codex` costs the first, and resolving to
+  // the npm `codex.cmd` shape costs a second for the bare `node` its
+  // invocation line names. Then the probe's own `codex --version` spawn.
+  const worstCaseMs = (2 * PATH_LOOKUP_TIMEOUT_MS) + PROBE_TIMEOUT_MS;
+  assert.ok(
+    worstCaseMs < budgetMs,
+    `gate worst case ${worstCaseMs}ms must stay under the ${budgetMs}ms UserPromptSubmit budget, or the hook can be killed before it writes its bootstrap-failure marker`,
+  );
+  // Not merely under it: there must be room left for node start, stdin,
+  // identity bootstrap, state reads and the marker write itself. A bound
+  // satisfied with 0ms to spare is not satisfied in practice.
+  assert.ok(
+    budgetMs - worstCaseMs >= 2000,
+    `only ${budgetMs - worstCaseMs}ms would remain for the hook's own fail-closed bookkeeping; at least 2000ms is required`,
+  );
 });

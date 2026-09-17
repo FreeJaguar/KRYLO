@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { platformSpawnTarget, resolveWindowsShimTarget, selectAsWindowsWould } from '../../scripts/lib/spawn-platform.mjs';
+import { platformSpawnTarget, platformSpawnTargetDetailed, resolveWindowsShimTarget, selectAsWindowsWould } from '../../scripts/lib/spawn-platform.mjs';
 
 test('on POSIX, the command and args pass through unchanged', { skip: os.platform() === 'win32' }, () => {
   const result = platformSpawnTarget('claude', ['--version']);
@@ -440,4 +440,30 @@ test('end to end: a real .exe earlier on PATH beats a real .cmd later on PATH', 
     process.env.PATH = savedPath;
     fs.rmSync(root, { recursive: true, force: true });
   }
+});
+
+// REGRESSION (CI, Windows). resolveOnPath() ran `where` with a 5s timeout and
+// collapsed every outcome into `null`. Two tests that resolve a `.cmd`
+// fixture down to a bare `node` failed reproducibly on a contended runner --
+// twice, on an identical image and an identical cached Node build, while the
+// rest of the suite took the same total time as the green run before it. The
+// timeout is now well clear of a load spike, and, more importantly, the
+// outcomes are distinguishable: a stall reports that the lookup did not
+// finish, not that the executable is missing.
+test('platformSpawnTargetDetailed: an abandoned PATH lookup is distinguishable from a genuinely absent command', { skip: os.platform() !== 'win32' }, () => {
+  // 1ms cannot outlast process creation, so this lookup is always abandoned.
+  const stalled = platformSpawnTargetDetailed('node', ['--version'], { timeoutMs: 1 });
+  assert.equal(stalled.target, null, 'an unanswered lookup must still fail closed');
+  assert.equal(stalled.failure, 'lookup-timeout');
+
+  const absent = platformSpawnTargetDetailed('this-cli-definitely-does-not-exist-xyz', ['--version']);
+  assert.equal(absent.target, null);
+  assert.equal(absent.failure, 'not-found', 'a real answer of "nothing matches" must not be reported as a stall');
+
+  // node is genuinely on PATH here, so the only reason the first case failed
+  // is the abandoned lookup -- without this the test would pass even if
+  // resolution were broken outright.
+  const resolved = platformSpawnTargetDetailed('node', ['--version']);
+  assert.equal(resolved.failure, null);
+  assert.ok(resolved.target?.command.toLowerCase().endsWith('node.exe'), JSON.stringify(resolved));
 });
