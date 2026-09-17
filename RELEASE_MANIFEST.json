@@ -716,8 +716,8 @@
     },
     {
       "path": "docs/adr/0041-codex-live-hook-verification-round-two.md",
-      "bytes": 16457,
-      "sha256": "605bbba95a8705f3326a0612e26a1651adf8d2009dfbad1816a5c3a0346746b5"
+      "bytes": 21589,
+      "sha256": "9db28b13a36ab193a21e950c69b2857dc8c37eabe4559ce1b3d8643a1aa28547"
     },
     {
       "path": "docs/adr/README.md",
