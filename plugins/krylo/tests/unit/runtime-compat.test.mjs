@@ -313,3 +313,31 @@ test('evaluateCodexRuntimeCompatibility: never throws for any combination of mal
     contractPath,
   }));
 });
+
+// REGRESSION (CI, Windows). The gate told a human the Codex binary was not
+// installed on a machine where it demonstrably was: the PATH lookup the
+// resolution step runs is itself a subprocess, that subprocess exceeded its
+// own timeout under runner load, and "we could not ask" was returned as the
+// same value as "we asked and it is absent". Both still refuse the run, so
+// nothing failed open -- but one of the two reasons is a false factual claim
+// about the user's machine, which is exactly what this repository forbids.
+test('probeCodexVersion: an abandoned PATH lookup is reported as transient, never as a missing executable', { skip: os.platform() !== 'win32' }, () => {
+  // 1ms cannot outlast process creation, so the lookup is always abandoned.
+  const stalled = probeCodexVersion({ cliPath: FAKE_CLI, resolutionTimeoutMs: 1 });
+  assert.equal(stalled.ok, false);
+  assert.equal(stalled.reason, 'probe-timeout', 'a lookup that never answered must not be reported as an absent binary');
+
+  // The genuinely-absent case must keep its own distinct reason, or the fix
+  // above would have traded one false claim for the opposite one.
+  const absent = probeCodexVersion({ cliPath: 'krylo-no-such-codex-cli-xyz' });
+  assert.equal(absent.ok, false);
+  assert.equal(absent.reason, 'probe-executable-unresolved');
+
+  // And the same fixture resolves normally when the lookup is left alone,
+  // proving the two cases above differ only in the lookup's fate.
+  const healthy = probeCodexVersion({
+    cliPath: FAKE_CLI,
+    env: { ...process.env, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 0.120.0' },
+  });
+  assert.equal(healthy.ok, true, JSON.stringify(healthy));
+});

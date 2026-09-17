@@ -251,19 +251,69 @@ export function selectAsWindowsWould(candidates, env = process.env) {
   return null;
 }
 
-function resolveOnPath(command) {
-  if (path.isAbsolute(command) && fs.existsSync(command)) return command;
+/**
+ * How long the `where` lookup subprocess may take before it is abandoned.
+ *
+ * This is an anti-hang guard, not a control: a lookup that never finishes
+ * tells us nothing, and every caller already treats an unresolved command as
+ * capability-unavailable (fail-closed). It was 5s, and CI proved that too
+ * tight. On a 4-core Windows runner the suite executes test FILES in
+ * parallel, each spawning its own child processes; two tests that resolve a
+ * `.cmd` fixture down to a bare `node` reproducibly exceeded 5s for this one
+ * subprocess -- twice, on identical runner images and an identical cached
+ * Node build -- while the same tests cost well under a second when the
+ * machine was not contended. Process creation is the contended resource on
+ * Windows, so the ceiling has to sit far above a load spike rather than just
+ * above the happy path. A genuinely absent command still fails promptly:
+ * `where` reports "not found" and exits, it does not hang.
+ */
+const PATH_LOOKUP_TIMEOUT_MS = 15_000;
+
+/**
+ * Resolve `command` via PATH, reporting WHY it failed as well as that it did.
+ *
+ * The distinction is the point. Until this function existed, a transient
+ * environmental stall and "this executable does not exist" were the same
+ * `null`, so the Codex runtime gate reported `probe-executable-unresolved`
+ * -- "the binary is not there" -- for a machine that was merely busy. That is
+ * the same unavailable-versus-absent conflation this codebase keeps closing
+ * elsewhere (a failed probe is not a measurement), and here it cost a full
+ * forensic pass across two CI runs to establish that the binary had been
+ * present the whole time.
+ *
+ * `failure` is null on success, otherwise:
+ *   'not-found'      -- the lookup ran and genuinely matched nothing in PATH
+ *   'lookup-timeout' -- the lookup did not finish; existence is UNKNOWN
+ *   'lookup-failed'  -- the lookup could not be run at all; existence UNKNOWN
+ */
+function resolveOnPathDetailed(command, { timeoutMs = PATH_LOOKUP_TIMEOUT_MS } = {}) {
+  if (path.isAbsolute(command) && fs.existsSync(command)) return { path: command, failure: null };
   try {
-    const res = spawnSync('where', [command], { encoding: 'utf8', shell: false, timeout: 5000, cwd: os.tmpdir() });
-    if (res.status !== 0 || typeof res.stdout !== 'string') return null;
+    const res = spawnSync('where', [command], { encoding: 'utf8', shell: false, timeout: timeoutMs, cwd: os.tmpdir() });
+    // Ordering mirrors probeCodexVersion()'s own reviewed spawnSync result
+    // handling: a timeout kill surfaces as ETIMEDOUT and/or a SIGTERM signal
+    // depending on platform, and either one means the lookup was abandoned
+    // rather than answered, so it must be classified before the status check
+    // below (a killed process also reports a non-zero status).
+    if (res.error?.code === 'ETIMEDOUT' || res.signal === 'SIGTERM') {
+      killProcessTree(res.pid);
+      return { path: null, failure: 'lookup-timeout' };
+    }
+    if (res.error || typeof res.stdout !== 'string') return { path: null, failure: 'lookup-failed' };
+    if (res.status !== 0) return { path: null, failure: 'not-found' };
     const allCandidates = res.stdout.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
     const pathDirs = pathDirectorySet();
     const candidates = allCandidates.filter((c) => pathDirs.has(canonicalDir(path.dirname(c))));
-    if (candidates.length === 0) return null;
-    return selectAsWindowsWould(candidates);
+    if (candidates.length === 0) return { path: null, failure: 'not-found' };
+    const selected = selectAsWindowsWould(candidates);
+    return selected ? { path: selected, failure: null } : { path: null, failure: 'not-found' };
   } catch {
-    return null;
+    return { path: null, failure: 'lookup-failed' };
   }
+}
+
+function resolveOnPath(command) {
+  return resolveOnPathDetailed(command).path;
 }
 
 // Matches npm cmd-shim's own generated line shape (verified directly
@@ -316,24 +366,38 @@ function parseShimContent(shimPath, content) {
  * Never throws.
  */
 export function resolveWindowsShimTarget(shimPath) {
+  return resolveWindowsShimTargetDetailed(shimPath).target;
+}
+
+/**
+ * The reason-carrying form of resolveWindowsShimTarget(). The inner PATH
+ * lookup below is exactly where the conflation described on
+ * resolveOnPathDetailed() was actually observed: an npm-style shim whose real
+ * invocation line is a bare `node` has to resolve `node` itself, and when
+ * that lookup stalled the whole chain reported the SHIM as unresolvable.
+ */
+function resolveWindowsShimTargetDetailed(shimPath, options = {}) {
   try {
-    if (!fs.existsSync(shimPath)) return null;
+    if (!fs.existsSync(shimPath)) return { target: null, failure: 'not-found' };
     const content = fs.readFileSync(shimPath, 'utf8');
     const resolved = parseShimContent(shimPath, content);
-    if (!resolved) return null;
+    if (!resolved) return { target: null, failure: 'shim-unrecognized' };
     // The shim's own fallback (npm's codex.cmd: "SET _prog=node" when no
     // colocated node.exe exists, relying on PATH) yields a bare command
     // name here, not an absolute path -- resolve IT via PATH search too,
     // rather than treating "not a literal existing file named './node'" as
     // a parse failure. Confirmed necessary against the real installed
     // codex.cmd in this environment, which does exactly this.
-    const resolvedCommand = path.isAbsolute(resolved.command)
-      ? (fs.existsSync(resolved.command) ? resolved.command : null)
-      : resolveOnPath(resolved.command);
-    if (!resolvedCommand) return null;
-    return { command: resolvedCommand, prefixArgs: resolved.prefixArgs };
+    if (path.isAbsolute(resolved.command)) {
+      return fs.existsSync(resolved.command)
+        ? { target: { command: resolved.command, prefixArgs: resolved.prefixArgs }, failure: null }
+        : { target: null, failure: 'not-found' };
+    }
+    const inner = resolveOnPathDetailed(resolved.command, options);
+    if (!inner.path) return { target: null, failure: inner.failure };
+    return { target: { command: inner.path, prefixArgs: resolved.prefixArgs }, failure: null };
   } catch {
-    return null;
+    return { target: null, failure: 'lookup-failed' };
   }
 }
 
@@ -347,20 +411,36 @@ export function resolveWindowsShimTarget(shimPath) {
  * fall back to invoking cmd.exe directly.
  */
 export function platformSpawnTarget(command, args) {
+  return platformSpawnTargetDetailed(command, args).target;
+}
+
+/**
+ * The reason-carrying form of platformSpawnTarget(). Callers that report a
+ * capability as unavailable should prefer this one, so that "we could not
+ * ask" is never reported to a human as "it is not installed".
+ *
+ * `failure` is null on success, otherwise one of resolveOnPathDetailed()'s
+ * reasons, or 'shim-unrecognized' (a `.cmd`/`.bat` whose real invocation line
+ * did not match the one shape this module is willing to parse) or
+ * 'unsupported-extension' (resolved to something Windows would only run
+ * through an interpreter this module deliberately refuses to invoke).
+ */
+export function platformSpawnTargetDetailed(command, args, options = {}) {
   if (os.platform() !== 'win32') {
-    return { command, args };
+    return { target: { command, args }, failure: null };
   }
-  const resolvedPath = resolveOnPath(command);
-  if (!resolvedPath) return null;
-  if (resolvedPath.toLowerCase().endsWith('.exe')) {
+  const resolved = resolveOnPathDetailed(command, options);
+  if (!resolved.path) return { target: null, failure: resolved.failure };
+  const lowered = resolved.path.toLowerCase();
+  if (lowered.endsWith('.exe')) {
     // A real executable: shell:false is unconditionally safe, no reparsing
     // step exists for a direct CreateProcess target.
-    return { command: resolvedPath, args };
+    return { target: { command: resolved.path, args }, failure: null };
   }
-  if (resolvedPath.toLowerCase().endsWith('.cmd') || resolvedPath.toLowerCase().endsWith('.bat')) {
-    const shimTarget = resolveWindowsShimTarget(resolvedPath);
-    if (!shimTarget) return null;
-    return { command: shimTarget.command, args: [...shimTarget.prefixArgs, ...args] };
+  if (lowered.endsWith('.cmd') || lowered.endsWith('.bat')) {
+    const shim = resolveWindowsShimTargetDetailed(resolved.path, options);
+    if (!shim.target) return { target: null, failure: shim.failure };
+    return { target: { command: shim.target.command, args: [...shim.target.prefixArgs, ...args] }, failure: null };
   }
-  return null;
+  return { target: null, failure: 'unsupported-extension' };
 }
