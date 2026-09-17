@@ -1186,8 +1186,8 @@
     },
     {
       "path": "plugins/krylo/scripts/host/claude/context.mjs",
-      "bytes": 3992,
-      "sha256": "4eb73a1850dd3f2236c439ff28caf5c3cb001d576be83fcc9c76f5387db924f6"
+      "bytes": 4980,
+      "sha256": "ad3276c74a5fd7ff5f87b2791f1a43d4fa8f6cc6963326325d5295815b9c6f9d"
     },
     {
       "path": "plugins/krylo/scripts/host/claude/hook-transport.mjs",
@@ -1196,8 +1196,8 @@
     },
     {
       "path": "plugins/krylo/scripts/host/codex/context.mjs",
-      "bytes": 9201,
-      "sha256": "1dcd29656a95a2a455e34888500017146364bad7467a601fd0efe8d25da230c7"
+      "bytes": 10233,
+      "sha256": "1c1919fb07477ea465809fa3830fe94f9f0d23eb3e54607be51d2759ac901f47"
     },
     {
       "path": "plugins/krylo/scripts/host/codex/hook-transport.mjs",
@@ -1246,8 +1246,8 @@
     },
     {
       "path": "plugins/krylo/scripts/lib/host-dispatch.mjs",
-      "bytes": 5135,
-      "sha256": "667f15ce8dff6936d1aae2b3f71be09ac9a03ed2dbae1bfb58bc4ee3fac1cf42"
+      "bytes": 6628,
+      "sha256": "ed4efe8317a0c859272fcd57a7a1c18e590925c4704c42aaa7f7d62b06c3abd9"
     },
     {
       "path": "plugins/krylo/scripts/lib/lock.mjs",
@@ -1526,8 +1526,8 @@
     },
     {
       "path": "plugins/krylo/skills/run/SKILL.md",
-      "bytes": 8941,
-      "sha256": "cf3d20e3f14cf0869d153e42568c69c606cf3dc445a3a8f8299461cebf67667f"
+      "bytes": 9918,
+      "sha256": "73f0d1dc4ed2abee9e11378b791843537a960b077ab14017c6fcbfa33ce7c322"
     },
     {
       "path": "plugins/krylo/skills/setup/SKILL.md",
@@ -1716,8 +1716,8 @@
     },
     {
       "path": "plugins/krylo/tests/hooks/user-prompt-submit-codex.test.mjs",
-      "bytes": 45797,
-      "sha256": "42e9b3ca7b99555988c01026d46680681c84f2479b7d223f4faa9cf821703961"
+      "bytes": 47197,
+      "sha256": "2ec288da3eb39153d59b1d8a902f65c1dd21f6aa469d0cdad3ade3103a8d1bf4"
     },
     {
       "path": "plugins/krylo/tests/maintenance/actions-pins.test.mjs",
@@ -1851,8 +1851,8 @@
     },
     {
       "path": "plugins/krylo/tests/unit/claude-context.test.mjs",
-      "bytes": 3406,
-      "sha256": "b2d1d732cd00ee4df9640b7667d7a38336f42862003b9f0e248c41dbdbfc8fb6"
+      "bytes": 4534,
+      "sha256": "61d2424f931ca005a43250a7f7b69629f1e3c13849e93d7f03a66d745781bd61"
     },
     {
       "path": "plugins/krylo/tests/unit/cleanup.test.mjs",
@@ -1866,8 +1866,8 @@
     },
     {
       "path": "plugins/krylo/tests/unit/codex-context.test.mjs",
-      "bytes": 10576,
-      "sha256": "7520c33cef288ab4ebf93a117d18db302fa61076adde7545c5ec8c584edf52ee"
+      "bytes": 13751,
+      "sha256": "4f4b0f73dcc2f66185d776b75428044f0486f09793fc30bb7e070162970c18da"
     },
     {
       "path": "plugins/krylo/tests/unit/cross-harness.test.mjs",
@@ -1881,8 +1881,8 @@
     },
     {
       "path": "plugins/krylo/tests/unit/host-dispatch.test.mjs",
-      "bytes": 3230,
-      "sha256": "a5d201fb2de2bebd480875669c54252af3eba94cb67b2b8c290ef6947d17d402"
+      "bytes": 4786,
+      "sha256": "30a7285108999636f4d29f8e9a12f1467504f7a8537d5397e15d648ff79a4b75"
     },
     {
       "path": "plugins/krylo/tests/unit/lock.test.mjs",
