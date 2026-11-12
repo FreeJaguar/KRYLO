@@ -726,8 +726,8 @@
     },
     {
       "path": "docs/adr/0043-session-keyed-run-resolution.md",
-      "bytes": 7396,
-      "sha256": "0897c32e15db7a0de34a5dea9fad78b6e0a8ed6d7abd1343fe302ad95b463495"
+      "bytes": 8015,
+      "sha256": "28f8e5a827ac8760f638a5ded193cde1bcfd5c800625986ea0c2ecd027b9c64c"
     },
     {
       "path": "docs/adr/README.md",
@@ -1291,8 +1291,8 @@
     },
     {
       "path": "plugins/krylo/scripts/lib/state.mjs",
-      "bytes": 58525,
-      "sha256": "d91d3f28485590ea946e8640b031d8a1fbebbdbfb1c20ba90cff7a9d3c98fbe9"
+      "bytes": 58338,
+      "sha256": "1de0d212ac1b0ef50479e3155853ec89686ba1c28649a495d475e7c4f94703bd"
     },
     {
       "path": "plugins/krylo/scripts/lib/telemetry.mjs",
@@ -1821,8 +1821,8 @@
     },
     {
       "path": "plugins/krylo/tests/security/run-resolution-cwd.test.mjs",
-      "bytes": 14086,
-      "sha256": "7a7adc26315938e6e0b28b077230488113ae47aedf9c6615d398874074c101c3"
+      "bytes": 15427,
+      "sha256": "9e5efb13aacfea399df33a1764a409cb1760b40bb4ff933f626c2268ba9f39b9"
     },
     {
       "path": "plugins/krylo/tests/setup/alias.test.mjs",
