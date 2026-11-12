@@ -126,8 +126,8 @@
     },
     {
       "path": "ARCHITECTURE.md",
-      "bytes": 8114,
-      "sha256": "17b0042a4e2752b21b255609394d5a526159c9b42683bfe4d0712f6e86647cab"
+      "bytes": 8271,
+      "sha256": "f9a2574dc8ff7d4f55de0e88c30723cd16d72995dbcd856610a3582b2f5fd0c4"
     },
     {
       "path": "BLUEPRINT_MANIFEST.json",
@@ -136,8 +136,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 45234,
-      "sha256": "425b63930f30e3e6c5762b649c7dfdccb446a25ce0f65d44f9213cfa55fe050d"
+      "bytes": 45300,
+      "sha256": "7c7c4d8e7ae7afb66b279440966af288e9581487b5ed3276e99a69dfe96c4380"
     },
     {
       "path": "CLAUDE.md",
