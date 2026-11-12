@@ -104,17 +104,25 @@ function normalizeCodexToolName(rawName) {
 // for was silently allowed here regardless: session_id/cwd are read
 // directly off the raw payload (the same authoritative host-supplied
 // fields the marker was written against), never trusted for anything else.
+//
+// The raw `session_id` is also passed to the active-run lookup, solely to
+// find a run to deny under, so it tolerates a process cwd below the run's
+// project root like the normal path does; and the marker check no longer
+// needs a `cwd`, since it falls back to the session under any project
+// (docs/adr/0043-session-keyed-run-resolution.md).
 function failSafeOnUnreadablePayload(rawPayload) {
+  const rawSessionId = typeof rawPayload?.session_id === 'string' && rawPayload.session_id.trim() !== '' ? rawPayload.session_id.trim() : null;
   const identity = codexCwdFallbackIdentity();
   if (identity) {
-    const run = resolveActiveRun({ projectRoot: identity.projectRoot, host: identity.host, hostSessionId: identity.hostSessionId });
+    const run = resolveActiveRun({ projectRoot: identity.projectRoot, host: identity.host, hostSessionId: rawSessionId ?? identity.hostSessionId });
     if (run.active) emitCodexPreToolDeny('KRYLO risk gate could not read this action and denied it as a fail-safe. Re-run with a well-formed request.');
   }
-  const rawSessionId = typeof rawPayload?.session_id === 'string' && rawPayload.session_id.trim() !== '' ? rawPayload.session_id.trim() : null;
-  const rawCwd = typeof rawPayload?.cwd === 'string' && rawPayload.cwd.trim() !== '' ? rawPayload.cwd : null;
-  if (rawSessionId && rawCwd) {
+  if (rawSessionId) {
+    const rawCwd = typeof rawPayload?.cwd === 'string' && rawPayload.cwd.trim() !== '' ? rawPayload.cwd : null;
     let projectRoot = null;
-    try { projectRoot = path.resolve(rawCwd); } catch { projectRoot = null; }
+    if (rawCwd) {
+      try { projectRoot = path.resolve(rawCwd); } catch { projectRoot = null; }
+    }
     denyIfBootstrapFailureMarked('codex', projectRoot, rawSessionId);
   }
   allowCodexSilently();

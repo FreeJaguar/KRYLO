@@ -1176,25 +1176,101 @@ function listProjectRootHashes(index) {
 }
 
 /**
- * Every active-run pointer this exact host session owns, across all
- * projects. A pointer whose recorded projectRootHash disagrees with the
- * directory it sits in is ignored. Never throws; [] without a session id,
- * because without one there is nothing that identifies the session.
+ * This session's own pointer under one project-root hash, or null. A pointer
+ * whose runId is not a string, or whose recorded projectRootHash disagrees
+ * with the directory it sits in, is ignored. Never throws.
  */
-export function listActiveRunPointersForSession({ host, hostSessionId } = {}) {
-  if (!host || !hostSessionId) return [];
-  const pointers = [];
-  for (const projectRootHash of listProjectRootHashes('active-runs')) {
-    try {
-      const result = readJson(activeRunPointerPath(projectRootHash, host, hostSessionId));
-      if (!result.ok || !result.value?.runId) continue;
-      if (result.value.projectRootHash && result.value.projectRootHash !== projectRootHash) continue;
-      pointers.push(result.value);
-    } catch {
-      // one unreadable entry never hides the others
-    }
+function readSessionPointerAt(projectRootHash, host, hostSessionId) {
+  try {
+    const result = readJson(activeRunPointerPath(projectRootHash, host, hostSessionId));
+    if (!result.ok || typeof result.value?.runId !== 'string' || result.value.runId === '') return null;
+    if (result.value.projectRootHash && result.value.projectRootHash !== projectRootHash) return null;
+    return result.value;
+  } catch {
+    return null;
   }
-  return pointers;
+}
+
+/**
+ * The non-terminal run state a pointer leads to, if it belongs to exactly
+ * this host and session; otherwise null. Never throws: one malformed pointer
+ * (a non-string or path-like runId, an unreadable state) never hides the
+ * others.
+ */
+export function activeRunStateFor(pointer, { host, hostSessionId } = {}) {
+  try {
+    if (typeof pointer?.runId !== 'string' || pointer.runId === '') return null;
+    const loaded = loadState(pointer.runId);
+    if (!loaded.ok || loaded.value.terminalState !== null) return null;
+    if (loaded.value.host?.name !== host) return null;
+    if (hostSessionId && loaded.value.host.sessionId !== hostSessionId) return null;
+    return loaded.value;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Locate the active-run pointer for a host session, tolerating a working
+ * directory that is not the run's project root. In order:
+ *
+ *   1. The exact path-keyed pointer for `projectRoot`, with readActiveRunPointer()'s
+ *      existing semantics (including the ADR-0020 most-recent fallback when
+ *      no session id is known). With `requireActive`, it is used only if it
+ *      leads to this session's non-terminal run.
+ *   2. Only for a known session: this session's pointer under the NEAREST
+ *      ancestor of `projectRoot` -- a `cd` into a subdirectory, or a command
+ *      workdir, resolves to the project it is inside, not to some other
+ *      project the same session also has a run in.
+ *   3. Only for a known session: this session's pointer under any project;
+ *      if several lead to active runs, the most recently updated wins.
+ *
+ * Steps 2 and 3 accept a pointer only when it leads to this exact session's
+ * non-terminal run. Returns { ok: true, value: pointer, state? } (state when
+ * it was loaded) or { ok: false, error }. Never throws.
+ */
+export function locateActiveRunPointer({ projectRoot, host, hostSessionId, requireActive = false } = {}) {
+  try {
+    if (!host) return { ok: false, error: 'host-required' };
+    const root = path.resolve(projectRoot ?? process.cwd());
+    const rootHash = computeProjectRootHash(root);
+
+    const exact = readActiveRunPointer({ projectRootHash: rootHash, host, hostSessionId });
+    const exactUsable = exact.ok && typeof exact.value?.runId === 'string'
+      && (!exact.value.projectRootHash || exact.value.projectRootHash === rootHash);
+    if (exactUsable) {
+      // A pointer at the exact path is final, exactly as before ADR-0043: the
+      // fallbacks below are only for a directory that has NO pointer. When
+      // the pointer exists but its state does not load as active, that is
+      // either a terminal run (whose pointer is normally already cleared) or
+      // a transient read failure while another hook is atomically replacing
+      // state.json; re-reading the same file through the fallbacks during
+      // that window measurably raised lost concurrent updates on Windows.
+      if (!requireActive) return { ok: true, value: exact.value };
+      const state = activeRunStateFor(exact.value, { host, hostSessionId });
+      return state ? { ok: true, value: exact.value, state } : { ok: false, error: 'not-active' };
+    }
+    if (!hostSessionId) return { ok: false, error: 'not-found' };
+
+    for (let dir = path.dirname(root); ; dir = path.dirname(dir)) {
+      const pointer = readSessionPointerAt(computeProjectRootHash(dir), host, hostSessionId);
+      const state = pointer && activeRunStateFor(pointer, { host, hostSessionId });
+      if (state) return { ok: true, value: pointer, state };
+      if (path.dirname(dir) === dir) break;
+    }
+
+    let best = null;
+    for (const projectRootHash of listProjectRootHashes('active-runs')) {
+      const pointer = readSessionPointerAt(projectRootHash, host, hostSessionId);
+      const state = pointer && activeRunStateFor(pointer, { host, hostSessionId });
+      if (!state) continue;
+      const updatedAt = String(pointer.updatedAt ?? '');
+      if (!best || updatedAt > best.updatedAt) best = { value: pointer, state, updatedAt };
+    }
+    return best ? { ok: true, value: best.value, state: best.state } : { ok: false, error: 'not-found' };
+  } catch {
+    return { ok: false, error: 'lookup-failed' };
+  }
 }
 
 /** A still-fresh bootstrap-failure marker for this host session under any project. Never throws. */

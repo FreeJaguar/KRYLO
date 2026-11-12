@@ -8,10 +8,9 @@ import path from 'node:path';
 import {
   loadState,
   saveState,
-  readActiveRunPointer,
+  locateActiveRunPointer,
   clearActiveRunPointerForState,
   completionEval,
-  computeProjectRootHash,
   applyApprovalResolution,
   ENUMS,
   validateEvidence,
@@ -497,9 +496,10 @@ function main() {
 
   let runId = explicitRunId;
   if (!runId) {
-    const projectRootHash = computeProjectRootHash(path.resolve(projectDir || process.cwd()));
+    // locateActiveRunPointer() tolerates a working directory below the run's
+    // project root for a known session (docs/adr/0043-session-keyed-run-resolution.md).
     const hostSessionId = resolveSessionId({ explicitSessionId: session }) || undefined;
-    const pointer = readActiveRunPointer({ projectRootHash, host: detectHost(), hostSessionId });
+    const pointer = locateActiveRunPointer({ projectRoot: path.resolve(projectDir || process.cwd()), host: detectHost(), hostSessionId });
     if (!pointer.ok || !pointer.value || !pointer.value.runId) {
       fail('no-current-run');
       return;

@@ -108,10 +108,18 @@ const ASK_ELIGIBLE_PERMISSION_MODES = new Set(['auto', 'manual', 'default']);
  * whether a KRYLO run is active, and deny rather than pass through silently
  * if so.
  */
-function failSafeOnUnreadablePayload() {
+//
+// `rawPayload` is the parsed payload when only normalization failed. Its
+// `session_id` is used solely to FIND a run to deny under (never to allow
+// anything), so the lookup tolerates a process cwd below the run's project
+// root the same way the normal path does
+// (docs/adr/0043-session-keyed-run-resolution.md). With no parseable
+// payload there is no session id, and only the process cwd remains.
+function failSafeOnUnreadablePayload(rawPayload) {
   const identity = claudeCwdFallbackIdentity();
   if (identity) {
-    const run = resolveActiveRun({ projectRoot: identity.projectRoot, host: identity.host, hostSessionId: identity.hostSessionId });
+    const rawSessionId = typeof rawPayload?.session_id === 'string' && rawPayload.session_id.trim() !== '' ? rawPayload.session_id.trim() : undefined;
+    const run = resolveActiveRun({ projectRoot: identity.projectRoot, host: identity.host, hostSessionId: rawSessionId ?? identity.hostSessionId });
     if (run.active) emitClaudePreToolDecision('deny', 'KRYLO risk gate could not read this action and denied it as a fail-safe. Re-run with a well-formed request.');
   }
   allowClaudeSilently();
@@ -121,7 +129,7 @@ async function main() {
   const input = await readStdinJson();
   if (!input.ok) failSafeOnUnreadablePayload();
   const normalized = normalizeClaudeHookPayload(input.value);
-  if (!normalized.ok) failSafeOnUnreadablePayload();
+  if (!normalized.ok) failSafeOnUnreadablePayload(input.value);
   const payload = normalized.payload;
 
   const run = resolveActiveRun({

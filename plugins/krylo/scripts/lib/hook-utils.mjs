@@ -11,7 +11,7 @@
 // transport module (e.g. scripts/host/claude/hook-transport.mjs) before
 // calling resolveActiveRun() here.
 
-import { readActiveRunPointer, loadState, computeProjectRootHash, listActiveRunPointersForSession } from './state.mjs';
+import { locateActiveRunPointer } from './state.mjs';
 
 const STDIN_LIMIT = 1024 * 1024; // 1 MB guard against unbounded input
 
@@ -52,50 +52,21 @@ export function eventName(payload) {
  * to one host's own directory; it is never applied across hosts.
  *
  * When `hostSessionId` IS known and the path-keyed lookup misses, the
- * session is looked up by its id alone under every project before this
- * returns { active: false } (docs/adr/0043-session-keyed-run-resolution.md).
+ * session is looked up under the nearest ancestor directory, then under any
+ * project, before this returns { active: false }; see locateActiveRunPointer()
+ * in state.mjs and docs/adr/0043-session-keyed-run-resolution.md.
  * `projectRoot` comes from the payload's `cwd`, which the session itself can
- * move: Claude Code carries a `cd` into a project subdirectory over to later
- * calls, and Codex 0.166.0 reports the command's own working directory. A
- * path miss for a named session is therefore never proof that the session is
- * ungoverned, and treating it as such switched every gate off mid-run.
+ * move: Claude Code documents that a `cd` inside the project carries over to
+ * later calls, and Codex 0.166.0 reports the command's own working directory.
+ * A path miss for a named session is therefore never proof that the session
+ * is ungoverned, and treating it as such switched every gate off mid-run.
  */
 export function resolveActiveRun({ projectRoot, host, hostSessionId } = {}) {
   try {
     if (!host) return { active: false };
-    const byPath = resolveActiveRunByPath({ projectRoot, host, hostSessionId });
-    if (byPath.active || !hostSessionId) return byPath;
-    return resolveActiveRunBySession({ host, hostSessionId });
+    const found = locateActiveRunPointer({ projectRoot, host, hostSessionId, requireActive: true });
+    return found.ok && found.state ? { active: true, state: found.state } : { active: false };
   } catch {
     return { active: false };
   }
-}
-
-function resolveActiveRunByPath({ projectRoot, host, hostSessionId }) {
-  const projectRootHash = computeProjectRootHash(projectRoot ?? process.cwd());
-  const pointer = readActiveRunPointer({ projectRootHash, host, hostSessionId });
-  if (!pointer.ok || !pointer.value?.runId) return { active: false };
-  if (pointer.value.projectRootHash && pointer.value.projectRootHash !== projectRootHash) return { active: false };
-  return activeStateFor(pointer.value.runId, { host, hostSessionId });
-}
-
-// Every non-terminal run this exact session owns, under any project; if a
-// session somehow has more than one, the most recently updated pointer wins.
-function resolveActiveRunBySession({ host, hostSessionId }) {
-  let best = null;
-  for (const pointer of listActiveRunPointersForSession({ host, hostSessionId })) {
-    const candidate = activeStateFor(pointer.runId, { host, hostSessionId });
-    if (!candidate.active) continue;
-    const updatedAt = String(pointer.updatedAt ?? '');
-    if (!best || updatedAt > best.updatedAt) best = { state: candidate.state, updatedAt };
-  }
-  return best ? { active: true, state: best.state } : { active: false };
-}
-
-function activeStateFor(runId, { host, hostSessionId }) {
-  const loaded = loadState(runId);
-  if (!loaded.ok || loaded.value.terminalState !== null) return { active: false };
-  if (loaded.value.host.name !== host) return { active: false };
-  if (hostSessionId && loaded.value.host.sessionId !== hostSessionId) return { active: false };
-  return { active: true, state: loaded.value };
 }
