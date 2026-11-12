@@ -43,8 +43,12 @@ jobs:
         run: claude plugin validate --strict plugins/krylo
       - name: Validate marketplace manifest (strict)
         run: claude plugin validate --strict .
-      - name: Enforce CLAUDE.md line budget
+      - name: Enforce repository instructions line budget
         run: |
-          lines=$(wc -l < CLAUDE.md)
-          echo "CLAUDE.md lines: $lines"
-          test "$lines" -le 130
+          # AGENTS.md is the instructions index; CLAUDE.md only imports it.
+          for f in AGENTS.md CLAUDE.md; do
+            lines=$(wc -l < "$f")
+            echo "$f lines: $lines"
+            test "$lines" -le 130
+          done
+          grep -qx '@AGENTS.md' CLAUDE.md

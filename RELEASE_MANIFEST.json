@@ -2,7 +2,7 @@
   "name": "krylo-release",
   "version": "0.3.0",
   "note": "Per-file SHA-256 of every git-tracked file at HEAD (excluding this manifest itself). Hashed from the committed git blob content, not the working tree, so this is reproducible from a clean clone of the same commit. Deterministic: regenerating from an unchanged HEAD produces byte-identical output (no timestamp or other nondeterministic field is embedded). BLUEPRINT_MANIFEST.json remains the separate, immutable record of blueprint 0.1.2 as delivered in the baseline commit.",
-  "fileCount": 387,
+  "fileCount": 388,
   "files": [
     {
       "path": ".claude-plugin/marketplace.json",
@@ -111,8 +111,8 @@
     },
     {
       "path": ".github/workflows/validate-plugin.yml",
-      "bytes": 2102,
-      "sha256": "d1fa8f802d1fd704adce1d1c7bdd824f0fd42d9eaf4e2af126e6df4c7e22783d"
+      "bytes": 2286,
+      "sha256": "e3320178661ff8c30adc1475f23e83f9f1ba5e75544df4ad46f0a7c9ea5c8880"
     },
     {
       "path": ".gitignore",
@@ -120,9 +120,14 @@
       "sha256": "898c5201021829de75700598c79e1d0e4962817dc045b95de48d7b3b33e9e757"
     },
     {
+      "path": "AGENTS.md",
+      "bytes": 7386,
+      "sha256": "8804597b347b98b130d22fa56e3fd24006aebfb302e295f3fc381ca69ec682bb"
+    },
+    {
       "path": "ARCHITECTURE.md",
-      "bytes": 8114,
-      "sha256": "17b0042a4e2752b21b255609394d5a526159c9b42683bfe4d0712f6e86647cab"
+      "bytes": 8271,
+      "sha256": "f9a2574dc8ff7d4f55de0e88c30723cd16d72995dbcd856610a3582b2f5fd0c4"
     },
     {
       "path": "BLUEPRINT_MANIFEST.json",
@@ -131,13 +136,13 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 44534,
-      "sha256": "4bec7fe98e7ff0376f5b67d0d5a6d725e82d8b9ad269b489e147aa4145abd909"
+      "bytes": 45300,
+      "sha256": "7c7c4d8e7ae7afb66b279440966af288e9581487b5ed3276e99a69dfe96c4380"
     },
     {
       "path": "CLAUDE.md",
-      "bytes": 7226,
-      "sha256": "712bf29c0f5308adb16e173211b77cddca5feaa0ea82caa4c5f26796f05f239e"
+      "bytes": 11,
+      "sha256": "336cc4fbf19beaada7ccf9986414fa91851a8d7a07dfb3ccbe800a69eed0ab49"
     },
     {
       "path": "CODE_OF_CONDUCT.md",
@@ -781,8 +786,8 @@
     },
     {
       "path": "docs/process/FILE_MANIFEST.md",
-      "bytes": 21505,
-      "sha256": "e3ac9e9ad355ac89dff0af376e89d7b1809fbdb59aee89dd6051993fa492ee17"
+      "bytes": 21634,
+      "sha256": "f0031df0df95da959df301e42a8c67012cce52d983dd8987710343f4800acc19"
     },
     {
       "path": "docs/process/IMPLEMENTATION_PLAN.md",
@@ -806,13 +811,13 @@
     },
     {
       "path": "docs/process/PROMPT_INPUT_CONTRACT.md",
-      "bytes": 2625,
-      "sha256": "4d6c2b156c7f39fb0aae7749493a4c0d41d00a709ce32423ca481de09faa4352"
+      "bytes": 2653,
+      "sha256": "fb67c8306d352fe94c17eb26417d0a545cea6928e822f7643996371ef98b947d"
     },
     {
       "path": "docs/process/REVIEW_CHECKLIST.md",
-      "bytes": 2947,
-      "sha256": "8e567f8aaf5a34954eef1d2e46ada2b89d90c80b3d5614753af40c5ad8851264"
+      "bytes": 3018,
+      "sha256": "353f6ed8169424a8040932a35176e13aedeafa29cf7c29a103ce15c744a1e2a2"
     },
     {
       "path": "docs/templates/adr-template.md",
