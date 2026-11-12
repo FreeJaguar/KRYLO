@@ -17,7 +17,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { platformSpawnTarget, killProcessTree } from '../../lib/spawn-platform.mjs';
+import { platformSpawnTargetDetailed, killProcessTree } from '../../lib/spawn-platform.mjs';
 import { parseCodexVersion } from '../../lib/version-compare.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -32,7 +32,10 @@ const SUPPORTED_CONTRACT_SCHEMA_VERSION = 1;
 // runs once per invocation, never per ordinary prompt (see the bootstrap
 // hook's own call site) -- a 5s bound is generous without risking a long
 // stall on a genuinely hung/unresponsive binary.
-const PROBE_TIMEOUT_MS = 5000;
+// Exported so tests/unit/runtime-compat.test.mjs can pin the budget
+// inequality this gate must satisfy inside the UserPromptSubmit hook,
+// rather than restating the number and drifting from it.
+export const PROBE_TIMEOUT_MS = 5000;
 const PROBE_MAX_BUFFER_BYTES = 64 * 1024;
 
 /**
@@ -81,11 +84,23 @@ export function loadCompatibilityContract({ contractPath = DEFAULT_CONTRACT_PATH
  * Codex installation -- production callers resolve `cliPath` from
  * env.KRYLO_CODEX_CLI_PATH (default 'codex'), never from prompt content.
  * Never throws; every failure returns { ok: false, reason }.
+ *
+ * 'probe-executable-unresolved' is reserved for a resolution that actually
+ * ANSWERED that nothing matches. When the PATH lookup itself is abandoned or
+ * cannot run, existence is unknown, so the transient 'probe-timeout' is
+ * reported instead -- both refuse the run identically (SAFE_BLOCKED), but
+ * only one of them tells a human to go install Codex. CI produced exactly
+ * that false claim: a contended Windows runner exceeded the lookup's own
+ * timeout and the gate reported an absent binary that was present.
  */
-export function probeCodexVersion({ cliPath = 'codex', env = process.env, timeoutMs = PROBE_TIMEOUT_MS } = {}) {
+export function probeCodexVersion({ cliPath = 'codex', env = process.env, timeoutMs = PROBE_TIMEOUT_MS, resolutionTimeoutMs } = {}) {
   try {
-    const target = platformSpawnTarget(cliPath, ['--version']);
-    if (!target) return { ok: false, reason: 'probe-executable-unresolved' };
+    const resolution = platformSpawnTargetDetailed(cliPath, ['--version'], resolutionTimeoutMs === undefined ? {} : { timeoutMs: resolutionTimeoutMs });
+    const target = resolution.target;
+    if (!target) {
+      const unknown = resolution.failure === 'lookup-timeout' || resolution.failure === 'lookup-failed';
+      return { ok: false, reason: unknown ? 'probe-timeout' : 'probe-executable-unresolved' };
+    }
 
     const res = spawnSync(target.command, target.args, {
       encoding: 'utf8',

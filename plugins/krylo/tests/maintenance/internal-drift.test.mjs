@@ -11,7 +11,11 @@ import path from 'node:path';
 
 import { runInternalDriftChecks } from '../../scripts/maintenance/checks/internal-drift.mjs';
 
-function makeFixtureRepo({ pkgVersion = '0.1.1', claudePluginVersion = '0.1.1', codexPluginVersion = '0.1.1', marketplaceVersion = '0.1.1', changelog = '## [Unreleased]\n\nsome notes\n\n## [0.1.1] - 2026-07-20\n' } = {}) {
+function makeFixtureRepo({
+  pkgVersion = '0.1.1', claudePluginVersion = '0.1.1', codexPluginVersion = '0.1.1', marketplaceVersion = '0.1.1',
+  aliasVersion = '0.1.1', rulesVersion = '0.1.1', hooksVersion = '0.1.1', launcherVersion = '0.1.1',
+  changelog = '## [Unreleased]\n\nsome notes\n\n## [0.1.1] - 2026-07-20\n',
+} = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-maint-drift-'));
   fs.mkdirSync(path.join(dir, 'plugins', 'krylo', '.claude-plugin'), { recursive: true });
   fs.mkdirSync(path.join(dir, 'plugins', 'krylo', '.codex-plugin'), { recursive: true });
@@ -22,10 +26,30 @@ function makeFixtureRepo({ pkgVersion = '0.1.1', claudePluginVersion = '0.1.1', 
   fs.writeFileSync(path.join(dir, 'plugins', 'krylo', '.codex-plugin', 'plugin.json'), JSON.stringify({ name: 'krylo', version: codexPluginVersion }));
   fs.writeFileSync(path.join(dir, '.claude-plugin', 'marketplace.json'), JSON.stringify({ plugins: [{ name: 'krylo', version: marketplaceVersion }] }));
   fs.writeFileSync(path.join(dir, 'CHANGELOG.md'), changelog);
+
+  // The four version stamps embedded in generated, user-facing artifacts.
+  // They are part of this check because they went stale twice by NOT being
+  // (see internal-drift.mjs's own comment), so the fixture has to carry
+  // them or every case here would exercise a "source missing" path instead
+  // of the agreement logic it means to test.
+  fs.mkdirSync(path.join(dir, 'plugins', 'krylo', 'scripts', 'setup'), { recursive: true });
+  fs.mkdirSync(path.join(dir, 'plugins', 'krylo', 'codex', 'project-hooks'), { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, 'plugins', 'krylo', 'scripts', 'setup', 'install-alias.mjs'),
+    `const ALIAS_VERSION = '${aliasVersion}';\n`,
+  );
+  fs.writeFileSync(
+    path.join(dir, 'plugins', 'krylo', 'scripts', 'setup', 'install-codex.mjs'),
+    `const RULES_VERSION = '${rulesVersion}';\nconst HOOKS_VERSION = '${hooksVersion}';\n`,
+  );
+  fs.writeFileSync(
+    path.join(dir, 'plugins', 'krylo', 'codex', 'project-hooks', 'codex-project-hook-launcher.mjs'),
+    `// krylo-hook-launcher-version: ${launcherVersion}\n`,
+  );
   return dir;
 }
 
-test('product version agreement: all five sources agree -> ok', async () => {
+test('product version agreement: all sources agree -> ok', async () => {
   const repoRoot = makeFixtureRepo();
   const results = await runInternalDriftChecks({ repoRoot });
   const check = results.find((r) => r.id === 'product-version-agreement');
@@ -40,6 +64,22 @@ test('compatibility floor / product version agreement: a mismatched plugin.json 
   assert.equal(check.status, 'changed');
   assert.equal(check.severity, 'high');
   fs.rmSync(repoRoot, { recursive: true, force: true });
+});
+
+// REGRESSION (fourth independent review, F3). Each embedded stamp must be
+// individually load-bearing. These are the exact stamps that silently went
+// stale at the 0.3.0 bump with every test still green, and that
+// RELEASE_READINESS.md records going stale once before at 0.2.0 -- a check
+// that merely LISTS them without failing on each one would repeat that.
+test('product version agreement: each embedded artifact stamp is individually load-bearing', async () => {
+  for (const stale of ['aliasVersion', 'rulesVersion', 'hooksVersion', 'launcherVersion']) {
+    const repoRoot = makeFixtureRepo({ [stale]: '0.1.0' });
+    const results = await runInternalDriftChecks({ repoRoot });
+    const check = results.find((r) => r.id === 'product-version-agreement');
+    assert.equal(check.status, 'changed', `a stale ${stale} must be caught`);
+    assert.equal(check.severity, 'high', `a stale ${stale} must be high severity`);
+    fs.rmSync(repoRoot, { recursive: true, force: true });
+  }
 });
 
 test('future 0.2 planning docs do NOT create a false-positive product-version drift finding', async () => {

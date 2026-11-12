@@ -9,7 +9,24 @@ import {
   createClaudeHostIdentity,
   applyClaudeRuntimeEnvironment,
   bootstrapClaudeStorageEnvironment,
+  hasNativeClaudeSignal,
 } from '../../scripts/host/claude/context.mjs';
+
+// REGRESSION (independent review, F1). host-dispatch.mjs's detectHost()
+// needs to know whether THIS host's own signal is genuinely present, to
+// outrank a same-machine signal belonging to a different host that was
+// merely inherited by accident. Shared Core is forbidden from reading this
+// host's env vars directly (validate-runtime.mjs's hostIsolation check), so
+// this boolean is the only channel -- covered here directly, in the one
+// file allowed to read the underlying variables.
+test('hasNativeClaudeSignal: true when any native signal is present, false otherwise', () => {
+  assert.equal(hasNativeClaudeSignal({ CLAUDE_SESSION_ID: 'x' }), true);
+  assert.equal(hasNativeClaudeSignal({ CLAUDE_PLUGIN_ROOT: '/x' }), true);
+  assert.equal(hasNativeClaudeSignal({ CLAUDE_PLUGIN_DATA: '/x' }), true);
+  assert.equal(hasNativeClaudeSignal({ CLAUDE_SESSION_ID: '   ' }), false, 'whitespace-only is not a real value');
+  assert.equal(hasNativeClaudeSignal({}), false);
+  assert.equal(hasNativeClaudeSignal({ CODEX_THREAD_ID: 'x' }), false, 'a different host\'s own signal must not count');
+});
 
 test('an already-set KRYLO_DATA_ROOT overrides the Claude-derived data root and is never silently recomputed', () => {
   const isolatedRoot = path.resolve('tmp-isolated-krylo-data');

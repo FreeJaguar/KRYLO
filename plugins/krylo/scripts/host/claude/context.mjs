@@ -35,6 +35,23 @@ export function resolveClaudeSessionId({ explicitSessionId, hookPayload, env = p
   return null;
 }
 
+// Governance guard (scripts/validation/validate-runtime.mjs's hostIsolation
+// check) forbids Shared Core (host-dispatch.mjs included) from referencing
+// this host's own env vars directly, by design (ADR-0023): only this file
+// may read them. host-dispatch.mjs's detectHost() needs to know whether a
+// genuine signal from THIS host is present -- to outrank a same-machine
+// signal belonging to a different host that was merely inherited by
+// accident (a nested terminal, a devcontainer, a forwarded shell
+// environment) -- without itself reading the variable name. This is that
+// boundary: a plain boolean, never the value itself.
+export function hasNativeClaudeSignal(env = process.env) {
+  return (
+    (typeof env.CLAUDE_SESSION_ID === 'string' && env.CLAUDE_SESSION_ID.trim() !== '')
+    || (typeof env.CLAUDE_PLUGIN_ROOT === 'string' && env.CLAUDE_PLUGIN_ROOT.trim() !== '')
+    || (typeof env.CLAUDE_PLUGIN_DATA === 'string' && env.CLAUDE_PLUGIN_DATA.trim() !== '')
+  );
+}
+
 export function resolveClaudeDataRoot(env = process.env) {
   if (typeof env.KRYLO_DATA_ROOT === 'string' && env.KRYLO_DATA_ROOT.trim() !== '') {
     return path.resolve(env.KRYLO_DATA_ROOT);
