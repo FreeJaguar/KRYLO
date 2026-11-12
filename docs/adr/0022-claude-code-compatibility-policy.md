@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted. The pinned floor was raised from `2.1.223` to `2.1.318` by `docs/adr/0042-claude-host-reverified-on-2-1-318.md`, following this ADR's own version upgrade policy.
 
 ## Context
 

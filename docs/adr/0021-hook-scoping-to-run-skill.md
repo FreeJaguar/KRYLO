@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted
+Accepted. The hook-lifetime premise below is corrected by `docs/adr/0042-claude-host-reverified-on-2-1-318.md`: verified live on Claude Code 2.1.318, skill hooks stay registered for the rest of the session after the skill is invoked, not only while it is active. The placement decision stands.
 
 ## Context
 

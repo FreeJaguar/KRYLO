@@ -1,11 +1,13 @@
-// Verifies the Item 4 hook-scoping decision (docs/adr/0021-hook-scoping-to-run-skill.md):
-// per the current Claude Code hook schema, hooks declared in a Skill's own
-// frontmatter run only while that skill is active and are cleaned up when it
-// finishes; plugin-wide hooks/hooks.json runs for every ordinary session
-// regardless of whether any KRYLO skill was invoked. KRYLO's six gate/
-// telemetry hooks must live in the run skill's frontmatter, not plugin-wide,
-// so an ordinary Claude Code session that never invokes /krylo:run launches
-// zero KRYLO hook processes.
+// Verifies the hook-scoping decision (docs/adr/0021-hook-scoping-to-run-skill.md,
+// lifetime corrected by docs/adr/0042-claude-host-reverified-on-2-1-318.md):
+// hooks declared in a Skill's own frontmatter are registered when the skill
+// is invoked and, as verified live on Claude Code 2.1.318, keep running for
+// the rest of that session; plugin-wide hooks/hooks.json runs for every
+// ordinary session regardless of whether any KRYLO skill was invoked.
+// KRYLO's six gate/telemetry hooks must live in the run skill's frontmatter,
+// not plugin-wide, so an ordinary Claude Code session that never invokes
+// /krylo:run launches zero KRYLO hook processes. After a run ends they stay
+// registered but pass through, because no run is active.
 //
 // What this test CAN prove deterministically: the wiring — hooks/hooks.json
 // registers nothing plugin-wide, the run skill's frontmatter registers all
@@ -56,6 +58,46 @@ test('the run skill frontmatter declares all six required hook events against re
   // AskUserQuestion and the write-surface matcher (extended to MCP tools for Item 2) must both be present.
   assert.ok(block.includes('AskUserQuestion'));
   assert.ok(block.includes('Bash|PowerShell|Write|Edit|NotebookEdit|Read|Glob|Grep|mcp__.*'));
+});
+
+// The one hook entry (type/command/timeout/onFailure lines) whose command
+// references `scriptRel`, as raw frontmatter text.
+function hookEntryFor(block, scriptRel) {
+  const lines = block.split(/\r?\n/);
+  const at = lines.findIndex((l) => l.includes(scriptRel));
+  assert.ok(at > 0, `no hook entry references ${scriptRel}`);
+  let start = at;
+  while (start > 0 && !/^\s*- type:/.test(lines[start])) start--;
+  let end = at + 1;
+  while (end < lines.length && !/^\s*-\s/.test(lines[end]) && !/^\s*[A-Za-z]+:\s*$/.test(lines[end])) end++;
+  return lines.slice(start, end).join('\n');
+}
+
+// docs/adr/0042-claude-host-reverified-on-2-1-318.md: verified live on
+// 2.1.318, a PreToolUse hook whose script cannot start let the action
+// through on Windows with Git Bash (and does on macOS/Linux), so a crashed
+// risk gate was a silent bypass. `onFailure: "block"` (Claude Code 2.1.295)
+// makes both gates fail closed on every platform.
+test('both PreToolUse gates fail closed when their own process cannot start', () => {
+  const block = frontmatterBlock(path.join(PLUGIN_ROOT, 'skills', 'run', 'SKILL.md'));
+  for (const gate of ['scripts/security/risk-gate.mjs', 'scripts/security/question-gate.mjs']) {
+    assert.match(hookEntryFor(block, gate), /^\s*onFailure:\s*"block"\s*$/m, `${gate} must declare onFailure: "block"`);
+  }
+});
+
+// A Stop hook that blocks on its own failure would keep a session from
+// ending at all if Node broke, and the telemetry/status hooks gate nothing,
+// so only the two PreToolUse gates may fail closed.
+test('no non-gate hook declares onFailure: "block"', () => {
+  const block = frontmatterBlock(path.join(PLUGIN_ROOT, 'skills', 'run', 'SKILL.md'));
+  for (const script of [
+    'scripts/runtime/posttool-telemetry.mjs',
+    'scripts/orbit/fingerprint.mjs',
+    'scripts/status/agent-events.mjs',
+    'scripts/orbit/stop-gate.mjs',
+  ]) {
+    assert.doesNotMatch(hookEntryFor(block, script), /onFailure/, `${script} must not declare onFailure`);
+  }
 });
 
 test('no other KRYLO skill declares an interception hook', () => {
