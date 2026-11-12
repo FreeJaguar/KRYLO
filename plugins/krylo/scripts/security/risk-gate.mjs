@@ -69,6 +69,7 @@ import {
   allowClaudeSilently,
   claudeCwdFallbackIdentity,
 } from '../host/claude/hook-transport.mjs';
+import { resolveClaudeSessionId } from '../host/claude/context.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { classifyRiskAction } from './risk-policy.mjs';
 import { isMcpToolName } from './mcp-classifier.mjs';
@@ -118,7 +119,9 @@ const ASK_ELIGIBLE_PERMISSION_MODES = new Set(['auto', 'manual', 'default']);
 function failSafeOnUnreadablePayload(rawPayload) {
   const identity = claudeCwdFallbackIdentity();
   if (identity) {
-    const rawSessionId = typeof rawPayload?.session_id === 'string' && rawPayload.session_id.trim() !== '' ? rawPayload.session_id.trim() : undefined;
+    // The host adapter's own resolution (payload session_id, then the host's
+    // session environment variable), as the normal path uses.
+    const rawSessionId = resolveClaudeSessionId({ hookPayload: rawPayload && typeof rawPayload === 'object' ? rawPayload : undefined }) ?? undefined;
     const run = resolveActiveRun({ projectRoot: identity.projectRoot, host: identity.host, hostSessionId: rawSessionId ?? identity.hostSessionId });
     if (run.active) emitClaudePreToolDecision('deny', 'KRYLO risk gate could not read this action and denied it as a fail-safe. Re-run with a well-formed request.');
   }

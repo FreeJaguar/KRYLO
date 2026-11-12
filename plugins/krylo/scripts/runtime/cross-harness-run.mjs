@@ -150,9 +150,9 @@ async function main() {
   const nativeHost = detectHost();
   const hostSessionId = resolveSessionId({ explicitSessionId: args.session }) || undefined;
   // See update-state.mjs: tolerant of a working directory below the run's project root.
-  const pointer = locateActiveRunPointer({ projectRoot, host: nativeHost, hostSessionId });
+  const pointer = locateActiveRunPointer({ projectRoot, host: nativeHost, hostSessionId, requireActive: true, ambiguity: 'fail' });
   if (!pointer.ok || !pointer.value?.runId) {
-    output({ ok: false, failureCode: 'NO_ACTIVE_RUN', error: 'no-current-run' });
+    output({ ok: false, failureCode: 'NO_ACTIVE_RUN', error: pointer.error === 'ambiguous-session-run' ? 'ambiguous-session-run' : 'no-current-run' });
     process.exit(1);
     return;
   }

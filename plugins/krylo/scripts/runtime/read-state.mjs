@@ -39,9 +39,9 @@ function main() {
   if (!runId) {
     // See update-state.mjs: tolerant of a working directory below the run's project root.
     const hostSessionId = resolveSessionId({ explicitSessionId: args.session }) || undefined;
-    const pointer = locateActiveRunPointer({ projectRoot: path.resolve(args.projectDir || process.cwd()), host: detectHost(), hostSessionId });
+    const pointer = locateActiveRunPointer({ projectRoot: path.resolve(args.projectDir || process.cwd()), host: detectHost(), hostSessionId, requireActive: true, ambiguity: 'fail' });
     if (!pointer.ok || !pointer.value || !pointer.value.runId) {
-      console.log(JSON.stringify({ ok: false, error: 'no-current-run' }));
+      console.log(JSON.stringify({ ok: false, error: pointer.error === 'ambiguous-session-run' ? 'ambiguous-session-run' : 'no-current-run' }));
       process.exit(1);
       return;
     }

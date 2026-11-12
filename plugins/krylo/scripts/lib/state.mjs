@@ -1176,15 +1176,17 @@ function listProjectRootHashes(index) {
 }
 
 /**
- * This session's own pointer under one project-root hash, or null. A pointer
- * whose runId is not a string, or whose recorded projectRootHash disagrees
- * with the directory it sits in, is ignored. Never throws.
+ * This session's own pointer under one project-root hash, or null. Only a
+ * string runId is required here: the run it leads to is validated by
+ * activeRunStateFor() (host, session, non-terminal). A recorded
+ * projectRootHash that disagrees with the directory is deliberately NOT a
+ * reason to skip it -- rejecting a pointer to this session's own live run
+ * could only turn a governed session into a pass-through. Never throws.
  */
 function readSessionPointerAt(projectRootHash, host, hostSessionId) {
   try {
     const result = readJson(activeRunPointerPath(projectRootHash, host, hostSessionId));
     if (!result.ok || typeof result.value?.runId !== 'string' || result.value.runId === '') return null;
-    if (result.value.projectRootHash && result.value.projectRootHash !== projectRootHash) return null;
     return result.value;
   } catch {
     return null;
@@ -1217,24 +1219,32 @@ export function activeRunStateFor(pointer, { host, hostSessionId } = {}) {
  *   1. The exact path-keyed pointer for `projectRoot`, with readActiveRunPointer()'s
  *      existing semantics (including the ADR-0020 most-recent fallback when
  *      no session id is known). With `requireActive`, it is used only if it
- *      leads to this session's non-terminal run.
+ *      leads to this session's non-terminal run; otherwise resolution goes on.
  *   2. Only for a known session: this session's pointer under the NEAREST
  *      ancestor of `projectRoot` -- a `cd` into a subdirectory, or a command
- *      workdir, resolves to the project it is inside, not to some other
- *      project the same session also has a run in.
- *   3. Only for a known session: this session's pointer under any project;
- *      if several lead to active runs, the most recently updated wins.
+ *      workdir, resolves to the project it is inside.
+ *   3. Only for a known session: this session's pointer under any project.
+ *      If several lead to active runs, `ambiguity: 'newest'` (hooks, which at
+ *      worst gate against the wrong one of the session's own runs) takes the
+ *      most recently updated; `ambiguity: 'fail'` (state-mutating CLIs) refuses
+ *      with error 'ambiguous-session-run' rather than guess which run to change.
  *
- * Steps 2 and 3 accept a pointer only when it leads to this exact session's
- * non-terminal run. Returns { ok: true, value: pointer, state? } (state when
- * it was loaded) or { ok: false, error }. Never throws.
+ * Steps 2 and 3 accept only a pointer that leads to this exact host's and
+ * session's non-terminal run. Each step is isolated: a failure in one never
+ * skips the next. Returns { ok: true, value: pointer, state? } or
+ * { ok: false, error }. Never throws.
  */
-export function locateActiveRunPointer({ projectRoot, host, hostSessionId, requireActive = false } = {}) {
+export function locateActiveRunPointer({ projectRoot, host, hostSessionId, requireActive = false, ambiguity = 'newest' } = {}) {
+  if (!host) return { ok: false, error: 'host-required' };
+  let root;
   try {
-    if (!host) return { ok: false, error: 'host-required' };
-    const root = path.resolve(projectRoot ?? process.cwd());
-    const rootHash = computeProjectRootHash(root);
+    root = path.resolve(projectRoot ?? process.cwd());
+  } catch {
+    return { ok: false, error: 'lookup-failed' };
+  }
 
+  try {
+    const rootHash = computeProjectRootHash(root);
     const exact = readActiveRunPointer({ projectRootHash: rootHash, host, hostSessionId });
     const exactUsable = exact.ok && typeof exact.value?.runId === 'string'
       && (!exact.value.projectRootHash || exact.value.projectRootHash === rootHash);
@@ -1242,30 +1252,37 @@ export function locateActiveRunPointer({ projectRoot, host, hostSessionId, requi
       if (!requireActive) return { ok: true, value: exact.value };
       const state = activeRunStateFor(exact.value, { host, hostSessionId });
       if (state) return { ok: true, value: exact.value, state };
-      // Not final when it does not lead to an active run: a stale pointer at
-      // this exact directory, or a state read that failed transiently while
-      // another hook was replacing state.json, must not hide this session's
-      // live run -- treating either as "no run" is a fail-open pass-through.
-      // The fallbacks below re-validate every candidate independently.
+      // Not final when it does not lead to an active run: a stale pointer
+      // here, or a state read that failed transiently while another hook was
+      // replacing state.json, must not hide this session's live run.
     }
-    if (!hostSessionId) return { ok: false, error: 'not-found' };
+  } catch {
+    // An unexpected failure in the exact lookup must not skip the fallbacks.
+  }
+  if (!hostSessionId) return { ok: false, error: 'not-found' };
 
+  try {
     for (let dir = path.dirname(root); ; dir = path.dirname(dir)) {
       const pointer = readSessionPointerAt(computeProjectRootHash(dir), host, hostSessionId);
       const state = pointer && activeRunStateFor(pointer, { host, hostSessionId });
       if (state) return { ok: true, value: pointer, state };
       if (path.dirname(dir) === dir) break;
     }
+  } catch {
+    // fall through to the session scan
+  }
 
-    let best = null;
+  try {
+    const found = [];
     for (const projectRootHash of listProjectRootHashes('active-runs')) {
       const pointer = readSessionPointerAt(projectRootHash, host, hostSessionId);
       const state = pointer && activeRunStateFor(pointer, { host, hostSessionId });
-      if (!state) continue;
-      const updatedAt = String(pointer.updatedAt ?? '');
-      if (!best || updatedAt > best.updatedAt) best = { value: pointer, state, updatedAt };
+      if (state) found.push({ value: pointer, state, updatedAt: String(pointer.updatedAt ?? '') });
     }
-    return best ? { ok: true, value: best.value, state: best.state } : { ok: false, error: 'not-found' };
+    if (found.length === 0) return { ok: false, error: 'not-found' };
+    if (found.length > 1 && ambiguity === 'fail') return { ok: false, error: 'ambiguous-session-run' };
+    const best = found.reduce((a, b) => (b.updatedAt > a.updatedAt ? b : a));
+    return { ok: true, value: best.value, state: best.state };
   } catch {
     return { ok: false, error: 'lookup-failed' };
   }

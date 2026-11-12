@@ -53,6 +53,7 @@ import {
   allowCodexSilently,
   codexCwdFallbackIdentity,
 } from '../host/codex/hook-transport.mjs';
+import { resolveCodexSessionId } from '../host/codex/context.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { classifyRiskAction } from './risk-policy.mjs';
 import { computeProjectRootHash, readBootstrapFailureMarker, readBootstrapFailureMarkerForSession } from '../lib/state.mjs';
@@ -111,7 +112,8 @@ function normalizeCodexToolName(rawName) {
 // needs a `cwd`, since it falls back to the session under any project
 // (docs/adr/0043-session-keyed-run-resolution.md).
 function failSafeOnUnreadablePayload(rawPayload) {
-  const rawSessionId = typeof rawPayload?.session_id === 'string' && rawPayload.session_id.trim() !== '' ? rawPayload.session_id.trim() : null;
+  // The host adapter's own resolution (payload session_id, then CODEX_THREAD_ID).
+  const rawSessionId = resolveCodexSessionId({ hookPayload: rawPayload && typeof rawPayload === 'object' ? rawPayload : undefined });
   const identity = codexCwdFallbackIdentity();
   if (identity) {
     const run = resolveActiveRun({ projectRoot: identity.projectRoot, host: identity.host, hostSessionId: rawSessionId ?? identity.hostSessionId });

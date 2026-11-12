@@ -314,3 +314,134 @@ test('review round 2: a stale pointer at the exact directory never hides the liv
     teardown(ctx);
   }
 });
+
+// ------------------------------------------------- independent review round 2
+// Mutation testing showed the checks inside the fallbacks were not pinned by
+// any test (dropping the session, host, terminal or recorded-hash check, or
+// the Codex fail-safe's session id, left the suites green). Each test below
+// fails if its specific check is removed.
+
+import { patchState } from '../hooks/helpers.mjs';
+
+function codexProcessEnv(dataDir) {
+  const env = { ...process.env, PLUGIN_DATA: dataDir, PLUGIN_ROOT: dataDir, KRYLO_HOST: 'codex', KRYLO_LOCAL_TELEMETRY: 'false' };
+  for (const k of ['KRYLO_DATA_ROOT', 'CLAUDE_PLUGIN_DATA', 'CLAUDE_PLUGIN_ROOT', 'CLAUDE_SESSION_ID', 'CODEX_THREAD_ID']) delete env[k];
+  return env;
+}
+
+function plantPointer(dataDir, host, dirForHash, sessionId, pointer) {
+  const p = path.join(dataDir, 'active-runs', computeProjectRootHash(dirForHash), host, `${sessionId}.json`);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, JSON.stringify(pointer), 'utf8');
+  return p;
+}
+
+const runIdOf = (statePath) => JSON.parse(fs.readFileSync(statePath, 'utf8')).runId;
+
+test('round 2 (session check): a pointer filed under session S that leads to session T run does not govern S', () => {
+  const ctx = setup('krylo-cwd-r2-');
+  try {
+    const t = createActiveRun(ctx.dataDir, { projectDir: ctx.projectDir }); // session 'hook-session'
+    plantPointer(ctx.dataDir, 'claude', path.join(ctx.unrelatedDir, 'elsewhere'), 'intruder-session', { runId: runIdOf(t.statePath), updatedAt: new Date().toISOString() });
+    const res = runHook('security/risk-gate.mjs', bash('intruder-session', ctx.unrelatedDir, 'git push origin main'), ctx.dataDir, { env: { CLAUDE_SESSION_ID: 'intruder-session' } });
+    assert.equal(res.stdout, '', 'session S has no run of its own and must stay ungoverned');
+  } finally {
+    teardown(ctx);
+  }
+});
+
+test('round 2 (host check): a Claude session never attaches to a Codex run that shares its session id', () => {
+  const ctx = setup('krylo-cwd-r2-');
+  try {
+    const c = createActiveRunCodexOnly(ctx.dataDir, { projectDir: ctx.projectDir }); // host codex, session 'codex-hook-session'
+    plantPointer(ctx.dataDir, 'claude', path.join(ctx.unrelatedDir, 'elsewhere'), 'codex-hook-session', { runId: runIdOf(c.statePath), updatedAt: new Date().toISOString() });
+    const res = runHook('security/risk-gate.mjs', bash('codex-hook-session', ctx.unrelatedDir, 'git push origin main'), ctx.dataDir, { env: { CLAUDE_SESSION_ID: 'codex-hook-session' } });
+    assert.equal(res.stdout, '', 'a Codex run must never govern a Claude session');
+  } finally {
+    teardown(ctx);
+  }
+});
+
+test('round 2 (terminal check): a pointer the fallbacks find for a run that has ended does not govern', () => {
+  const ctx = setup('krylo-cwd-r2-');
+  try {
+    const r = createActiveRun(ctx.dataDir, { projectDir: ctx.projectDir });
+    // End the run WITHOUT clearing its pointer (the normal --terminal path
+    // clears it, which is why the earlier control never reached this check).
+    patchState(r.statePath, (s) => { s.terminalState = 'SAFE_BLOCKED'; });
+    const res = runHook('security/risk-gate.mjs', bash('hook-session', path.join(ctx.projectDir, 'sub'), 'git push origin main'), ctx.dataDir);
+    assert.equal(res.stdout, '', 'a terminal run must not be revived through the fallbacks');
+  } finally {
+    teardown(ctx);
+  }
+});
+
+test('round 2 (recorded hash): a misplaced pointer to this session own live run still governs (fail closed)', () => {
+  const ctx = setup('krylo-cwd-r2-');
+  try {
+    const r = createActiveRun(ctx.dataDir, { projectDir: ctx.projectDir });
+    // Remove the genuine pointer and leave only one whose recorded hash does
+    // not match the directory it sits in.
+    fs.rmSync(path.join(ctx.dataDir, 'active-runs', computeProjectRootHash(ctx.projectDir)), { recursive: true, force: true });
+    plantPointer(ctx.dataDir, 'claude', path.join(ctx.unrelatedDir, 'elsewhere'), 'hook-session', { runId: runIdOf(r.statePath), projectRootHash: computeProjectRootHash(ctx.projectDir), updatedAt: new Date().toISOString() });
+    const res = runHook('security/risk-gate.mjs', bash('hook-session', ctx.unrelatedDir, 'git push origin main'), ctx.dataDir);
+    assert.equal(decisionOf(res), 'ask', 'the run itself is validated by host and session; a hash mismatch must not make it ungoverned');
+  } finally {
+    teardown(ctx);
+  }
+});
+
+test('round 2 (Codex fail-safe): denies from a subdirectory when only normalization failed', () => {
+  const ctx = setup('krylo-cwd-r2-');
+  try {
+    createActiveRunCodexOnly(ctx.dataDir, { projectDir: ctx.projectDir });
+    const raw = JSON.stringify({ ...bash('codex-hook-session', path.join(ctx.projectDir, 'sub'), 'echo hi'), permission_mode: 'x'.repeat(300) });
+    const res = runHookIn(path.join(ctx.projectDir, 'sub'), 'security/risk-gate-codex.mjs', raw, codexProcessEnv(ctx.dataDir));
+    assert.equal(decisionOf(res), 'deny');
+  } finally {
+    teardown(ctx);
+  }
+});
+
+test('round 2 (fail-safe, env session): the Claude fail-safe uses the host session resolution, not only payload.session_id', () => {
+  const ctx = setup('krylo-cwd-r2-');
+  try {
+    createActiveRun(ctx.dataDir, { projectDir: ctx.projectDir });
+    const payload = { hook_event_name: 'PreToolUse', tool_name: 'Bash', tool_input: { command: 'echo hi' }, cwd: path.join(ctx.projectDir, 'sub'), permission_mode: 'x'.repeat(300) };
+    const res = runHookIn(path.join(ctx.projectDir, 'sub'), 'security/risk-gate.mjs', JSON.stringify(payload), { ...claudeEnv(ctx.dataDir), CLAUDE_SESSION_ID: 'hook-session' });
+    assert.equal(decisionOf(res), 'deny');
+  } finally {
+    teardown(ctx);
+  }
+});
+
+test('round 2 (CLI, stale exact pointer): a known session CLI call skips a stale pointer and acts on its live run', () => {
+  const ctx = setup('krylo-cwd-r2-');
+  try {
+    createActiveRun(ctx.dataDir, { projectDir: ctx.projectDir });
+    const sub = path.join(ctx.projectDir, 'sub');
+    plantPointer(ctx.dataDir, 'claude', sub, 'hook-session', { runId: 'run-that-does-not-exist', projectRootHash: computeProjectRootHash(sub), updatedAt: new Date().toISOString() });
+    const res = runCli('runtime/update-state.mjs', ['--add-criterion', 'reached the live run', '--project-dir', sub, '--session', 'hook-session'], ctx.dataDir);
+    assert.equal(res.status, 0, res.stdout);
+    const read = runCli('runtime/read-state.mjs', ['--project-dir', ctx.projectDir, '--session', 'hook-session'], ctx.dataDir);
+    assert.match(read.stdout, /reached the live run/);
+  } finally {
+    teardown(ctx);
+  }
+});
+
+test('round 2 (CLI, ambiguity): a mutating CLI refuses to guess between two projects live runs', () => {
+  const ctx = setup('krylo-cwd-r2-');
+  const projectB = path.join(ctx.dataDir, 'project-b');
+  fs.mkdirSync(projectB, { recursive: true });
+  try {
+    const a = createActiveRun(ctx.dataDir, { projectDir: ctx.projectDir });
+    const b = createActiveRun(ctx.dataDir, { projectDir: projectB });
+    const res = runCli('runtime/update-state.mjs', ['--terminal', 'SAFE_BLOCKED', '--project-dir', ctx.unrelatedDir, '--session', 'hook-session'], ctx.dataDir);
+    assert.notEqual(res.status, 0, 'an ambiguous target must be refused, not guessed');
+    assert.match(res.stdout, /ambiguous/);
+    for (const r of [a, b]) assert.equal(JSON.parse(fs.readFileSync(r.statePath, 'utf8')).terminalState, null, 'neither run may be changed');
+  } finally {
+    teardown(ctx);
+  }
+});
