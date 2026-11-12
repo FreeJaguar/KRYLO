@@ -77,7 +77,7 @@ Runtime state must be written under a KRYLO-owned, host-provided persistent data
 
 ### Repository instruction boundary
 
-The root `CLAUDE.md` is a compact repository operating index capped at 130 lines. It points to authoritative product, architecture, security, workflow, and release documents through progressive references. It governs contributors and Claude Code while modifying the KRYLO source repository, is not installed into user projects, and is not an end-user runtime policy file.
+The root `AGENTS.md` is a compact repository operating index capped at 130 lines. It points to authoritative product, architecture, security, workflow, and release documents through progressive references. It governs contributors and every coding agent while modifying the KRYLO source repository: Codex reads it directly, and the root `CLAUDE.md` contains only an `@AGENTS.md` import so Claude Code loads the same text. Neither file is installed into user projects, and neither is an end-user runtime policy file.
 
 ### Markdown control plane
 
@@ -103,6 +103,7 @@ Adapters are detection and policy modules, not required dependencies. They descr
 krylo/
 |-- .claude-plugin/
 |   `-- marketplace.json
+|-- AGENTS.md
 |-- CLAUDE.md
 |-- plugins/
 |   `-- krylo/
