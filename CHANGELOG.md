@@ -6,6 +6,9 @@ The project follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+- **Repository instructions have one source for every coding agent.** The root `AGENTS.md` now holds the repository control index that `CLAUDE.md` used to hold, and `CLAUDE.md` is reduced to a single `@AGENTS.md` import (the documented Claude Code pattern for sharing one instructions file with other tools). Codex, which reads `AGENTS.md` natively, and Claude Code now load identical text instead of two copies that could drift. The CI line budget (`validate-plugin.yml`) now applies to both files and asserts the import line; `FILE_MANIFEST.md`, `REVIEW_CHECKLIST.md`, and `PROMPT_INPUT_CONTRACT.md` point at `AGENTS.md`. Repository-only change: nothing in the shipped plugin changes.
+
 ## [0.3.0] - 2026-09-16
 
 ### Added

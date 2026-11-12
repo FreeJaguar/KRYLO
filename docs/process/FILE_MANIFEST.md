@@ -6,7 +6,8 @@ Originally the planned target manifest of the blueprint (preserved verbatim in t
 
 ```text
 .claude-plugin/marketplace.json             # implemented
-CLAUDE.md                                   # compact index, 115 lines (<=130)
+AGENTS.md                                   # compact index, single source for every coding agent, 115 lines (<=130)
+CLAUDE.md                                   # one-line `@AGENTS.md` import for Claude Code
 README.md                                   # implemented (public repository readme)
 CHANGELOG.md                                # implemented (0.1.0 entry)
 CONTRIBUTING.md                             # as drafted

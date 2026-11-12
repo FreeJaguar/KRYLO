@@ -12,11 +12,11 @@ Approve this blueprint only when every item is answered.
 
 ## Architecture
 
-- [ ] Root `CLAUDE.md` is no longer than 130 lines, repository-scoped, and acts as a routing index to authoritative documents instead of duplicating them.
-- [ ] Every file and document range referenced by `CLAUDE.md` exists and resolves to the intended authoritative source.
-- [ ] Every path referenced by `CLAUDE.md` exists and resolves inside the repository.
-- [ ] Detailed policy remains in ADRs, root specifications, numbered docs, and `archive/blueprint-v0.1.2/references/`, not duplicated in `CLAUDE.md`.
-- [ ] The installer never copies the repository `CLAUDE.md` into user application repositories.
+- [ ] Root `AGENTS.md` is no longer than 130 lines, repository-scoped, and acts as a routing index to authoritative documents instead of duplicating them; root `CLAUDE.md` contains only the `@AGENTS.md` import.
+- [ ] Every file and document range referenced by `AGENTS.md` exists and resolves to the intended authoritative source.
+- [ ] Every path referenced by `AGENTS.md` exists and resolves inside the repository.
+- [ ] Detailed policy remains in ADRs, root specifications, numbered docs, and `archive/blueprint-v0.1.2/references/`, not duplicated in `AGENTS.md`.
+- [ ] The installer never copies the repository `AGENTS.md` or `CLAUDE.md` into user application repositories.
 - [ ] The plugin is not the default Claude Code agent.
 - [ ] KRYLO Core has no mandatory third-party integration.
 - [ ] Runtime state is outside application repositories.
