@@ -1239,16 +1239,14 @@ export function locateActiveRunPointer({ projectRoot, host, hostSessionId, requi
     const exactUsable = exact.ok && typeof exact.value?.runId === 'string'
       && (!exact.value.projectRootHash || exact.value.projectRootHash === rootHash);
     if (exactUsable) {
-      // A pointer at the exact path is final, exactly as before ADR-0043: the
-      // fallbacks below are only for a directory that has NO pointer. When
-      // the pointer exists but its state does not load as active, that is
-      // either a terminal run (whose pointer is normally already cleared) or
-      // a transient read failure while another hook is atomically replacing
-      // state.json; re-reading the same file through the fallbacks during
-      // that window measurably raised lost concurrent updates on Windows.
       if (!requireActive) return { ok: true, value: exact.value };
       const state = activeRunStateFor(exact.value, { host, hostSessionId });
-      return state ? { ok: true, value: exact.value, state } : { ok: false, error: 'not-active' };
+      if (state) return { ok: true, value: exact.value, state };
+      // Not final when it does not lead to an active run: a stale pointer at
+      // this exact directory, or a state read that failed transiently while
+      // another hook was replacing state.json, must not hide this session's
+      // live run -- treating either as "no run" is a fail-open pass-through.
+      // The fallbacks below re-validate every candidate independently.
     }
     if (!hostSessionId) return { ok: false, error: 'not-found' };
 

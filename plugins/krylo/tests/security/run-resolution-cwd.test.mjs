@@ -101,7 +101,8 @@ test('claude stop-gate: an unmet run cannot end just because the session changed
   const ctx = setup('krylo-cwd-claude-');
   try {
     createActiveRun(ctx.dataDir, { projectDir: ctx.projectDir });
-    runCli('runtime/update-state.mjs', ['--add-criterion', 'cwd invariant holds', '--project-dir', ctx.projectDir], ctx.dataDir);
+    const added = runCli('runtime/update-state.mjs', ['--add-criterion', 'cwd invariant holds', '--project-dir', ctx.projectDir], ctx.dataDir);
+    assert.equal(added.status, 0, added.stdout);
     const res = runHook('orbit/stop-gate.mjs', stop('hook-session', path.join(ctx.projectDir, 'sub')), ctx.dataDir);
     assert.equal(res.status, 0);
     assert.equal(res.json?.decision, 'block');
@@ -175,7 +176,8 @@ test('codex stop-gate: an unmet run cannot end just because the command cwd move
   const ctx = setup('krylo-cwd-codex-');
   try {
     createActiveRunCodexOnly(ctx.dataDir, { projectDir: ctx.projectDir });
-    runCliCodexOnly('runtime/update-state.mjs', ['--add-criterion', 'cwd invariant holds', '--project-dir', ctx.projectDir], ctx.dataDir);
+    const added = runCliCodexOnly('runtime/update-state.mjs', ['--add-criterion', 'cwd invariant holds', '--project-dir', ctx.projectDir], ctx.dataDir);
+    assert.equal(added.status, 0, added.stdout);
     const res = runHookCodexOnly('orbit/stop-gate-codex.mjs', stop('codex-hook-session', path.join(ctx.projectDir, 'sub')), ctx.dataDir);
     assert.equal(res.status, 0);
     assert.equal(res.json?.decision, 'block');
@@ -287,6 +289,27 @@ test('review F5: the Codex failed-bootstrap marker still denies when the payload
     const invalid = { ...bash('codex-hook-session', undefined, 'echo hello'), permission_mode: 'x'.repeat(300) };
     const failSafe = runHookCodexOnly('security/risk-gate-codex.mjs', invalid, ctx.dataDir);
     assert.equal(decisionOf(failSafe), 'deny', 'fail-safe path');
+  } finally {
+    teardown(ctx);
+  }
+});
+
+// Independent review round 2 / automated security review: a pointer at the
+// exact directory that does not lead to an active run (stale, or its state
+// unreadable at that moment) must not be final -- the session's live run
+// under an ancestor still governs.
+test('review round 2: a stale pointer at the exact directory never hides the live run under an ancestor', () => {
+  const ctx = setup('krylo-cwd-review2-');
+  try {
+    createActiveRun(ctx.dataDir, { projectDir: ctx.projectDir });
+    const sub = path.join(ctx.projectDir, 'sub');
+    // A well-formed pointer for this session at the subdirectory, leading to
+    // a run id whose state does not exist.
+    const stale = path.join(ctx.dataDir, 'active-runs', computeProjectRootHash(sub), 'claude', 'hook-session.json');
+    fs.mkdirSync(path.dirname(stale), { recursive: true });
+    fs.writeFileSync(stale, JSON.stringify({ runId: 'run-that-does-not-exist', projectRootHash: computeProjectRootHash(sub), updatedAt: new Date().toISOString() }), 'utf8');
+    const res = runHook('security/risk-gate.mjs', bash('hook-session', sub, 'git push origin main'), ctx.dataDir);
+    assert.equal(decisionOf(res), 'ask');
   } finally {
     teardown(ctx);
   }
