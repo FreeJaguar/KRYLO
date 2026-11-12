@@ -6,6 +6,9 @@ The project follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+- **The Codex drift checks read a frozen 0.120.0 snapshot instead of the reviewed runtime contract.** `codex-hook-event-names-recognized` compared `codex-hooks.json` against an event list hard-coded from the 0.120.0 binary, so it reported `SessionEnd` as unknown in general long after ADR-0038 confirmed it on 0.154.0; and `codex-tested-version-vs-latest-upstream` measured upstream drift from the capability matrix's historical 0.120.0 anchor rather than the newest supported runtime. Both now read `plugins/krylo/policies/codex-runtime-compatibility.json` through the runtime gate's own validated loader: the event check reports each unconfirmed event against the exact supported version that lacks it (today: `SessionEnd` on 0.120.0), the drift check compares the newest supported version (0.154.0) with upstream, and an unreadable or incomplete contract is reported as blocked rather than replaced by a fallback list. The two documentation-consistency checks keep their ADR-0029 anchor.
+
 ### Changed
 - **Repository instructions have one source for every coding agent.** The root `AGENTS.md` now holds the repository control index that `CLAUDE.md` used to hold, and `CLAUDE.md` is reduced to a single `@AGENTS.md` import (the documented Claude Code pattern for sharing one instructions file with other tools). Codex, which reads `AGENTS.md` natively, and Claude Code now load identical text instead of two copies that could drift. The CI line budget (`validate-plugin.yml`) now applies to both files and asserts the import line; `ARCHITECTURE.md`, `FILE_MANIFEST.md`, `REVIEW_CHECKLIST.md`, and `PROMPT_INPUT_CONTRACT.md` point at `AGENTS.md`; historical plans and ADRs are left as written. Repository-only change: nothing in the shipped plugin changes.
 

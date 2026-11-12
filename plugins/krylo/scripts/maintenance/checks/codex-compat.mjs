@@ -9,13 +9,33 @@ import path from 'node:path';
 
 import { buildCheckResult } from '../../lib/maintenance-schema.mjs';
 import { parseCodexVersion, compareParsed } from '../../lib/version-compare.mjs';
+import { loadCompatibilityContract } from '../../host/codex/runtime-compat.mjs';
 
-// The confirmed-accepted Codex Hook event enum, sourced from ADR-0029's own
-// direct byte inspection of the real installed codex-cli 0.120.0 binary's
-// embedded HookEventNameWire schema (not a web-fetched summary, not
-// memory) -- KRYLO's own small expectation snapshot (task Section 13),
-// scoped to exactly what plugins/krylo/hooks/codex-hooks.json uses.
-const KNOWN_ACCEPTED_HOOK_EVENTS = new Set(['PreToolUse', 'PostToolUse', 'SessionStart', 'UserPromptSubmit', 'Stop']);
+// Which hook events each supported Codex build is confirmed to accept comes
+// from the reviewed runtime contract, the same file the runtime gate trusts
+// (docs/adr/0034-codex-runtime-compatibility-gate.md). This check previously
+// carried its own snapshot of the 0.120.0 binary's event enum; it never
+// learned that 0.154.0 confirms SessionEnd, so it reported SessionEnd as
+// unknown in general instead of unconfirmed on 0.120.0 only.
+const CONTRACT_REL_PATH = 'plugins/krylo/policies/codex-runtime-compatibility.json';
+
+function compareVersionStrings(a, b) {
+  return compareParsed(parseCodexVersion(`rust-v${a}`), parseCodexVersion(`rust-v${b}`));
+}
+
+/**
+ * Supported entries with a usable confirmedHookEvents list, newest first, or
+ * null when the contract cannot answer the question. Never a fallback list:
+ * an unanswerable contract is reported as blocked, not as "nothing to check".
+ */
+function loadSupportedEventSets(repoRoot) {
+  const loaded = loadCompatibilityContract({ contractPath: path.join(repoRoot, CONTRACT_REL_PATH) });
+  if (!loaded.ok) return null;
+  const supported = loaded.contract.supported;
+  if (supported.length === 0) return null;
+  if (supported.some((s) => !Array.isArray(s.confirmedHookEvents) || !parseCodexVersion(`rust-v${s.version}`).ok)) return null;
+  return [...supported].sort((a, b) => compareVersionStrings(b.version, a.version));
+}
 
 function readText(repoRoot, relPath) {
   try {
@@ -89,29 +109,58 @@ export async function runCodexCompatChecks({ repoRoot, offline, upstream }) {
       declaredEvents = [];
     }
   }
-  const unknownEvents = declaredEvents.filter((e) => !KNOWN_ACCEPTED_HOOK_EVENTS.has(e));
-  results.push(
-    buildCheckResult({
-      id: 'codex-hook-event-names-recognized',
-      category: 'codex-compat',
-      status: declaredEvents.length === 0 ? 'blocked' : unknownEvents.length === 0 ? 'ok' : 'changed',
-      severity: unknownEvents.length === 0 ? 'info' : 'high',
-      current: [...KNOWN_ACCEPTED_HOOK_EVENTS].join(','),
-      observed: declaredEvents.join(','),
-      evidence: ['plugins/krylo/hooks/codex-hooks.json'],
-      recommendedAction: unknownEvents.length === 0 ? 'none' : `Verify unrecognized Codex Hook event(s) against the real installed binary's schema before trusting: ${unknownEvents.join(', ')}`,
-      requiresHumanReview: unknownEvents.length > 0,
-    }),
-  );
+  const supportedEventSets = loadSupportedEventSets(repoRoot);
+  const evidence = ['plugins/krylo/hooks/codex-hooks.json', CONTRACT_REL_PATH];
+  if (!supportedEventSets) {
+    results.push(
+      buildCheckResult({
+        id: 'codex-hook-event-names-recognized',
+        category: 'codex-compat',
+        status: 'blocked',
+        severity: 'medium',
+        current: null,
+        observed: declaredEvents.join(','),
+        evidence,
+        recommendedAction: `${CONTRACT_REL_PATH} is missing, invalid, lists no supported version, or has a supported version without confirmedHookEvents; restore it before trusting any declared Codex hook event.`,
+        requiresHumanReview: true,
+      }),
+    );
+  } else {
+    // Per supported version: declared events that version is not confirmed to accept.
+    const gaps = supportedEventSets
+      .map((s) => ({ version: s.version, missing: declaredEvents.filter((e) => !s.confirmedHookEvents.includes(e)) }))
+      .filter((g) => g.missing.length > 0);
+    const clean = declaredEvents.length > 0 && gaps.length === 0;
+    results.push(
+      buildCheckResult({
+        id: 'codex-hook-event-names-recognized',
+        category: 'codex-compat',
+        status: declaredEvents.length === 0 ? 'blocked' : clean ? 'ok' : 'changed',
+        severity: declaredEvents.length === 0 ? 'medium' : clean ? 'info' : 'high',
+        current: supportedEventSets.map((s) => `${s.version}: ${s.confirmedHookEvents.join(',')}`).join(' | '),
+        observed: declaredEvents.join(','),
+        evidence,
+        recommendedAction: clean || declaredEvents.length === 0
+          ? 'none'
+          : `Declared Codex Hook event(s) not confirmed on a supported runtime -- ${gaps.map((g) => `${g.missing.join(', ')} on ${g.version}`).join('; ')}. Verify against that exact binary, or retire the version from the contract.`,
+        requiresHumanReview: !clean,
+      }),
+    );
+  }
 
-  if (offline || !testedVersion) {
+  // Upstream drift is measured from the newest version the contract supports
+  // -- the runtime KRYLO actually trusts today -- not from the capability
+  // matrix's historical anchor (testedVersion above), which stays 0.120.0
+  // because ADR-0029 and the matrix's older rows are pinned to it.
+  const newestSupported = supportedEventSets?.[0]?.version ?? null;
+  if (offline || !newestSupported) {
     results.push(
       buildCheckResult({
         id: 'codex-tested-version-vs-latest-upstream',
         category: 'codex-compat',
         status: 'unavailable',
         severity: 'info',
-        current: testedVersion,
+        current: newestSupported,
         observed: null,
         evidence: [],
         recommendedAction: 'Run in live mode to verify against api.github.com.',
@@ -121,7 +170,7 @@ export async function runCodexCompatChecks({ repoRoot, offline, upstream }) {
     return results;
   }
 
-  const parsedTested = parseCodexVersion(`rust-v${testedVersion}`);
+  const parsedTested = parseCodexVersion(`rust-v${newestSupported}`);
   const latestRelease = await upstream.getLatestGithubRelease('openai', 'codex');
   if (latestRelease.ok && typeof latestRelease.json?.tag_name === 'string' && parsedTested.ok) {
     const parsedLatest = parseCodexVersion(latestRelease.json.tag_name);
@@ -132,7 +181,7 @@ export async function runCodexCompatChecks({ repoRoot, offline, upstream }) {
         category: 'codex-compat',
         status: isBehind ? 'changed' : 'ok',
         severity: isBehind ? 'medium' : 'info',
-        current: `codex-cli ${testedVersion}`,
+        current: `codex-cli ${newestSupported}`,
         observed: latestRelease.json.tag_name,
         evidence: ['https://api.github.com/repos/openai/codex/releases/latest'],
         recommendedAction: isBehind
@@ -148,7 +197,7 @@ export async function runCodexCompatChecks({ repoRoot, offline, upstream }) {
         category: 'codex-compat',
         status: 'unavailable',
         severity: 'info',
-        current: testedVersion,
+        current: newestSupported,
         observed: null,
         evidence: [],
         recommendedAction: 'none',
