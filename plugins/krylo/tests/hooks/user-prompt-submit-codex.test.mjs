@@ -84,6 +84,135 @@ test('user-prompt-submit-codex: explicit $krylo-run invocation creates a host-bo
   }
 });
 
+// REGRESSION (live verification): PLUGIN_ROOT is populated only inside the
+// environment Codex builds for its OWN registered hook commands, never in
+// the shell the model's own `exec` tool calls run in. A model told to read
+// `${PLUGIN_ROOT}` from its own environment got an empty string against the
+// real installed binary, and every krylo-run Skill command that follows
+// failed with a module-not-found error. This hook is the only place that
+// knows the real value, so it must hand the literal path to the model
+// directly rather than let it try to rediscover an unreachable one.
+test('user-prompt-submit-codex: a fresh bootstrap hands the model the literal plugin-root path, not just a runId', () => {
+  const dataDir = mkTempDataDir('krylo-ups-');
+  const projectDir = mkTempDataDir('krylo-ups-project-');
+  const fakePluginRoot = path.join(os.tmpdir(), 'krylo-fake-plugin-root-for-test');
+  try {
+    const res = run(
+      payload({ prompt: '$krylo-run fix the failing tests', sessionId: 'codex-session-plugin-root', cwd: projectDir }),
+      dataDir,
+      { env: { PLUGIN_ROOT: fakePluginRoot } },
+    );
+    assert.equal(res.status, 0);
+    const ctx = additionalContext(res) ?? '';
+    assert.match(ctx, /now active/);
+    assert.ok(ctx.includes(fakePluginRoot), `expected the literal PLUGIN_ROOT value in the bootstrap message, got: ${ctx}`);
+    assert.match(ctx, /not a shell environment variable/i, 'must warn the model against re-resolving it itself');
+    assert.match(ctx, /KRYLO_HOST=codex/, 'must instruct setting the host override explicitly');
+    // The corrected half of the fix: the data root must NEVER be handed to
+    // the model at all, because any command referencing it is denied by
+    // KRYLO's own sensitive-path protection (see the module header comment).
+    assert.ok(!ctx.includes(dataDir), 'the literal data-root value must never appear in this message');
+    assert.match(ctx, /never set KRYLO_DATA_ROOT/i, 'must actively warn against referencing the data root at all');
+  } finally {
+    cleanup(dataDir);
+    cleanup(projectDir);
+  }
+});
+
+test('user-prompt-submit-codex: the idempotent-reuse message also carries the literal plugin-root path, never the data root', () => {
+  const dataDir = mkTempDataDir('krylo-ups-');
+  const projectDir = mkTempDataDir('krylo-ups-project-');
+  const fakePluginRoot = path.join(os.tmpdir(), 'krylo-fake-plugin-root-reuse');
+  try {
+    const p = payload({ prompt: '$krylo-run fix the failing tests', sessionId: 'codex-session-reuse-root', cwd: projectDir });
+    const res1 = run(p, dataDir, { env: { PLUGIN_ROOT: fakePluginRoot } });
+    assert.equal(res1.status, 0);
+    const res2 = run(p, dataDir, { env: { PLUGIN_ROOT: fakePluginRoot } });
+    assert.equal(res2.status, 0);
+    const ctx2 = additionalContext(res2) ?? '';
+    assert.match(ctx2, /already active/i);
+    assert.ok(ctx2.includes(fakePluginRoot), `expected the literal PLUGIN_ROOT value in the reuse message, got: ${ctx2}`);
+    assert.ok(!ctx2.includes(dataDir), 'the literal data-root value must never appear in this message either');
+  } finally {
+    cleanup(dataDir);
+    cleanup(projectDir);
+  }
+});
+
+// REGRESSION (live verification, the severe half of the finding, corrected
+// design). The first fix attempt -- hand the model the literal dataRoot
+// value and instruct it to set KRYLO_DATA_ROOT inline -- was itself found
+// live to be unusable: any command referencing that path is denied outright
+// by KRYLO's own sensitive-path protection. The actual fix requires NOTHING
+// from the model: resolveCodexDataRoot() self-derives the real data root
+// from the plugin root alone (context.mjs's deriveCodexDataRootFromPluginRoot,
+// covered directly in host/codex/context.test.mjs). This test proves the
+// FULL loop end to end through the real hook and the real read-state.mjs CLI:
+// a run bootstrapped under a plugin-root/data-root pair shaped exactly like
+// Codex's own real on-disk convention must be findable by a later call that
+// supplies ONLY that same plugin root (which the model needs anyway, to
+// construct the invocation path) and nothing else.
+// A genuinely REAL install, exercised through the actual shipped hook and
+// runtime CLI scripts, with ZERO environment override for the model's own
+// step -- the real shape of the model's exec environment, confirmed live.
+//
+// This replaced an earlier version that gave the "model" step an explicit
+// PLUGIN_ROOT to trigger derivation. An independent review (F2, F5) found
+// that env-driven derivation was itself a security hole -- an
+// attacker-controlled PLUGIN_ROOT could redirect KRYLO's entire control
+// plane -- and that this test's own reliance on it meant the fix for that
+// hole would have gone untested. resolveCodexDataRoot() now derives ONLY
+// from the module's own self-derived on-disk location, so proving the real
+// mechanism requires the scripts to genuinely LIVE at a Codex-shaped path --
+// this copies the whole scripts/ tree into one, exactly as a real
+// `codex plugin add` install would place it.
+test('user-prompt-submit-codex: a real install self-derives its own data root, exercised through the shipped scripts with no environment override', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-ups-real-install-'));
+  const fixturePluginRoot = path.join(root, 'plugins', 'cache', 'krylo-marketplace', 'krylo', '0.2.0');
+  const fixtureDataRoot = path.join(root, 'plugins', 'data', 'krylo-krylo-marketplace');
+  const projectDir = mkTempDataDir('krylo-ups-project-');
+  try {
+    fs.mkdirSync(fixturePluginRoot, { recursive: true });
+    fs.mkdirSync(fixtureDataRoot, { recursive: true });
+    fs.cpSync(SCRIPTS_ROOT, path.join(fixturePluginRoot, 'scripts'), { recursive: true });
+    const copiedHook = path.join(fixturePluginRoot, 'scripts', 'security', 'user-prompt-submit-codex.mjs');
+    const copiedReadState = path.join(fixturePluginRoot, 'scripts', 'runtime', 'read-state.mjs');
+
+    // Bootstrap exactly as the real hook subprocess would: PLUGIN_ROOT and
+    // PLUGIN_DATA both genuinely present (Codex sets both for its own hook
+    // commands), pointed at the fixture's real, copied location.
+    const bootstrapEnv = {
+      ...process.env, PLUGIN_ROOT: fixturePluginRoot, PLUGIN_DATA: fixtureDataRoot, KRYLO_LOCAL_TELEMETRY: 'true',
+    };
+    delete bootstrapEnv.KRYLO_DATA_ROOT;
+    delete bootstrapEnv.CLAUDE_PLUGIN_DATA;
+    const bootstrapResult = spawnSync(process.execPath, [copiedHook], {
+      input: JSON.stringify(payload({ prompt: '$krylo-run fix the failing tests', sessionId: 'codex-session-real-install', cwd: projectDir })),
+      encoding: 'utf8',
+      env: bootstrapEnv,
+    });
+    assert.equal(bootstrapResult.status, 0, bootstrapResult.stderr);
+    const runId = /run-[0-9a-f]+/.exec(JSON.parse(bootstrapResult.stdout).hookSpecificOutput.additionalContext)[0];
+
+    // The model's own exec environment: nothing at all beyond what its own
+    // process already inherits, plus KRYLO_HOST as the Skill instructs.
+    // No PLUGIN_ROOT, no PLUGIN_DATA, no KRYLO_DATA_ROOT.
+    const modelExecEnv = { ...process.env, KRYLO_HOST: 'codex' };
+    delete modelExecEnv.PLUGIN_ROOT;
+    delete modelExecEnv.PLUGIN_DATA;
+    delete modelExecEnv.KRYLO_DATA_ROOT;
+    delete modelExecEnv.CLAUDE_PLUGIN_DATA;
+    delete modelExecEnv.KRYLO_LOCAL_TELEMETRY;
+    const readStateResult = spawnSync(process.execPath, [copiedReadState, '--run', runId], { encoding: 'utf8', env: modelExecEnv });
+    const state = JSON.parse(readStateResult.stdout);
+    assert.equal(state.host?.name, 'codex', 'KRYLO_HOST alone must resolve as the Codex host');
+    assert.equal(state.runId, runId, 'and it must be THIS run, found via genuine self-derivation with zero data-root input');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+    cleanup(projectDir);
+  }
+});
+
 // B. A normal prompt never bootstraps a run.
 test('user-prompt-submit-codex: an ordinary prompt with no $krylo-run mention never initializes a run', () => {
   const dataDir = mkTempDataDir('krylo-ups-');

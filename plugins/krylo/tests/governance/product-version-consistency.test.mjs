@@ -21,7 +21,7 @@ test('every authoritative current-product-version field agrees, against the real
   const results = await runInternalDriftChecks({ repoRoot: REPO_ROOT });
   const check = results.find((r) => r.id === 'product-version-agreement');
   assert.equal(check.status, 'ok', check.observed);
-  assert.equal(check.current, '0.2.0');
+  assert.equal(check.current, '0.3.0');
 });
 
 test('package.json, both plugin manifests, and the marketplace manifest report the identical version, read directly (not via the shared checker) as an independent cross-check', () => {
@@ -35,5 +35,5 @@ test('package.json, both plugin manifests, and the marketplace manifest report t
   };
   const uniqueValues = new Set(Object.values(versions));
   assert.equal(uniqueValues.size, 1, `expected exactly one distinct version across all sources, got: ${JSON.stringify(versions)}`);
-  assert.equal([...uniqueValues][0], '0.2.0');
+  assert.equal([...uniqueValues][0], '0.3.0');
 });

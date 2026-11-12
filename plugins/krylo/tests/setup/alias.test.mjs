@@ -7,6 +7,17 @@ import { spawnSync } from 'node:child_process';
 
 import { SCRIPTS_ROOT } from '../hooks/helpers.mjs';
 
+// Read from the real manifest rather than hardcoding. An independent review
+// found that this test's hardcoded literal is exactly why the stamp it
+// guards went stale twice: it asserts agreement between the script and the
+// TEST, so when a release bumps package.json and neither the script nor the
+// test is touched, both stay on the old value and agree with each other
+// while the product version has moved on. Deriving it here means a bump
+// that forgets the stamp fails this test instead of passing it.
+const CURRENT_VERSION = JSON.parse(
+  fs.readFileSync(path.resolve(SCRIPTS_ROOT, '..', '..', '..', 'package.json'), 'utf8'),
+).version;
+
 function mkHome() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-home-'));
 }
@@ -45,10 +56,11 @@ test('alias: apply installs a marked wrapper with metadata', () => {
     assert.equal(res.status, 0);
     const { skill, meta } = aliasPaths(home);
     const content = fs.readFileSync(skill, 'utf8');
-    assert.match(content, /krylo-alias-version: 0\.2\.0/);
+    assert.ok(content.includes(`krylo-alias-version: ${CURRENT_VERSION}`),
+      `the installed alias must stamp the real current product version, got: ${content.match(/krylo-alias-version: \S+/)?.[0]}`);
     assert.match(content, /\/krylo:run/);
     assert.match(content, /\$ARGUMENTS/);
-    assert.equal(JSON.parse(fs.readFileSync(meta, 'utf8')).version, '0.2.0');
+    assert.equal(JSON.parse(fs.readFileSync(meta, 'utf8')).version, CURRENT_VERSION);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }

@@ -28,6 +28,48 @@
 // non-secret hookSpecificOutput.additionalContext confirming the run is
 // active; this is coordination context for the model, never authorization.
 //
+// Both success paths (fresh bootstrap and idempotent reuse) also include
+// `identity.pluginRoot` as a literal value, together with an instruction to
+// set KRYLO_HOST=codex inline on every subsequent runtime CLI call. This was
+// added after a live verification session confirmed, against the real
+// installed binary, that PLUGIN_ROOT is populated only inside the
+// environment Codex builds for its OWN registered hook commands
+// (hooks/codex-hooks.json's own command/commandWindows templating) and is
+// never exposed to the shell the model's own `exec` tool calls run in: read
+// as an empty string there, every runtime CLI call failed outright with a
+// module-not-found error.
+//
+// A SECOND, more severe layer was hidden behind the first. Once PLUGIN_ROOT
+// was fixed, this hook's own bootstrap ran correctly and wrote real state
+// to `identity.dataRoot` (a Codex-plugin-specific location derived from the
+// real PLUGIN_DATA this hook subprocess received) -- but the model's later
+// read-state.mjs/update-state.mjs calls, run in a shell with neither
+// PLUGIN_ROOT nor PLUGIN_DATA, fell through host-dispatch.mjs's detection to
+// 'claude' and ITS OWN default data root, silently reading and nearly
+// mutating a COMPLETELY UNRELATED Claude-host run that happened to be active
+// on the same machine at the time -- confirmed live, not theoretical: a
+// concurrent file lock is the only reason that run's terminal state was not
+// actually overwritten.
+//
+// The obvious fix -- hand the model the literal dataRoot value too, and
+// instruct it to set KRYLO_DATA_ROOT inline -- was tried and is UNUSABLE: a
+// further live session found that ANY Bash/PowerShell command whose text
+// contains the real data-root path is unconditionally denied by this
+// project's OWN sensitive-path protection (risk-policy.mjs's
+// touchesDataRoot()), which exists specifically to stop a model from
+// bypassing the runtime scripts and reaching KRYLO's control-plane state
+// directly -- and is deliberately too blunt to distinguish that use from a
+// legitimate one. Carving a safe exception into that control is its own
+// security review, not a side effect of this fix. So `identity.dataRoot` is
+// deliberately NOT included here: the fix instead lives entirely in
+// host/codex/context.mjs's resolveCodexDataRoot(), which now self-derives
+// the same real data root from the plugin root alone (which the model must
+// already have, unavoidably, to invoke any script at all) -- requiring
+// nothing new from the model, and never putting the literal value where a
+// command's own text could trip the sensitive-path check. detectHost() also
+// now recognizes CODEX_THREAD_ID as a Codex-native signal, so the
+// KRYLO_HOST=codex instruction here is defense in depth, not the only path.
+//
 // Idempotent: an already-active, non-terminal run bound to this EXACT
 // session_id is never silently duplicated or overwritten by a second
 // invocation in the same session -- the existing run is reused instead.
@@ -205,7 +247,12 @@ async function main() {
     // was found for it.
     clearBootstrapFailureMarker({ projectRootHash, host: 'codex', hostSessionId: sessionId });
     emitAdditionalContext(
-      `KRYLO Codex run ${existingRunId} is already active for this host session. `
+      `KRYLO Codex run ${existingRunId} is already active for this host session. Plugin root: ${identity.pluginRoot} -- `
+      + 'this is the literal, absolute path the krylo-run Skill instructions call ${PLUGIN_ROOT}. It is not a shell '
+      + 'environment variable your own commands can read, so substitute it verbatim rather than trying to resolve it '
+      + "yourself. Set KRYLO_HOST=codex inline before every runtime CLI call (e.g. PowerShell: $env:KRYLO_HOST='codex'; "
+      + 'node ...); never set KRYLO_DATA_ROOT or reference a data-root path in any command -- KRYLO resolves that '
+      + 'internally, and any command whose text contains that path is denied by KRYLO\'s own sensitive-path protection. '
       + 'Follow the krylo-run Skill workflow using this existing run; do not initialize another run.',
     );
     return;
@@ -360,7 +407,13 @@ async function main() {
   clearBootstrapFailureMarker({ projectRootHash, host: 'codex', hostSessionId: sessionId });
 
   emitAdditionalContext(
-    `KRYLO Codex run ${runId} is now active for this host session. Follow the krylo-run Skill workflow. Do not initialize another run.`,
+    `KRYLO Codex run ${runId} is now active for this host session. Plugin root: ${identity.pluginRoot} -- `
+    + 'this is the literal, absolute path the krylo-run Skill instructions call ${PLUGIN_ROOT}. It is not a shell '
+    + 'environment variable your own commands can read, so substitute it verbatim rather than trying to resolve it '
+    + "yourself. Set KRYLO_HOST=codex inline before every runtime CLI call (e.g. PowerShell: $env:KRYLO_HOST='codex'; "
+    + 'node ...); never set KRYLO_DATA_ROOT or reference a data-root path in any command -- KRYLO resolves that '
+    + 'internally, and any command whose text contains that path is denied by KRYLO\'s own sensitive-path protection. '
+    + 'Follow the krylo-run Skill workflow. Do not initialize another run.',
   );
 }
 
