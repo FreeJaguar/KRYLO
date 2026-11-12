@@ -60,44 +60,56 @@ test('the run skill frontmatter declares all six required hook events against re
   assert.ok(block.includes('Bash|PowerShell|Write|Edit|NotebookEdit|Read|Glob|Grep|mcp__.*'));
 });
 
-// The one hook entry (type/command/timeout/onFailure lines) whose command
-// references `scriptRel`, as raw frontmatter text.
-function hookEntryFor(block, scriptRel) {
+// Every hook handler in the frontmatter, parsed by indentation: each
+// `- type:` item becomes { command, keys: { key: indent } }, where indent is
+// the column of each key. A key nested deeper or shallower than the
+// handler's own `command:` is not a property of that handler.
+function hookHandlers(block) {
   const lines = block.split(/\r?\n/);
-  const at = lines.findIndex((l) => l.includes(scriptRel));
-  assert.ok(at > 0, `no hook entry references ${scriptRel}`);
-  let start = at;
-  while (start > 0 && !/^\s*- type:/.test(lines[start])) start--;
-  let end = at + 1;
-  while (end < lines.length && !/^\s*-\s/.test(lines[end]) && !/^\s*[A-Za-z]+:\s*$/.test(lines[end])) end++;
-  return lines.slice(start, end).join('\n');
+  const handlers = [];
+  for (let i = 0; i < lines.length; i++) {
+    const item = /^(\s*)- type:/.exec(lines[i]);
+    if (!item) continue;
+    const keyIndent = item[1].length + 2;
+    const keys = { type: keyIndent };
+    let command = null;
+    for (let j = i + 1; j < lines.length; j++) {
+      const indent = /^(\s*)/.exec(lines[j])[1].length;
+      if (lines[j].trim() === '' || indent < keyIndent) break;
+      const kv = /^\s*([A-Za-z]+):\s*(.*)$/.exec(lines[j]);
+      if (kv && indent === keyIndent) {
+        keys[kv[1]] = kv[2];
+        if (kv[1] === 'command') command = kv[2];
+      }
+    }
+    handlers.push({ command, keys });
+  }
+  return handlers;
 }
 
 // docs/adr/0042-claude-host-reverified-on-2-1-318.md: verified live on
-// 2.1.318, a PreToolUse hook whose script cannot start let the action
-// through on Windows with Git Bash (and does on macOS/Linux), so a crashed
-// risk gate was a silent bypass. `onFailure: "block"` (Claude Code 2.1.295)
-// makes both gates fail closed on every platform.
-test('both PreToolUse gates fail closed when their own process cannot start', () => {
-  const block = frontmatterBlock(path.join(PLUGIN_ROOT, 'skills', 'run', 'SKILL.md'));
-  for (const gate of ['scripts/security/risk-gate.mjs', 'scripts/security/question-gate.mjs']) {
-    assert.match(hookEntryFor(block, gate), /^\s*onFailure:\s*"block"\s*$/m, `${gate} must declare onFailure: "block"`);
-  }
-});
+// 2.1.318 (Windows with Git Bash), a PreToolUse hook whose script cannot
+// start let the action through, so a crashed risk gate was a silent bypass.
+// `onFailure: "block"` (Claude Code 2.1.295) makes both gates fail closed.
+// Exactly these two handlers may carry it, at handler level: a Stop hook
+// that blocked on its own failure could keep a session from ending, and the
+// telemetry and status hooks gate nothing.
+const FAIL_CLOSED_GATES = ['scripts/security/risk-gate.mjs', 'scripts/security/question-gate.mjs'];
 
-// A Stop hook that blocks on its own failure would keep a session from
-// ending at all if Node broke, and the telemetry/status hooks gate nothing,
-// so only the two PreToolUse gates may fail closed.
-test('no non-gate hook declares onFailure: "block"', () => {
+test('exactly the two PreToolUse gates fail closed, each at handler level', () => {
   const block = frontmatterBlock(path.join(PLUGIN_ROOT, 'skills', 'run', 'SKILL.md'));
-  for (const script of [
-    'scripts/runtime/posttool-telemetry.mjs',
-    'scripts/orbit/fingerprint.mjs',
-    'scripts/status/agent-events.mjs',
-    'scripts/orbit/stop-gate.mjs',
-  ]) {
-    assert.doesNotMatch(hookEntryFor(block, script), /onFailure/, `${script} must not declare onFailure`);
+  const handlers = hookHandlers(block);
+  assert.equal(handlers.length, REQUIRED_EVENTS_AND_SCRIPTS.length, 'every declared handler must be parsed');
+  for (const h of handlers) {
+    const isGate = FAIL_CLOSED_GATES.some((g) => h.command?.includes(g));
+    if (isGate) assert.equal(h.keys.onFailure, '"block"', `${h.command} must declare onFailure: "block" at handler level`);
+    else assert.ok(!('onFailure' in h.keys), `${h.command} must not declare onFailure`);
   }
+  // A misplaced onFailure (matcher-group or event level) is not parsed as a
+  // handler key above, so also forbid any onFailure line the parser did not
+  // attribute to one of the two gates.
+  const onFailureLines = block.split(/\r?\n/).filter((l) => /^\s*onFailure:/.test(l)).length;
+  assert.equal(onFailureLines, FAIL_CLOSED_GATES.length, 'no onFailure may appear anywhere but on the two gate handlers');
 });
 
 test('no other KRYLO skill declares an interception hook', () => {

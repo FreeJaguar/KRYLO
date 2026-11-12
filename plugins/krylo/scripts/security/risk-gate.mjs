@@ -89,9 +89,10 @@ const NATIVE_ASK_ELIGIBLE_TOOLS = new Set(['Bash', 'PowerShell']);
 // `permission_mode` is absent, renamed, or a new mode is added upstream.
 // Only modes actually observed, live, to honor a Hook's `ask` decision
 // (docs/adr/0025-native-permission-approval.md's verification log: `manual`
-// tested explicitly; `auto` tested explicitly and also observed as the
-// real default for a non-interactive session with no --permission-mode flag
-// at all; `default` -- an undocumented sixth value accepted by the CLI
+// tested explicitly; `auto` tested explicitly and also observed, on 2.1.223,
+// as the default for a non-interactive session with no --permission-mode
+// flag (on 2.1.318 that default is `default`, see below); `default` -- an
+// undocumented sixth value accepted by the CLI
 // despite being absent from `claude --help`'s own choices list -- tested
 // explicitly on the pinned 2.1.223 floor binary and confirmed to honor
 // `ask` identically) are eligible. Everything else -- `bypassPermissions`,
