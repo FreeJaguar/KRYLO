@@ -6,6 +6,9 @@ The project follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Security
+- **A governed run stopped being enforced when its session worked outside the project root (ADR-0043).** Both hosts found the active run only through a hash of the hook payload's `cwd`. Claude Code carries a `cd` into a project subdirectory over to later Bash calls, and Codex 0.166.0 reports a command's own working directory, so the lookup could miss mid-run and every gate fell through to its ordinary-session pass-through: a direct probe of `risk-gate.mjs` returned `ask` for `git push` from the project root and a silent allow from a subdirectory. `resolveActiveRun()` now falls back to the host session id across projects before concluding no run is active, and the Codex bootstrap-failure marker does the same. No new storage. `tests/security/run-resolution-cwd.test.mjs` covers both hosts' risk and Stop gates and the marker from the root, subdirectories, an unrelated directory, and no `cwd`, with an ungoverned-session control and a terminal-run control. Codex 0.167.2 was not exposed: it is outside the reviewed contract and blocked.
+
 ### Changed
 - **Repository instructions have one source for every coding agent.** The root `AGENTS.md` now holds the repository control index that `CLAUDE.md` used to hold, and `CLAUDE.md` is reduced to a single `@AGENTS.md` import (the documented Claude Code pattern for sharing one instructions file with other tools). Codex, which reads `AGENTS.md` natively, and Claude Code now load identical text instead of two copies that could drift. The CI line budget (`validate-plugin.yml`) now applies to both files and asserts the import line; `ARCHITECTURE.md`, `FILE_MANIFEST.md`, `REVIEW_CHECKLIST.md`, and `PROMPT_INPUT_CONTRACT.md` point at `AGENTS.md`; historical plans and ADRs are left as written. Repository-only change: nothing in the shipped plugin changes.
 

@@ -55,7 +55,7 @@ import {
 } from '../host/codex/hook-transport.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { classifyRiskAction } from './risk-policy.mjs';
-import { computeProjectRootHash, readBootstrapFailureMarker } from '../lib/state.mjs';
+import { computeProjectRootHash, readBootstrapFailureMarker, readBootstrapFailureMarkerForSession } from '../lib/state.mjs';
 
 // Shared by both call sites below (the normal !run.active path, and
 // failSafeOnUnreadablePayload's own invalid-host-identity path): if a
@@ -63,11 +63,18 @@ import { computeProjectRootHash, readBootstrapFailureMarker } from '../lib/state
 // instead of falling through to the ordinary silent-allow. Never throws --
 // any lookup failure here must fall through to the caller's own existing
 // fail-safe behavior, not introduce a new crash path.
+//
+// The marker is keyed by the project root the failed invocation saw, but a
+// later PreToolUse payload's cwd can be the command's own working directory
+// (Codex 0.166.0), so a path miss falls back to the same session's marker
+// under any project (docs/adr/0043-session-keyed-run-resolution.md).
 function denyIfBootstrapFailureMarked(host, projectRoot, hostSessionId) {
-  if (!projectRoot || !hostSessionId) return;
+  if (!hostSessionId) return;
   try {
-    const projectRootHash = computeProjectRootHash(projectRoot);
-    const failure = readBootstrapFailureMarker({ projectRootHash, host, hostSessionId });
+    const byPath = projectRoot
+      ? readBootstrapFailureMarker({ projectRootHash: computeProjectRootHash(projectRoot), host, hostSessionId })
+      : { active: false };
+    const failure = byPath.active ? byPath : readBootstrapFailureMarkerForSession({ host, hostSessionId });
     if (failure.active) {
       emitCodexPreToolDeny(
         `KRYLO failed to initialize for this session (${failure.reason}) after an explicit $krylo-run invocation. `

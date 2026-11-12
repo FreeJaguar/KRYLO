@@ -15,6 +15,7 @@ import {
   activeRunPointerPath,
   activeRunsHostDir,
   bootstrapFailurePath,
+  perProjectIndexDir,
 } from './paths.mjs';
 import { writeJsonAtomic, readJson } from './atomic.mjs';
 import { redactText } from './redact.mjs';
@@ -1147,4 +1148,61 @@ export function pruneStaleActiveRunPointers(activeRunsRoot) {
     }
   }
   return removed;
+}
+
+// ---------------------------------------------------------------------------
+// Session-keyed lookups (docs/adr/0043-session-keyed-run-resolution.md).
+//
+// The per-project indexes above are keyed by a hash of the project root,
+// and a hook only knows that root through the `cwd` its payload reports --
+// a value the session itself can move (Claude Code carries a `cd` into a
+// project subdirectory over to later calls; Codex 0.166.0 reports a
+// command's own working directory). A host session id cannot move, so when
+// the path-keyed lookup misses, these find the same session's entry under
+// whichever project it was created for. No new storage: they enumerate the
+// project-root hashes that already exist.
+// ---------------------------------------------------------------------------
+
+const PROJECT_ROOT_HASH_PATTERN = /^[0-9a-f]{64}$/;
+
+function listProjectRootHashes(index) {
+  try {
+    return fs.readdirSync(perProjectIndexDir(index), { withFileTypes: true })
+      .filter((e) => e.isDirectory() && PROJECT_ROOT_HASH_PATTERN.test(e.name))
+      .map((e) => e.name);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Every active-run pointer this exact host session owns, across all
+ * projects. A pointer whose recorded projectRootHash disagrees with the
+ * directory it sits in is ignored. Never throws; [] without a session id,
+ * because without one there is nothing that identifies the session.
+ */
+export function listActiveRunPointersForSession({ host, hostSessionId } = {}) {
+  if (!host || !hostSessionId) return [];
+  const pointers = [];
+  for (const projectRootHash of listProjectRootHashes('active-runs')) {
+    try {
+      const result = readJson(activeRunPointerPath(projectRootHash, host, hostSessionId));
+      if (!result.ok || !result.value?.runId) continue;
+      if (result.value.projectRootHash && result.value.projectRootHash !== projectRootHash) continue;
+      pointers.push(result.value);
+    } catch {
+      // one unreadable entry never hides the others
+    }
+  }
+  return pointers;
+}
+
+/** A still-fresh bootstrap-failure marker for this host session under any project. Never throws. */
+export function readBootstrapFailureMarkerForSession({ host, hostSessionId } = {}) {
+  if (!host || !hostSessionId) return { active: false };
+  for (const projectRootHash of listProjectRootHashes('bootstrap-failures')) {
+    const marker = readBootstrapFailureMarker({ projectRootHash, host, hostSessionId });
+    if (marker.active) return marker;
+  }
+  return { active: false };
 }
