@@ -136,8 +136,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 53268,
-      "sha256": "beec949eaf99c3669cba7c2377a16bb551c9ee4b30559562cf62d154485b63c0"
+      "bytes": 53751,
+      "sha256": "d701690d5b9a4a90c8693038d0df9270dcb53db9e858c24801bb5d0570cb0f1a"
     },
     {
       "path": "CLAUDE.md",
@@ -166,13 +166,13 @@
     },
     {
       "path": "README.md",
-      "bytes": 15067,
-      "sha256": "fd799c1d1dcf76010ce07a071b93cf10b2ae870a1ec52bf8a548a52dcba4434c"
+      "bytes": 15387,
+      "sha256": "72a3cd005f9c23fa6f2a6455fbcb4d4160d3d2b7af467231a8af094e52ac2828"
     },
     {
       "path": "RELEASE_READINESS.md",
-      "bytes": 47847,
-      "sha256": "3582fb409a4f57f383482bb0852ac896e950bb0a31c6a96ddc606c175986a779"
+      "bytes": 52014,
+      "sha256": "b038af6429503fce400586e61c59bfa015da73d5ed3a32a43a4db0274fb829ec"
     },
     {
       "path": "SECURITY.md",
