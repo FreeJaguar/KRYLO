@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync as spawnSyncForShortName } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { classifyRiskAction } from '../../scripts/security/risk-policy.mjs';
@@ -421,7 +422,11 @@ test('shared risk policy denies a quoted sensitive path containing an internal s
   for (const [toolName, toolInput] of mustDeny) {
     const result = classifyRiskAction({ toolName, toolInput, cwd: process.cwd(), dataRoot });
     assert.equal(result.action, 'deny', `expected deny for ${toolName}(${JSON.stringify(toolInput)})`);
-    assert.equal(result.category, 'sensitive-path');
+    // A structured path (Read/Write file_path) in NTFS stream syntax is now
+    // caught first by the Windows alias-form rule (ADR-0044); shell commands
+    // are still classified by the sensitive-path check.
+    const expected = ['Read', 'Write'].includes(toolName) ? 'path-alias-form' : 'sensitive-path';
+    assert.equal(result.category, expected);
   }
 
   // A benign quoted path with an internal space must still pass.
@@ -728,7 +733,8 @@ test('shared risk policy: settings.json protection resolves the path before comp
   for (const target of mustDeny) {
     const result = classifyRiskAction({ toolName: 'Write', toolInput: { file_path: target, content: '{}' }, cwd: process.cwd(), dataRoot });
     assert.equal(result.action, 'deny', `expected deny for Write(${target})`);
-    assert.equal(result.category, 'security-config-protection');
+    // The `::$DATA` target is now caught first by the Windows alias-form rule (ADR-0044).
+    assert.equal(result.category, target.includes('::') ? 'path-alias-form' : 'security-config-protection');
   }
 });
 
@@ -1534,4 +1540,313 @@ test('module source never reads a CLAUDE_-prefixed environment variable', () => 
   const source = fs.readFileSync(RISK_POLICY_PATH, 'utf8');
   assert.doesNotMatch(source, /process\.env\.CLAUDE_/);
   assert.doesNotMatch(source, /env\[.CLAUDE_/);
+});
+
+// Codex sends apply_patch as `tool_input.command` (rust-v0.154.0 and
+// rust-v0.167.2); the classifier used to read only `patch` and denied every
+// real call as unparseable. Both fields are classified, so neither can mask
+// the other.
+test('shared risk policy: apply_patch reads the real Codex shape (command) and never lets one field mask the other', () => {
+  const dataRoot = path.join(os.tmpdir(), 'krylo-apply-patch-shape-data');
+  const benign = '*** Begin Patch\n*** Add File: notes.md\n+hello\n*** End Patch\n';
+  const secret = '*** Begin Patch\n*** Update File: .env\n@@\n-A=1\n+A=2\n*** End Patch\n';
+  const cwd = path.join(os.tmpdir(), 'krylo-apply-patch-shape-project');
+  assert.equal(classifyRiskAction({ toolName: 'apply_patch', toolInput: { command: benign }, cwd, dataRoot }).action, 'pass');
+  assert.equal(classifyRiskAction({ toolName: 'apply_patch', toolInput: { command: secret }, cwd, dataRoot }).action, 'deny');
+  assert.equal(classifyRiskAction({ toolName: 'apply_patch', toolInput: { command: benign, patch: secret }, cwd, dataRoot }).action, 'deny');
+  assert.equal(classifyRiskAction({ toolName: 'apply_patch', toolInput: { command: secret, patch: benign }, cwd, dataRoot }).action, 'deny');
+});
+
+// Parser differential (automated security review of ADR-0044): Codex trims
+// every patch line before matching a header (codex-rs/apply-patch/src/
+// streaming_parser.rs, `let trimmed = line.trim()` then
+// `trimmed.strip_prefix(UPDATE_FILE_MARKER)` etc., rust-v0.167.2), so an
+// indented header is a real header to Codex. Extracting only column-0
+// headers let a benign header vouch for a patch that also edits .env.
+test('shared risk policy: apply_patch headers are read the way Codex reads them (trimmed), and look-alikes fail closed', () => {
+  const dataRoot = path.join(os.tmpdir(), 'krylo-apply-patch-diff-data');
+  const cwd = path.join(os.tmpdir(), 'krylo-apply-patch-diff-project');
+  const classify = (command) => classifyRiskAction({ toolName: 'apply_patch', toolInput: { command }, cwd, dataRoot });
+  const benignThen = (secondHeader) => `*** Begin Patch\n*** Add File: notes.md\n+hello\n${secondHeader}\n@@\n-A=1\n+A=2\n*** End Patch\n`;
+  for (const [label, header] of [
+    ['leading spaces', '   *** Update File: .env'],
+    ['leading tab', '\t*** Update File: .env'],
+    ['leading NEL (U+0085, trimmed by Rust, not by JS trim)', '\u0085*** Update File: .env'],
+    ['leading no-break space', ' *** Update File: .env'],
+    ['CRLF line ending', '*** Update File: .env\r'],
+  ]) {
+    assert.equal(classify(benignThen(header)).action, 'deny', `${label}: a hidden .env header must be seen`);
+  }
+  for (const [label, header] of [
+    ['different case', '*** update file: notes2.md'],
+    ['missing space after stars', '***Update File: notes2.md'],
+  ]) {
+    const r = classify(benignThen(header));
+    assert.equal(r.action, 'deny', `${label}: a header-like line the strict reader does not take must fail closed`);
+  }
+  // Codex keeps the path after the exact prefix verbatim (PathBuf::from(path)),
+  // so a double space is a real header for a name with a leading space, and
+  // Windows drops trailing spaces when opening a file. KRYLO classifies the
+  // trimmed name: the conservative direction for both.
+  for (const header of ['*** Update File:  .env', '*** Update File: .env  ']) {
+    assert.equal(classify(benignThen(header)).action, 'deny', `${JSON.stringify(header)} must be denied`);
+  }
+  const moveInHunk = '*** Begin Patch\n*** Update File: notes.md\n  *** Move to: .env\n@@\n-a\n+b\n*** End Patch\n';
+  assert.equal(classify(moveInHunk).action, 'deny', 'an indented Move to into .env must be seen');
+  const contentLine = '*** Begin Patch\n*** Add File: docs/patch-format.md\n+*** Update File: example.txt\n*** End Patch\n';
+  assert.equal(classify(contentLine).action, 'pass', 'a + content line that merely mentions a header is file content, not a header');
+});
+
+// Independent security review of ADR-0044, findings F2-F4.
+test('shared risk policy: apply_patch targets with line separators or control characters fail closed (F2)', () => {
+  const dataRoot = path.join(os.tmpdir(), 'krylo-apply-patch-f2-data');
+  const cwd = path.join(os.tmpdir(), 'krylo-apply-patch-f2-project');
+  const classify = (command) => classifyRiskAction({ toolName: 'apply_patch', toolInput: { command }, cwd, dataRoot });
+  for (const [label, target] of [
+    ['U+2028', 'notes\u2028/../.env'],
+    ['U+2029', 'notes\u2029/../.env'],
+    ['bare CR', 'x\r/../.env'],
+    ['NUL', 'notes\u0000.md'],
+    ['other C0 control', 'notes\u001b.md'],
+  ]) {
+    const r = classify(`*** Begin Patch\n*** Add File: ${target}\n+hi\n*** End Patch\n`);
+    assert.equal(r.action, 'deny', `${label} inside a target must be denied, got ${r.action}`);
+  }
+});
+
+test('shared risk policy: apply_patch classification is bounded -- oversized patches and too many targets are denied (F3)', () => {
+  const dataRoot = path.join(os.tmpdir(), 'krylo-apply-patch-f3-data');
+  const cwd = path.join(os.tmpdir(), 'krylo-apply-patch-f3-project');
+  const classify = (command) => classifyRiskAction({ toolName: 'apply_patch', toolInput: { command }, cwd, dataRoot });
+  const manyHeaders = Array.from({ length: 5000 }, (_, i) => `*** Add File: f${i}.md\n+x`).join('\n');
+  let started = Date.now();
+  const many = classify(`*** Begin Patch\n${manyHeaders}\n*** Add File: .env\n+X=1\n*** End Patch\n`);
+  assert.equal(many.action, 'deny');
+  assert.ok(Date.now() - started < 5000, `a patch with 5001 targets must be refused quickly, took ${Date.now() - started} ms`);
+  started = Date.now();
+  const longPath = classify(`*** Begin Patch\n*** Add File: ${'a/'.repeat(16000)}x.md\n+x\n*** End Patch\n`);
+  assert.equal(longPath.action, 'deny');
+  assert.ok(Date.now() - started < 5000, `a 32 KB target path must be refused quickly, took ${Date.now() - started} ms`);
+  // A trim regex with an unanchored trailing-whitespace branch is quadratic
+  // on a long whitespace run: 300,000 spaces in one content line took about
+  // 70 s, far past the hook timeout, inside the length cap.
+  started = Date.now();
+  const spaces = classify('*** Begin Patch\n*** Add File: notes.md\n+' + ' '.repeat(300_000) + 'x\n*** End Patch\n');
+  assert.equal(spaces.action, 'pass');
+  assert.ok(Date.now() - started < 5000, `a 300,000-space content line must classify quickly, took ${Date.now() - started} ms`);
+  const normal = classify('*** Begin Patch\n*** Add File: notes.md\n+' + 'y'.repeat(200_000) + '\n*** End Patch\n');
+  assert.equal(normal.action, 'pass', 'a single-target patch with large but ordinary file content stays allowed');
+});
+
+test('shared risk policy: an apply_patch field that is present but not a string is denied, even beside a benign string (F4)', () => {
+  const dataRoot = path.join(os.tmpdir(), 'krylo-apply-patch-f4-data');
+  const cwd = path.join(os.tmpdir(), 'krylo-apply-patch-f4-project');
+  const benign = '*** Begin Patch\n*** Add File: notes.md\n+hi\n*** End Patch\n';
+  for (const toolInput of [{ command: ['*** Update File: .env'], patch: benign }, { command: benign, patch: { x: 1 } }, { command: 42 }]) {
+    assert.equal(classifyRiskAction({ toolName: 'apply_patch', toolInput, cwd, dataRoot }).action, 'deny', JSON.stringify(Object.keys(toolInput)));
+  }
+});
+
+// Second review round of ADR-0044.
+test('shared risk policy: an apply_patch target with surrounding whitespace is denied, never classified by its trimmed name (round 2 F1)', () => {
+  const root = path.join(os.tmpdir(), 'krylo-apply-patch-r2');
+  const cwd = path.join(root, 'proj');
+  const dataRoot = path.join(root, 'data');
+  const pluginRoot = path.join(root, 'plugin');
+  const classify = (command) => classifyRiskAction({ toolName: 'apply_patch', toolInput: { command }, cwd, dataRoot, pluginRoot });
+  // Codex keeps the path after the exact prefix verbatim, so ' /../../data/x'
+  // is cwd/' '/../../data/x = <root>/data/x to Codex, while the trimmed name
+  // is an absolute path at the filesystem root that no check covers.
+  for (const header of [
+    '*** Add File:  /../../data/state.json',
+    '*** Add File:  /../../data/state.json',
+    '*** Delete File:  /../../data/state.json',
+    '*** Add File:  /../../plugin/hooks/hooks.json',
+  ]) {
+    const r = classify(`*** Begin Patch\n${header}\n+x\n*** End Patch\n`);
+    assert.equal(r.action, 'deny', `${JSON.stringify(header)} must be denied`);
+  }
+  const move = classify('*** Begin Patch\n*** Update File: notes.md\n*** Move to:  /../../data/state.json\n@@\n-a\n+b\n*** End Patch\n');
+  assert.equal(move.action, 'deny', 'a Move to with a whitespace-prefixed path must be denied');
+  assert.equal(classify('*** Begin Patch\n*** Add File: notes.md\n+x\n*** End Patch\n').action, 'pass', 'an exact, clean target stays allowed');
+  // Codex trims the whole line before stripping the prefix, so trailing
+  // whitespace never reaches its path: 'notes.md ' is exactly 'notes.md'.
+  assert.equal(classify('*** Begin Patch\n*** Add File: notes.md \n+x\n*** End Patch\n').action, 'pass', 'trailing whitespace is trimmed by Codex too');
+  // U+FEFF is trimmed by JavaScript but is not Unicode White_Space, so Rust keeps it.
+  assert.equal(classify('*** Begin Patch\n*** Add File: notes.md﻿\n+x\n*** End Patch\n').action, 'deny', 'a BOM that only one side trims must be denied');
+});
+
+test('shared risk policy: apply_patch path work is bounded by total path components, deterministically (round 2 F2 and mutation e)', () => {
+  const root = path.join(os.tmpdir(), 'krylo-apply-patch-r2b');
+  const classify = (command) => classifyRiskAction({ toolName: 'apply_patch', toolInput: { command }, cwd: path.join(root, 'proj'), dataRoot: path.join(root, 'data') });
+  const deep = Array.from({ length: 100 }, (_, i) => `*** Add File: ${'a/'.repeat(508)}f${i}.md\n+x`).join('\n');
+  const started = Date.now();
+  const r = classify(`*** Begin Patch\n${deep}\n*** End Patch\n`);
+  assert.equal(r.action, 'deny');
+  assert.equal(r.category, 'apply-patch-oversized');
+  assert.ok(Date.now() - started < 5000, `100 deep targets must be refused quickly, took ${Date.now() - started} ms`);
+  const tooMany = Array.from({ length: 101 }, (_, i) => `*** Add File: f${i}.md\n+x`).join('\n');
+  assert.equal(classify(`*** Begin Patch\n${tooMany}\n*** End Patch\n`).category, 'apply-patch-oversized', '101 benign targets must be refused by the count cap, not by timing');
+  const ordinary = Array.from({ length: 40 }, (_, i) => `*** Add File: src/module${i}/index.js\n+x`).join('\n');
+  assert.equal(classify(`*** Begin Patch\n${ordinary}\n*** End Patch\n`).action, 'pass', 'an ordinary multi-file patch stays allowed');
+});
+
+test('shared risk policy: an apply_patch for another execution environment is denied (round 2 F4)', () => {
+  const root = path.join(os.tmpdir(), 'krylo-apply-patch-r2c');
+  const r = classifyRiskAction({
+    toolName: 'apply_patch',
+    toolInput: { command: '*** Begin Patch\n*** Environment ID: remote-1\n*** Add File: notes.md\n+x\n*** End Patch\n' },
+    cwd: path.join(root, 'proj'),
+    dataRoot: path.join(root, 'data'),
+  });
+  assert.equal(r.action, 'deny');
+  assert.equal(r.category, 'apply-patch-remote-environment');
+});
+
+// Windows alias forms (path-equivalence review of ADR-0044): an 8.3 short
+// name, NTFS stream syntax or a UNC/device/volume prefix names a protected
+// file under a spelling the per-path checks do not compare, so Windows opens
+// .codex\hooks.json, .claude\settings.json, .env or the data root while the
+// checks see an ordinary name. Observed by writing through the alias with
+// Node; affects Write/Edit/NotebookEdit/Read/Glob/Grep on both hosts and
+// apply_patch targets. Structured path fields in these forms are denied.
+const ALIAS_FORMS = [
+  String.raw`CODEX~1\hooks.json`,
+  String.raw`CLAUDE~1\settings.json`,
+  'ENV~1',
+  String.raw`..\KRYLO-~1\state.json`,
+  String.raw`.codex::$INDEX_ALLOCATION\hooks.json`,
+  String.raw`.claude::$INDEX_ALLOCATION\settings.json`,
+  'notes.txt:hidden-stream',
+  String.raw`\\localhost\C$\x\state.json`,
+  String.raw`\\?\Volume{00000000-0000-0000-0000-000000000000}\x\state.json`,
+  String.raw`\\?\C:\x\state.json`,
+  '//server/share/x.json',
+];
+
+test('shared risk policy: Windows alias path forms are denied on every structured path field and in apply_patch', () => {
+  const root = path.join(os.tmpdir(), 'krylo-alias-forms');
+  const ctx = { cwd: path.join(root, 'proj'), dataRoot: path.join(root, 'krylo-data-root'), pluginRoot: path.join(root, 'plugin') };
+  for (const p of ALIAS_FORMS) {
+    for (const [toolName, toolInput] of [
+      ['Write', { file_path: p, content: 'x' }],
+      ['Edit', { file_path: p, old_string: 'a', new_string: 'b' }],
+      ['NotebookEdit', { notebook_path: p, new_source: 'x' }],
+      ['Read', { file_path: p }],
+      ['Glob', { path: p, pattern: '*' }],
+      ['Grep', { path: p, pattern: 'x' }],
+      ['apply_patch', { command: `*** Begin Patch\n*** Add File: ${p}\n+x\n*** End Patch\n` }],
+    ]) {
+      const r = classifyRiskAction({ toolName, toolInput, ...ctx });
+      assert.equal(r.action, 'deny', `${toolName} ${JSON.stringify(p)} must be denied, got ${r.action}`);
+    }
+  }
+});
+
+test('shared risk policy: ordinary paths are not mistaken for Windows alias forms', () => {
+  const root = path.join(os.tmpdir(), 'krylo-alias-forms-ok');
+  const ctx = { cwd: path.join(root, 'proj'), dataRoot: path.join(root, 'krylo-data-root'), pluginRoot: path.join(root, 'plugin') };
+  for (const p of [String.raw`C:\work\notes.md`, 'C:/work/notes.md', 'src/index.js', String.raw`docs\guide.md`, '/home/user/notes.md', 'notes~draft.md']) {
+    assert.equal(classifyRiskAction({ toolName: 'Write', toolInput: { file_path: p, content: 'x' }, ...ctx }).action, 'pass', `${JSON.stringify(p)} must stay allowed`);
+  }
+});
+
+// 8.3 short names on real directories: the bypass (an existing protected
+// directory reached through its short name) must be denied by the same check
+// as the long name, and a legitimate path under a short-name ancestor (CI's
+// C:\Users\RUNNER~1\... temp directory) must be allowed and checked on its
+// long form. The short name is asked of Windows itself; where 8.3 generation
+// is disabled on the volume the case is skipped, never silently passed.
+function windowsShortPath(longPath) {
+  if (process.platform !== 'win32') return null;
+  // windowsVerbatimArguments: cmd.exe must receive the quoted command line
+  // as written; Node's default argument quoting mangles the inner quotes.
+  const r = spawnSyncForShortName('cmd.exe', ['/d', '/s', '/c', `"for %I in ("${longPath}") do @echo %~sI"`], { encoding: 'utf8', windowsVerbatimArguments: true });
+  const out = String(r.stdout || '').trim();
+  return out && out.toLowerCase() !== longPath.toLowerCase() ? out : null;
+}
+
+test('shared risk policy: an existing protected directory reached through its 8.3 short name is denied like its long name', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-shortname-'));
+  try {
+    const proj = path.join(root, 'proj');
+    fs.mkdirSync(path.join(proj, '.codex'), { recursive: true });
+    fs.mkdirSync(path.join(proj, '.claude'), { recursive: true });
+    const codexShort = windowsShortPath(path.join(proj, '.codex'));
+    const claudeShort = windowsShortPath(path.join(proj, '.claude'));
+    if (!codexShort || !claudeShort) {
+      t.skip('8.3 short names are not available on this volume');
+      return;
+    }
+    const ctx = { cwd: proj, dataRoot: path.join(root, 'data'), pluginRoot: path.join(root, 'plugin') };
+    for (const [toolName, toolInput] of [
+      ['Write', { file_path: path.join(codexShort, 'hooks.json'), content: '{}' }],
+      ['Write', { file_path: path.join(claudeShort, 'settings.json'), content: '{}' }],
+      ['apply_patch', { command: `*** Begin Patch\n*** Add File: ${path.join(path.basename(codexShort), 'hooks.json')}\n+{}\n*** End Patch\n` }],
+    ]) {
+      const r = classifyRiskAction({ toolName, toolInput, ...ctx });
+      assert.equal(r.action, 'deny', `${toolName} ${JSON.stringify(toolInput)} must be denied`);
+      assert.equal(r.category, 'security-config-protection', 'the expanded path must reach the real protection check');
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('shared risk policy: a legitimate path under an existing 8.3 short-name ancestor is allowed and checked on its long form', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-shortname-ok-'));
+  try {
+    const longDir = path.join(root, 'a-long-directory-name');
+    fs.mkdirSync(longDir, { recursive: true });
+    const shortDir = windowsShortPath(longDir);
+    if (!shortDir) {
+      t.skip('8.3 short names are not available on this volume');
+      return;
+    }
+    const ctx = { cwd: root, dataRoot: path.join(root, 'data'), pluginRoot: path.join(root, 'plugin') };
+    assert.equal(classifyRiskAction({ toolName: 'Write', toolInput: { file_path: path.join(shortDir, 'notes.md'), content: 'x' }, ...ctx }).action, 'pass');
+    const dataRoot = path.join(longDir, 'krylo-data');
+    fs.mkdirSync(dataRoot);
+    const r = classifyRiskAction({ toolName: 'Write', toolInput: { file_path: path.join(shortDir, 'krylo-data', 'state.json'), content: 'x' }, cwd: root, dataRoot });
+    assert.equal(r.category, 'data-root-protection', 'a short-name spelling of the data root must be recognized as the data root');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Automated security review of the short-name expansion: expanding only the
+// TARGET while the data root and plugin root went through the non-native
+// realpath left a one-sided differential -- a data root configured in short
+// form (CI's C:\Users\RUNNER~1\...) no longer matched a long-form target.
+// Both sides must be canonicalized the same way, in either direction.
+test('shared risk policy: data-root and plugin-root protection hold whichever side is spelled with an 8.3 short name', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-shortname-roots-'));
+  try {
+    const longData = path.join(root, 'krylo-long-data-root');
+    const longPlugin = path.join(root, 'krylo-long-plugin-root');
+    fs.mkdirSync(longData, { recursive: true });
+    fs.mkdirSync(longPlugin, { recursive: true });
+    const shortData = windowsShortPath(longData);
+    const shortPlugin = windowsShortPath(longPlugin);
+    if (!shortData || !shortPlugin) {
+      t.skip('8.3 short names are not available on this volume');
+      return;
+    }
+    const cwd = path.join(root, 'proj');
+    for (const [rootSpelling, targetSpelling] of [[shortData, longData], [longData, shortData], [shortData, shortData]]) {
+      for (const [toolName, toolInput] of [
+        ['Write', { file_path: path.join(targetSpelling, 'state.json'), content: 'x' }],
+        ['apply_patch', { command: `*** Begin Patch\n*** Add File: ${path.join(targetSpelling, 'state.json')}\n+x\n*** End Patch\n` }],
+      ]) {
+        const r = classifyRiskAction({ toolName, toolInput, cwd, dataRoot: rootSpelling });
+        assert.equal(r.category, 'data-root-protection', `${toolName} target ${targetSpelling} vs data root ${rootSpelling}`);
+      }
+    }
+    for (const [rootSpelling, targetSpelling] of [[shortPlugin, longPlugin], [longPlugin, shortPlugin]]) {
+      const r = classifyRiskAction({ toolName: 'Write', toolInput: { file_path: path.join(targetSpelling, 'hooks', 'x.json'), content: 'x' }, cwd, dataRoot: longData, pluginRoot: rootSpelling });
+      assert.equal(r.category, 'plugin-installation-protection', `target ${targetSpelling} vs plugin root ${rootSpelling}`);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

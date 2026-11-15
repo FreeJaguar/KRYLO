@@ -137,12 +137,17 @@ function homeExpandedVariants(command, home) {
  * suffix, so a not-yet-created file inside a symlinked directory still
  * resolves to where it would actually land.
  */
+// fs.realpathSync.native, not fs.realpathSync: only the native variant
+// expands Windows 8.3 short names (CODEX~1 -> .codex). Every protected-root
+// comparison passes BOTH the target and the root through this function, so
+// both sides are canonicalized identically whichever one is spelled short
+// (ADR-0044; a one-sided expansion was flagged by an automated review).
 function realpathBestEffort(candidatePath) {
   let current = candidatePath;
   const suffix = [];
   for (;;) {
     try {
-      const real = fs.realpathSync(current);
+      const real = fs.realpathSync.native(current);
       return suffix.length > 0 ? path.join(real, ...suffix.reverse()) : real;
     } catch {
       const parent = path.dirname(current);
@@ -571,16 +576,180 @@ function touchesPluginInstallation({ toolName, toolInput, cwd, pluginRoot }) {
 // fell through to the unconditional final `pass` any genuinely unrecognized
 // tool name reaches -- a real, reproduced .env read/write/exfiltration
 // bypass, not a hypothetical gap.
-function extractApplyPatchTargets(patchText) {
-  if (typeof patchText !== 'string') return [];
-  const targets = [];
-  const headerRe = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm;
-  let match;
-  while ((match = headerRe.exec(patchText)) !== null) {
-    const target = match[1].trim();
-    if (target !== '') targets.push(target);
+//
+// Headers are read the way Codex reads them, not by a column-0 regex:
+// codex-rs/apply-patch/src/streaming_parser.rs (rust-v0.167.2) splits on
+// line breaks, TRIMS each line, and then matches the exact prefixes below,
+// even on lines inside an Update hunk -- so an indented `*** Update File:
+// .env` is a real header to Codex. Reading only column-0 headers let a
+// benign header vouch for a patch that also edited .env (a parser
+// differential found by an automated security review). Rust's trim()
+// removes Unicode White_Space, which differs from JavaScript's trim() (it
+// includes U+0085, JS does not); trimming the union can only reveal more
+// headers, never hide one. A line that LOOKS like a header but does not
+// match an exact prefix (case, spacing) is reported as ambiguous, and the
+// caller denies -- KRYLO never guesses what Codex will make of it.
+const APPLY_PATCH_HEADER_PREFIXES = ['*** Add File: ', '*** Delete File: ', '*** Update File: ', '*** Move to: '];
+// Trimmed by scanning code points from each end, not by a regex: an
+// unanchored trailing-whitespace pattern is quadratic on a long whitespace
+// run (300,000 spaces took about 70 s). The set is JavaScript's whitespace
+// plus U+0085, which Rust's trim() also removes.
+const APPLY_PATCH_TRIM_CODES = new Set([
+  0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0x85, 0xa0, 0x1680,
+  0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a,
+  0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff,
+]);
+
+// Windows path forms that name a file under a different spelling than the
+// per-path checks compare, so Windows opens a protected file while the
+// checks see an ordinary name: an 8.3 short-name segment (`CODEX~1` for
+// `.codex`, `ENV~1` for `.env`), NTFS stream syntax (`.codex::$INDEX_ALLOCATION`,
+// `file:stream`) and UNC/device/volume prefixes (`\\localhost\C$\...`,
+// `\\?\...`, `\\?\Volume{...}`). Found by a path-equivalence review of
+// ADR-0044 by writing through each alias.
+//
+// Device/UNC prefixes and stream syntax have no use in an ordinary project
+// path and are denied outright. An 8.3 short name, by contrast, appears in
+// legitimate paths on many machines (a long user name gives a temp
+// directory like C:\Users\RUNNER~1\..., which is how CI exposed the first,
+// deny-everything version of this rule). It is therefore EXPANDED with
+// fs.realpathSync.native, which, unlike fs.realpathSync, returns the long
+// name, and every protection check then runs on the expanded path. A
+// short-name segment in a part of the path that does not exist yet cannot be
+// expanded and is denied.
+const SHORT_NAME_SEGMENT_RE = /(^|[\\/])[^\\/]*~\d/;
+
+const PATH_ALIAS_FORM_DENY = Object.freeze({
+  action: 'deny',
+  category: 'path-alias-form',
+  reason: 'This path uses a Windows alias form that can name a protected file under another spelling (a \\\\ UNC/device prefix, NTFS stream syntax with ":", or an 8.3 short name such as NAME~1 that could not be resolved to a real name). Denied as a fail-safe; use the plain, full path.',
+});
+
+function isWindowsDeviceOrStreamForm(rawPath) {
+  if (typeof rawPath !== 'string' || rawPath === '') return false;
+  const p = stripSurroundingQuotes(rawPath);
+  if (/^[\\/]{2}/.test(p)) return true;
+  return p.replace(/^[A-Za-z]:/, '').includes(':');
+}
+
+// { ok: true, path } with any 8.3 short-name segment expanded to its long
+// name (an absolute path when an expansion happened, the input unchanged
+// otherwise), or { ok: false } when the path is a device/stream form or a
+// short-name segment cannot be expanded. Never throws.
+function canonicalizeAliasPath(rawPath, cwd) {
+  if (typeof rawPath !== 'string' || rawPath === '') return { ok: true, path: rawPath };
+  if (isWindowsDeviceOrStreamForm(rawPath)) return { ok: false };
+  const p = stripSurroundingQuotes(rawPath);
+  if (!SHORT_NAME_SEGMENT_RE.test(p)) return { ok: true, path: rawPath };
+  try {
+    let existing = path.resolve(cwd || process.cwd(), p);
+    const missing = [];
+    while (!fs.existsSync(existing)) {
+      const parent = path.dirname(existing);
+      if (parent === existing) return { ok: false };
+      missing.unshift(path.basename(existing));
+      existing = parent;
+    }
+    if (missing.some((segment) => /~\d/.test(segment))) return { ok: false };
+    const expanded = path.join(fs.realpathSync.native(existing), ...missing);
+    if (SHORT_NAME_SEGMENT_RE.test(expanded)) return { ok: false };
+    return { ok: true, path: expanded };
+  } catch {
+    return { ok: false };
   }
-  return targets;
+}
+
+// The structured path fields of the tools the classifier knows.
+function structuredPathFieldNames(name) {
+  switch (name) {
+    case 'Write':
+    case 'Edit':
+    case 'Read':
+      return ['file_path'];
+    case 'NotebookEdit':
+      return ['notebook_path', 'file_path'];
+    case 'Glob':
+    case 'Grep':
+      return ['path'];
+    default:
+      return [];
+  }
+}
+
+function trimPatchLine(s) {
+  let start = 0;
+  let end = s.length;
+  while (start < end && APPLY_PATCH_TRIM_CODES.has(s.charCodeAt(start))) start++;
+  while (end > start && APPLY_PATCH_TRIM_CODES.has(s.charCodeAt(end - 1))) end--;
+  return s.slice(start, end);
+}
+const APPLY_PATCH_HEADER_LOOKALIKE_RE = /^\*+\s*(?:add|delete|update)\s*file\s*:|^\*+\s*move\s*to\s*:/i;
+
+// Bounds keep classification well inside the 30 s PreToolUse timeout: each
+// target goes through the full per-path checks, which an independent review
+// measured at about 22 s for 5,000 targets and 45 s for one 32 KB path.
+// A patch over any bound is denied as oversized, never partially checked.
+//
+// Path work, not only length, is bounded: the per-path checks resolve each
+// component on disk, and a second review measured 52-81 s for 100 deep
+// targets that were inside the length and count caps. The total number of
+// path components across all targets is capped as well.
+const MAX_APPLY_PATCH_LENGTH = 1_000_000;
+const MAX_APPLY_PATCH_TARGETS = 100;
+const MAX_APPLY_PATCH_TARGET_LENGTH = 1024;
+const MAX_APPLY_PATCH_PATH_COMPONENTS = 1000;
+// A control character or Unicode line/paragraph separator inside a target
+// has no legitimate use and could be read differently by Codex and by the
+// path checks here.
+const APPLY_PATCH_TARGET_FORBIDDEN_RE = /[\u0000-\u001f\u007f\u2028\u2029]/;
+// Codex addresses a different execution environment's filesystem with this
+// marker; its targets cannot be checked against this machine's paths.
+const APPLY_PATCH_ENVIRONMENT_MARKER = '*** Environment ID:';
+const BYTE_ORDER_MARK = 0xfeff;
+
+function extractApplyPatchTargets(patchText) {
+  const result = (fields) => ({ targets: [], ambiguous: false, oversized: false, remoteEnvironment: false, ...fields });
+  if (typeof patchText !== 'string') return result({});
+  if (patchText.length > MAX_APPLY_PATCH_LENGTH) return result({ oversized: true });
+  const targets = [];
+  let ambiguous = false;
+  let remoteEnvironment = false;
+  let components = 0;
+  for (const rawLine of patchText.split('\n')) {
+    const line = trimPatchLine(rawLine);
+    if (line.startsWith(APPLY_PATCH_ENVIRONMENT_MARKER)) {
+      remoteEnvironment = true;
+      continue;
+    }
+    const prefix = APPLY_PATCH_HEADER_PREFIXES.find((p) => line.startsWith(p));
+    if (prefix) {
+      // Codex trims the whole line, strips the exact prefix, and keeps the
+      // rest VERBATIM (PathBuf::from(path)). A target that would change under
+      // trimming therefore names a different path to Codex than to these
+      // checks -- per Codex's PathUri::join source (rust-v0.167.2; read, not
+      // executed), ' /../../data/x' is cwd/' '/../../data/x to Codex but a
+      // filesystem-root path here -- so it is denied, never classified by its
+      // trimmed name. U+FEFF is trimmed by JavaScript but kept by Rust.
+      const target = line.slice(prefix.length);
+      if (target.length > MAX_APPLY_PATCH_TARGET_LENGTH) return result({ oversized: true });
+      if (
+        target === ''
+        || trimPatchLine(target) !== target
+        || APPLY_PATCH_TARGET_FORBIDDEN_RE.test(target)
+        || rawLine.includes(String.fromCharCode(BYTE_ORDER_MARK))
+        || isWindowsDeviceOrStreamForm(target)
+      ) {
+        ambiguous = true;
+      } else {
+        targets.push(target);
+        components += target.split(/[\\/]+/).length;
+      }
+      if (targets.length > MAX_APPLY_PATCH_TARGETS || components > MAX_APPLY_PATCH_PATH_COMPONENTS) return result({ oversized: true });
+    } else if (APPLY_PATCH_HEADER_LOOKALIKE_RE.test(line)) {
+      ambiguous = true;
+    }
+  }
+  return result({ targets, ambiguous, remoteEnvironment });
 }
 
 function loadPolicy() {
@@ -1403,9 +1572,14 @@ function commandTouchesSensitivePath(policy, command) {
  * deterministic deny, not an unconfirmed-safe "ask") for a malformed input
  * (missing/invalid dataRoot, unreadable policy file, etc).
  */
-export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginRoot } = {}) {
+export function classifyRiskAction(args = {}) {
+  return classifyRiskActionInternal(args, { canonicalizePaths: true });
+}
+
+function classifyRiskActionInternal({ toolName, toolInput, cwd, dataRoot, pluginRoot } = {}, { canonicalizePaths }) {
   const name = String(toolName ?? '');
-  const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
+  const originalInput = toolInput && typeof toolInput === 'object' ? toolInput : {};
+  let input = originalInput;
   const resolvedDataRoot = typeof dataRoot === 'string' && dataRoot.trim() !== '' ? dataRoot : getDataRoot();
   const policy = loadPolicy();
 
@@ -1422,6 +1596,22 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
   // that happens to appear later in an otherwise-padded string).
   if ((name === 'Bash' || name === 'PowerShell') && typeof input.command === 'string' && input.command.length > MAX_BASH_COMMAND_LENGTH) {
     return { action: 'deny', category: 'oversized-command', reason: OVERSIZED_COMMAND_REASON };
+  }
+
+  // Structured path fields: device/stream forms are denied, and 8.3 short
+  // names are expanded so every check below sees the real file's name.
+  for (const field of structuredPathFieldNames(name)) {
+    if (!canonicalizePaths || typeof input[field] !== 'string') continue;
+    const canonical = canonicalizeAliasPath(input[field], cwd);
+    if (!canonical.ok) return PATH_ALIAS_FORM_DENY;
+    if (canonical.path !== input[field]) input = { ...input, [field]: canonical.path };
+  }
+  // When an expansion rewrote a path, the original spelling is classified
+  // too and a deny on either side wins, so no check can be weaker on the
+  // expanded form than it was on the raw one.
+  if (input !== originalInput) {
+    const raw = classifyRiskActionInternal({ toolName, toolInput: originalInput, cwd, dataRoot, pluginRoot }, { canonicalizePaths: false });
+    if (raw.action === 'deny') return raw;
   }
 
   if (touchesDataRoot({ toolName: name, toolInput: input, cwd, dataRoot: resolvedDataRoot })) {
@@ -1517,8 +1707,49 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
   }
 
   if (name === 'apply_patch') {
-    const patchText = typeof input.patch === 'string' ? input.patch : '';
-    const targets = extractApplyPatchTargets(patchText);
+    // Codex sends the raw patch as `tool_input.command`
+    // (codex-rs/core/src/tools/handlers/apply_patch.rs, pre_tool_use_payload,
+    // identical at rust-v0.154.0 and rust-v0.167.2). This read only `patch`,
+    // a field neither checked Codex build sends, so every real apply_patch call was
+    // denied below as unparseable -- fail-closed, but it left the Codex host
+    // unable to edit files at all. `patch` is still accepted for any caller
+    // that uses it; when both are present, each is classified, so a benign
+    // `command` can never mask a dangerous `patch` or the reverse.
+    // A field that is present but not a string cannot be classified, so it is
+    // denied rather than ignored beside a benign string in the other field.
+    for (const field of ['command', 'patch']) {
+      if (input[field] !== undefined && input[field] !== null && typeof input[field] !== 'string') {
+        return {
+          action: 'deny',
+          category: 'apply-patch-unparseable',
+          reason: `KRYLO received an apply_patch "${field}" that is not text, so it cannot verify which files would change. Denied as a fail-safe.`,
+        };
+      }
+    }
+    const patchTexts = [input.command, input.patch].filter((v) => typeof v === 'string');
+    const patchText = patchTexts.join('\n');
+    const { targets, ambiguous, oversized, remoteEnvironment } = extractApplyPatchTargets(patchText);
+    if (remoteEnvironment) {
+      return {
+        action: 'deny',
+        category: 'apply-patch-remote-environment',
+        reason: 'This apply_patch call targets another execution environment ("*** Environment ID:"), whose files KRYLO cannot check against this machine\'s protected paths. Denied as a fail-safe.',
+      };
+    }
+    if (oversized) {
+      return {
+        action: 'deny',
+        category: 'apply-patch-oversized',
+        reason: `This apply_patch call is too large to classify safely (over ${MAX_APPLY_PATCH_LENGTH.toLocaleString('en-US')} characters, over ${MAX_APPLY_PATCH_TARGETS} files, or a path over ${MAX_APPLY_PATCH_TARGET_LENGTH} characters). Denied as a fail-safe; split it into smaller patches.`,
+      };
+    }
+    if (ambiguous) {
+      return {
+        action: 'deny',
+        category: 'apply-patch-ambiguous',
+        reason: 'KRYLO found a line in this apply_patch call that resembles a file header but does not match the exact header form, so it cannot be sure which files Codex would change. Denied as a fail-safe; use the exact "*** Update File: <path>" form.',
+      };
+    }
     // A real apply_patch call always specifies at least one target file via
     // its own required header syntax -- zero extractable targets means the
     // patch content was not recognized (malformed, unexpected shape, or a
@@ -1533,7 +1764,16 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
         reason: 'KRYLO could not determine which file(s) this apply_patch call targets, so it cannot verify the action is safe. Denied as a fail-safe.',
       };
     }
-    for (const target of targets) {
+    // Each target is checked under its expanded spelling AND its original
+    // one, as for structured path fields above: a deny on either wins.
+    const spellings = [];
+    for (const rawTarget of targets) {
+      const canonical = canonicalizeAliasPath(rawTarget, cwd);
+      if (!canonical.ok) return PATH_ALIAS_FORM_DENY;
+      spellings.push(canonical.path);
+      if (canonical.path !== rawTarget) spellings.push(rawTarget);
+    }
+    for (const target of spellings) {
       const syntheticInput = { file_path: target };
       if (touchesDataRoot({ toolName: name, toolInput: syntheticInput, cwd, dataRoot: resolvedDataRoot })) {
         return { action: 'deny', category: 'data-root-protection', reason: DATA_ROOT_REASON };

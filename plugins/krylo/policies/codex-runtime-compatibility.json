@@ -1,6 +1,6 @@
 {
   "contractSchemaVersion": 1,
-  "reviewedAt": "2026-09-15",
+  "reviewedAt": "2026-11-15",
   "supported": [
     {
       "version": "0.120.0",
@@ -27,6 +27,20 @@
         "SessionEnd"
       ],
       "notes": "This entry deliberately records what was NOT established, because the approval it grants is only as good as its evidence. (1) SessionEnd fires and is confirmed: its telemetry marker was written on an active run. An earlier draft of this entry recorded it as never firing, which was wrong -- scripts/status/session-end-codex.mjs no-ops SILENTLY for a terminal run (its own `if (!run.active)` guard), so every earlier SAFE_BLOCKED session produced no evidence either way rather than evidence of absence. (2) The bootstrap-failure marker's own PreToolUse deny was not exercised live: the model complied with the advisory context every time, including when explicitly told to attempt the call anyway, so no tool call was ever issued on a SAFE_BLOCKED session. That path remains fixture-tested only, and KRYLO's own principle that enforcement must not depend on model cooperation is therefore still unproven live for it. (3) Hook trust and project trust were bypassed or preconfigured in the sandbox rather than exercised through their real review flows; on a real machine, hooks that are never trusted never run, and no KRYLO enforcement exists until they are. (4) PermissionRequest, SubagentStart/SubagentStop and PreCompact are recognized by this build but remain unregistered and unexercised. (5) Verified against the npm-installed codex.exe that KRYLO's own spawn-platform resolution selects. A second, natively-installed 0.153.4 exists on the same machine and was NOT verified; version identity here is per-binary, not per-machine."
+    },
+    {
+      "version": "0.167.2",
+      "reviewedAt": "2026-11-15",
+      "evidence": "Locally passed, LIVE, against real authenticated `codex exec` sessions on codex-cli 0.167.2 in an isolated CODEX_HOME (docs/adr/0044-codex-0167-supported.md). Observed directly: every registered hook event fires (SessionStart, UserPromptSubmit, PreToolUse, PostToolUse, Stop, SessionEnd -- the last confirmed by its telemetry marker on an active run); PreToolUse BLOCKS a real model-issued `git push` (require-approval) and `cat .env` (hard deny) while a benign command executes; a `git push` issued through `exec_command` with `workdir` set to a project subdirectory is also blocked (0.166.0 reports the command workdir as the hook cwd; resolved by ADR-0043); apply_patch is gated -- a benign file edit is applied and an edit to `.env` is denied (after the apply_patch input fix in ADR-0044); a `git push` issued by a subagent started with spawn_agent is blocked inside the subagent, whose hooks carry the parent session_id; PostToolUse telemetry carries counters only; the Orbit Stop gate holds an active run and releases a terminal one; the plugin install directory is byte-identical before and after the sessions (0.164.0 binds hook trust to plugin contents). With the shipped contract and 0.167.2 resolved first on PATH, the runtime gate refused the run as unreviewed with a codex-runtime-compat finding.",
+      "confirmedHookEvents": [
+        "SessionStart",
+        "UserPromptSubmit",
+        "PreToolUse",
+        "PostToolUse",
+        "Stop",
+        "SessionEnd"
+      ],
+      "notes": "Residuals this approval accepts: (1) Hook trust was bypassed with --dangerously-bypass-hook-trust in the sandbox, so 0.164.0 content-bound trust (trusted_content_hash, re-hashed before each hook run inside its timeout) was not exercised through its real review flow; on a real machine untrusted hooks never run, and any change to the plugin directory voids the grant until re-approved. (2) The runtime gate verifies the Codex binary its own PATH lookup resolves, not necessarily the binary running the session; with two installations whose PATH order differs from the one that launched the session, a run was admitted on 0.167.2 because PATH resolved a supported 0.154.0 (observed live; per-binary identity, as already disclosed for 0.154.0). (3) PermissionRequest, PreModelRequest/PostModelRequest, PreCompact/PostCompact, SubagentStart/SubagentStop and Interrupt are recognized by this build but unregistered by KRYLO and unexercised. (4) PreToolUse permissionDecision \"ask\" still fails open on this build, so KRYLO keeps a deny-only Codex gate. (5) Verified on Windows 11 only."
     }
   ],
   "blocked": []
