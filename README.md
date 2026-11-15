@@ -8,7 +8,7 @@
 
 KRYLO is an autonomous, evidence-driven software-development workflow, built on one Shared Core with two first-class hosts: the Claude Code plugin, and an OpenAI Codex CLI plugin. One explicit command turns a task into a controlled run: acceptance criteria, a minimal agent team, deterministic verification, independent review, a bounded correction loop (Orbit), and an evidence-backed final report.
 
-Current release: `0.2.0`. Not yet submitted to any official/curated marketplace on either host; install directly from this repository (below). The Claude Code host is released; the Codex host is implemented and shipped in this repository but not yet submitted to a curated Codex marketplace. A native `codex plugin` CLI install path (`marketplace add` + `add`, confirmed on `codex-cli 0.153.4`; absent on the originally-tested `0.120.0`) is now available -- see "Codex" below.
+Current release: `0.3.0` (minimum Claude Code `2.1.318`; reviewed Codex CLI `0.120.0`, `0.154.0` and `0.167.2`). Not yet submitted to any official/curated marketplace on either host; install directly from this repository (below). The Claude Code host is released; the Codex host is implemented and shipped in this repository but not yet submitted to a curated Codex marketplace. A native `codex plugin` CLI install path (`marketplace add` + `add`, confirmed on `codex-cli 0.153.4`, `0.154.0` and `0.167.2`; absent on the originally-tested `0.120.0`) is now available -- see "Codex" below.
 
 ## Installation (Claude Code)
 
@@ -40,7 +40,7 @@ KRYLO's Codex host reuses the same Shared Core as the Claude plugin (`docs/adr/0
 
 ### CLI/plugin-browser (full plugin: `PLUGIN_ROOT`, hooks, `$krylo-run` enforcement)
 
-Confirmed working on `codex-cli 0.153.4` (the `codex plugin` CLI management subcommand was absent on the originally-tested `0.120.0` -- see `docs/adr/0029-codex-host-packaging-and-approval-boundary.md`'s "Correction" section for the verified command transcript). Check `codex --help` for a `plugin` entry before relying on this path; if it is missing, use the standalone Skill path below instead.
+Confirmed working on `codex-cli 0.153.4`, `0.154.0` and `0.167.2` (the `codex plugin` CLI management subcommand was absent on the originally-tested `0.120.0` -- see `docs/adr/0029-codex-host-packaging-and-approval-boundary.md`'s "Correction" section for the verified command transcript). Check `codex --help` for a `plugin` entry before relying on this path; if it is missing, use the standalone Skill path below instead.
 
 ```bash
 git clone https://github.com/FreeJaguar/KRYLO
@@ -128,19 +128,19 @@ The Risk Gate is **defense in depth, not an operating-system sandbox**: it is a 
 ## Known limitations
 
 - **Codex `require-approval` denies deterministically instead of prompting.** Current official Codex `PreToolUse` output does not support a native `ask` decision on the currently tested build, so an action KRYLO classifies as requiring human approval is denied outright on Codex rather than pausing for a real human decision the way it does on Claude. This is a documented, capability-driven asymmetry, not an oversight (`docs/codex-capability-matrix.md`).
-- **Codex plugin CLI installation works on newer builds; live hook firing is still unconfirmed on either install path.** `codex plugin marketplace add`/`add` are confirmed working on `codex-cli 0.153.4` (absent on the originally-tested `0.120.0`) and successfully install KRYLO's plugin, but no authenticated Codex session has yet confirmed the plugin's hooks (session bootstrap, PreToolUse gate) actually fire end to end -- see "Installation (Codex)" above and `docs/codex-capability-matrix.md`. Full VS Code Hook enforcement is separately implemented (`--target hooks`, `docs/adr/0032-codex-project-scoped-hook-enforcement.md`) for the standalone Skill path, additionally requiring Codex's own `/hooks` trust review; live firing through a real authenticated Codex session remains unverified there too.
+- **Codex hooks run only after Codex's own hook-trust review.** Live, authenticated sessions on `codex-cli 0.154.0` and `0.167.2` confirmed that the plugin's hooks fire and enforce end to end (`docs/adr/0037-codex-enforcement-verified-live.md`, `docs/adr/0044-codex-0167-supported.md`). Those sessions bypassed Codex's interactive hook-trust review, though. On a real machine the hooks run only after you approve them in Codex, and since `0.164.0` any change to the plugin directory requires approving them again. See "Installation (Codex)" above and `docs/codex-capability-matrix.md`. Full VS Code Hook enforcement is separately implemented (`--target hooks`, `docs/adr/0032-codex-project-scoped-hook-enforcement.md`) for the standalone Skill path, additionally requiring Codex's own `/hooks` trust review; live firing through a real authenticated Codex session remains unverified there too.
 - **Cross-Harness is optional, advisory, and depth-1.** It never gives the opposite-provider worker write access, and its findings can never themselves prove a criterion, resolve an approval, or set run completion. It requires the opposite provider's CLI to be installed and authenticated; when unavailable, KRYLO falls back to native-only verification/review.
 - **Ecosystem Maintenance is detection-only.** It never edits a repository file, updates a dependency/pin automatically, or opens a PR/issue -- a detected drift is evidence for a separate, human-approved change.
 - MCP/external-tool classification (`plugins/krylo/scripts/security/mcp-classifier.mjs`) matches server and operation names against policy patterns; it is not a semantic analysis of what an operation actually does. Unknown MCP servers are always gated for every operation, but a known server's operation whose name does not match any configured write pattern passes through ungated.
 - Risk-approval expiry is a fixed 15 minutes and is not currently user-configurable.
-- The plugin `settings.json` `subagentStatusLine` key is deferred until the minimum supported Claude Code version reaches 2.1.207 or later (`docs/adr/0016-subagent-statusline-deferred.md`); the renderer itself ships and is offered through `/krylo:setup`.
+- The plugin `settings.json` `subagentStatusLine` key was deferred until the minimum supported Claude Code version reached 2.1.207 (`docs/adr/0016-subagent-statusline-deferred.md`). The 0.3.0 floor (2.1.318) now meets that condition, but enabling the key is still an open follow-up. The renderer itself ships and is offered through `/krylo:setup`.
 - Hook-scoping to the `run` skill (`docs/adr/0021-hook-scoping-to-run-skill.md`) relies on documented Claude Code skill-frontmatter behavior; it has been verified against the current official schema and an isolated real-CLI install/uninstall lifecycle, not fuzzed across every CLI patch release.
 - No macOS runner is exercised in CI (the test matrix covers `ubuntu-latest` and `windows-latest`); macOS support relies on portable Node.js and POSIX-path test coverage.
 - GitHub-hosted CI has not run on this exact release candidate until it is actually pushed; every result in `RELEASE_READINESS.md` for this release was produced by local execution.
 
 ## Roadmap (beyond 0.2, indicative)
 
-- Plugin `settings.json` with `subagentStatusLine` once the minimum supported Claude Code CLI reaches 2.1.207+.
+- Plugin `settings.json` with `subagentStatusLine` (the 0.3.0 floor of 2.1.318 now meets the 2.1.207 condition).
 - User-configurable risk-approval TTL.
 - Broaden MCP operation classification beyond name/pattern matching where the platform exposes richer tool metadata.
 - Official Claude Code marketplace submission, and an equivalent Codex distribution path once the platform provides one.
