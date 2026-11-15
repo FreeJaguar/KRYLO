@@ -4,10 +4,10 @@
 // platform supports it, then renamed over the target. Readers never receive
 // a raw fs error; failures are reported as a discriminated result object.
 //
-// Transient sharing errors (docs/adr/0044-transient-state-io-retry.md).
+// Transient sharing errors (docs/adr/0045-transient-state-io-retry.md).
 // On Windows, replacing a file by rename fails with EPERM while ANY other
 // process holds the target open, even briefly -- including a plain Node
-// fs.readFileSync in another process (measured, ADR-0044). Antivirus,
+// fs.readFileSync in another process (measured, ADR-0045). Antivirus,
 // indexers, and -- most often -- KRYLO's own lock-free readers (every Hook
 // reads state.json at startup to resolve its run) all open it. A sharing violation from a holder that
 // denies sharing surfaces as EBUSY. Both are retried here against a
@@ -22,7 +22,7 @@ const TRANSIENT_FS_CODES = new Set(['EPERM', 'EBUSY']);
 
 // Rename budget. Measured under 15-way concurrent posttool-telemetry load,
 // six runs in parallel, with the full test suite running alongside
-// (ADR-0044): a contended rename that eventually succeeded needed a median
+// (ADR-0045): a contended rename that eventually succeeded needed a median
 // of ~40ms, a p99 of ~160ms and at most 204ms, and the old fixed budget (5
 // attempts x 20ms, 113-151ms of wall clock in practice) gave up on that
 // tail, losing the write. 1000ms is about five times the slowest measured

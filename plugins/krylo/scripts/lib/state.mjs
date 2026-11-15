@@ -675,7 +675,7 @@ function preserveCorruptState(statePath, failure) {
  * via a recovery indicator instead of being trusted. A file that cannot be
  * read at all is reported as 'unreadable' (with `transient` set for a
  * sharing error that outlasted the bounded retry) and is never preserved,
- * because nothing about its contents is known (ADR-0044).
+ * because nothing about its contents is known (ADR-0045).
  *
  * Version-aware: a real prior-schema document is migrated to the CURRENT
  * schema IN MEMORY ONLY and validated against the current validator. A
@@ -713,7 +713,7 @@ export function loadState(runId) {
       // readJson's bounded retry, or another fs failure). That says nothing
       // about its contents, so it is never recorded as corruption and never
       // copied aside: a live run momentarily held open by another process
-      // must not be reported, or preserved, as corrupt (ADR-0044). Callers
+      // must not be reported, or preserved, as corrupt (ADR-0045). Callers
       // treat it like any other !ok result.
       return { ok: false, error: 'unreadable', transient: result.error === 'busy', code: result.code ?? null };
     }
@@ -756,7 +756,7 @@ export function loadState(runId) {
  * itself failed" (a real I/O error -- permissions, disk full, ...) are
  * deliberately NOT the same code path. Only an ABSENT existing file (ENOENT)
  * means "nothing to back up"; a present-but-unreadable one refuses the save
- * with 'state-unreadable' (ADR-0044) after a bounded retry of transient
+ * with 'state-unreadable' (ADR-0045) after a bounded retry of transient
  * sharing errors. If a prior file exists and
  * needs backing up but the backup write throws, this refuses the save
  * entirely rather than falling through to overwrite the original -- losing
@@ -780,7 +780,7 @@ export function saveState(state) {
     // sharing error that outlasted the bounded retry, or any other fs
     // failure) is NOT the same condition: proceeding would decide the
     // pre-migration backup question on a false premise, so refuse the save
-    // instead (ADR-0044).
+    // instead (ADR-0045).
     if (err?.code !== 'ENOENT') {
       return { ok: false, error: 'state-unreadable', details: err?.code || 'unknown' };
     }
@@ -1076,7 +1076,7 @@ export function clearActiveRunPointerForState(state) {
 }
 
 // True when a pointer, or the state it names, could not be read only because
-// of a transient sharing error (ADR-0044).
+// of a transient sharing error (ADR-0045).
 function isTransientlyUnreadable(pointer, loaded) {
   return pointer.error === 'busy' || (loaded.error === 'unreadable' && loaded.transient === true);
 }
@@ -1099,7 +1099,7 @@ function isTransientlyUnreadable(pointer, loaded) {
  * sharing error that outlasted the bounded read retry) is left untouched:
  * "could not read it right now" is not evidence that the run is over, and
  * deleting the pointer would silently switch off a live run's governance
- * (ADR-0044).
+ * (ADR-0045).
  */
 export function pruneStaleActiveRunPointers(activeRunsRoot) {
   const removed = [];

@@ -35,7 +35,7 @@ async function main() {
     withFileLock(runLockPath(runId), () => {
       const reloaded = loadState(runId);
       if (!reloaded.ok) {
-        // Not persisted: say so, as the Claude entrypoint does (ADR-0044).
+        // Not persisted: say so, as the Claude entrypoint does (ADR-0045).
         counterSaveFailed = true;
         return;
       }

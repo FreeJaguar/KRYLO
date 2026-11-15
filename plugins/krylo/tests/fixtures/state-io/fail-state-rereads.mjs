@@ -2,7 +2,7 @@
 // in this process succeed and fails every later one with a non-transient
 // EISDIR. A hook's lock-free resolveActiveRun() read therefore finds the
 // run, and its re-read under the run lock fails -- the exact path
-// docs/adr/0044-transient-state-io-retry.md requires to be reported as
+// docs/adr/0045-transient-state-io-retry.md requires to be reported as
 // counter-not-persisted rather than silently dropped.
 import fs from 'node:fs';
 import path from 'node:path';

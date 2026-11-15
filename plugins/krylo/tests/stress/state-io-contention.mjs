@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 // Opt-in stress reproduction for lost run-state updates under concurrent
-// hook load (docs/adr/0044-transient-state-io-retry.md). Not part of
+// hook load (docs/adr/0045-transient-state-io-retry.md). Not part of
 // `npm test` (the file name deliberately does not match *.test.mjs): it
 // takes minutes, and its signal is statistical, not a single assertion.
 //
 // Each round creates `copies` independent runs in parallel and fires `n`
 // concurrent posttool-telemetry.mjs processes at each one. A round is lost
-// when the run's tool counter ends below `n`. On Windows before ADR-0044 the
+// when the run's tool counter ends below `n`. On Windows before ADR-0045 the
 // rename of state.json lost the race against the other hooks' lock-free
 // reads often enough to show here; run it alongside `npm test` for the
 // heavier load the intermittent CI failures came from.

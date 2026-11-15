@@ -1,4 +1,4 @@
-// Transient Windows sharing errors on run-state I/O (docs/adr/0044-transient-state-io-retry.md).
+// Transient Windows sharing errors on run-state I/O (docs/adr/0045-transient-state-io-retry.md).
 //
 // Writer side: on Windows, renaming a temp file over state.json fails with
 // EPERM while ANY other process has state.json open, and every Hook reads

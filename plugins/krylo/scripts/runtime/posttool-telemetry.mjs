@@ -40,7 +40,7 @@ async function main() {
       const reloaded = loadState(runId);
       if (!reloaded.ok) {
         // The run resolved a moment ago but could not be re-read under the
-        // lock: the increment is not persisted, so say so (ADR-0044) rather
+        // lock: the increment is not persisted, so say so (ADR-0045) rather
         // than return as if it had been.
         counterSaveFailed = true;
         return;

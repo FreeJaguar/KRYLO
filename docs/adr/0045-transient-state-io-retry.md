@@ -1,4 +1,4 @@
-# ADR-0044: Retry transient sharing errors on run-state I/O, and never record them as corruption
+# ADR-0045: Retry transient sharing errors on run-state I/O, and never record them as corruption
 
 ## Status
 

@@ -1,8 +1,8 @@
-// docs/adr/0044-transient-state-io-retry.md, decision 6: when the
+// docs/adr/0045-transient-state-io-retry.md, decision 6: when the
 // PostToolUse telemetry hook resolves its run but then cannot re-read the
 // state under the run lock, the increment is not persisted and the hook must
 // say so (status 'counter-not-persisted') instead of returning as if it had
-// saved. Before ADR-0044 both entrypoints returned silently.
+// saved. Before ADR-0045 both entrypoints returned silently.
 //
 // The fault is injected with a test-only --import preload
 // (tests/fixtures/state-io/fail-state-rereads.mjs) that fails every read of
