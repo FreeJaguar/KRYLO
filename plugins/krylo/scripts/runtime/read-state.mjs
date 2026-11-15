@@ -3,7 +3,7 @@
 
 import path from 'node:path';
 
-import { loadState, readActiveRunPointer, computeProjectRootHash } from '../lib/state.mjs';
+import { loadState, locateActiveRunPointer } from '../lib/state.mjs';
 import { deepRedact } from '../lib/redact.mjs';
 import { bootstrapStorageEnvironment, resolveSessionId, detectHost } from '../lib/host-dispatch.mjs';
 
@@ -37,11 +37,11 @@ function main() {
 
   let runId = args.run;
   if (!runId) {
-    const projectRootHash = computeProjectRootHash(path.resolve(args.projectDir || process.cwd()));
+    // See update-state.mjs: tolerant of a working directory below the run's project root.
     const hostSessionId = resolveSessionId({ explicitSessionId: args.session }) || undefined;
-    const pointer = readActiveRunPointer({ projectRootHash, host: detectHost(), hostSessionId });
+    const pointer = locateActiveRunPointer({ projectRoot: path.resolve(args.projectDir || process.cwd()), host: detectHost(), hostSessionId, requireActive: true, ambiguity: 'fail' });
     if (!pointer.ok || !pointer.value || !pointer.value.runId) {
-      console.log(JSON.stringify({ ok: false, error: 'no-current-run' }));
+      console.log(JSON.stringify({ ok: false, error: pointer.error === 'ambiguous-session-run' ? 'ambiguous-session-run' : 'no-current-run' }));
       process.exit(1);
       return;
     }
