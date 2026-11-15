@@ -136,8 +136,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 51676,
-      "sha256": "afa0425dd7ce20c97c69f91acd5f6ed0236d5cd7a647ab43ecf8052fcbbcf4e1"
+      "bytes": 51701,
+      "sha256": "89f4489ac9ebd7ae7fa1b39545b5ce95bc47471e00db7ecf2bb567e87f83fe7f"
     },
     {
       "path": "CLAUDE.md",
@@ -736,8 +736,8 @@
     },
     {
       "path": "docs/adr/0044-codex-0167-supported.md",
-      "bytes": 8619,
-      "sha256": "7c9416d71de658541c6a60cd5d626e5986a0eb597a3da96f9944ddd7d9641710"
+      "bytes": 9835,
+      "sha256": "b89086edb3b8d9476fefe41d7196f948f937ad9fac7d931e3ba23cc66a46a7c7"
     },
     {
       "path": "docs/adr/README.md",
@@ -751,8 +751,8 @@
     },
     {
       "path": "docs/codex-capability-matrix.md",
-      "bytes": 42644,
-      "sha256": "7d7530e9686b5835744c007e82701887d0b9eaee30f003047e6d41587545d870"
+      "bytes": 42698,
+      "sha256": "1f91df342cb6911b0623a3a491394395811e8722aa3d235cb44bdddc7af07d7a"
     },
     {
       "path": "docs/external-adapter-audit-2026-07-27.md",
@@ -1476,8 +1476,8 @@
     },
     {
       "path": "plugins/krylo/scripts/security/risk-policy.mjs",
-      "bytes": 87154,
-      "sha256": "038f3e044ef8fc94e3aa3a307f7a7904c6bc1e6d54891b549d87072d515cdbe5"
+      "bytes": 89252,
+      "sha256": "b2fb4faeaa0347b15afe2a1e94b191d1349a8897350bf12ab0d8469ad0ce999a"
     },
     {
       "path": "plugins/krylo/scripts/security/session-start-codex.mjs",
@@ -1696,8 +1696,8 @@
     },
     {
       "path": "plugins/krylo/tests/hooks/risk-gate-codex.test.mjs",
-      "bytes": 18485,
-      "sha256": "cc9fe022770cb2077f0162fa62d1cf3dc595eeebc07dd1ff285e06a6a0826046"
+      "bytes": 18498,
+      "sha256": "4085d2da98014cdcff00555641da663d94f46821a47d7239935b3db5e2bab558"
     },
     {
       "path": "plugins/krylo/tests/hooks/risk-gate-fail-safe.test.mjs",
@@ -1926,8 +1926,8 @@
     },
     {
       "path": "plugins/krylo/tests/unit/risk-policy.test.mjs",
-      "bytes": 82190,
-      "sha256": "492292f882fab1474ee062286445d82f0e784df778efa16e625ca68990f7e392"
+      "bytes": 85031,
+      "sha256": "90ca4bf834acd70e4b3b08073c66c734a59973906634eb3a8cef97e53f4504df"
     },
     {
       "path": "plugins/krylo/tests/unit/runtime-compat.test.mjs",
