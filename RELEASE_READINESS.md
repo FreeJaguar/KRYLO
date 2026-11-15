@@ -1,8 +1,56 @@
-# KRYLO 0.2.0 Release-Readiness Report
+# KRYLO Release-Readiness Report (0.3.0; the 0.2.0 record follows)
 
 Persistent implementation progress record. Every status below cites evidence that was actually produced; nothing here is written ahead of execution.
 
 Status legend: `locally passed` (executed and verified in this environment), `statically inspected` (read/analyzed, not executed), `configured but not run` (a check/tool exists and is wired correctly but did not actually execute here), `environment-blocked` (requires something this environment cannot provide, e.g. an authenticated live host session), `GitHub-hosted CI pending` (the workflow has not run remotely), `GitHub-hosted CI stuck` (the workflow run was dispatched by GitHub but never completed), `external publication not performed` (deliberately, per this checkpoint's own hard-stop boundary).
+
+## Release 0.3.0 (2026-11-15): this section supersedes every status section below
+
+**Scope.** Everything merged to `main` through PR #28:
+- #18: the Codex live hook verification, round two;
+- #22: the GitHub Actions bumps;
+- #23: `AGENTS.md` as the single instructions source;
+- #24: session-keyed run resolution, ADR-0043;
+- #25: the Codex drift checks read the reviewed contract;
+- #26: Claude host re-verified on 2.1.318, fail-closed gates, raised floor, ADR-0042;
+- #28: Codex 0.167.2, `apply_patch` fixes, Windows alias path forms, ADR-0044.
+
+**Excluded by decision:** #27, transient run-state I/O retry (ADR-0045). It is not independently reviewed yet and is planned for a follow-up release.
+
+### Gates
+
+| Gate | Evidence | Status |
+|---|---|---|
+| Plugin validation | `claude plugin validate --strict plugins/krylo` and `.`, locally on Claude Code 2.1.318; the same steps in `validate-plugin.yml` on every PR, pinned to 2.1.318 | locally passed; GitHub-hosted CI passed on each merged PR |
+| Test suite | `npm test` on `main` at `dc166b3`: 956 tests, 955 pass, 0 fail, 1 skipped (Windows 11, Node 24); `test.yml` matrix on ubuntu and windows, Node 22 and 24 | locally passed; GitHub-hosted CI passed |
+| Security scans and secret scan | CodeQL, Semgrep, osv-scanner, dependency review and TruffleHog on each merged PR | GitHub-hosted CI passed |
+| SBOM | `sbom.yml` | configured, not run in this pass |
+| Changelog | `[0.3.0] - 2026-11-15` with a Compatibility block; all 22 entries from the unreleased work kept | done |
+| Clean install lifecycle | isolated `CLAUDE_CONFIG_DIR`, current tree: `marketplace add` → `install` (0.3.0) → `list` → `marketplace update` → `update` → `uninstall` → `marketplace remove` | locally passed, all exit 0; a second `uninstall` exits 1 with "not found" and changes nothing |
+| Upgrade | real `krylo--v0.2.0` tree installed, then the marketplace path switched to the current tree, `marketplace update` + `plugin update` | locally passed: "updated from 0.2.0 to 0.3.0" |
+| Uninstall and rollback | uninstall 0.3.0, unrelated config data preserved, `krylo--v0.2.0` re-installed at the same path | locally passed |
+| Live host verification | Claude Code 2.1.318: native ask matrix, skill-hook lifetime, `onFailure` (ADR-0042), and a moved-`cwd` push blocked by the merged gate. Codex 0.167.2 in an isolated `CODEX_HOME`: hook events, enforcement, `apply_patch`, subagent, no-override gate admission (ADR-0044) | locally passed, as recorded in the ADRs |
+| Independent review | ADR-0043: two rounds and mutation testing. ADR-0044: three rounds plus automated commit reviews, all findings closed with tests that fail on the revision before them | done |
+| Release checksum and attestation | `release.yml`: SHA-256 and build-provenance attestation of the archive | runs at release |
+
+### Known limitations carried into 0.3.0
+
+- **Codex `require-approval` is deny-only.** It denies instead of prompting, because Codex `ask` still fails open.
+- **The Codex runtime gate verifies the binary its PATH lookup resolves.** With two installations, that can differ from the binary running the session (observed live; ADR-0044).
+- **`SessionEnd` is unconfirmed on Codex 0.120.0.** The weekly `ecosystem-maintenance` run stays red until 0.120.0 is re-verified or retired.
+- **Shell commands and glob patterns are matched as text.** They are not covered by the Windows alias-form rule.
+- **The question gate fails closed when it cannot start** (`onFailure`), and skill hooks stay registered for the rest of the session after `/krylo:run` (ADR-0042).
+- **Not exercised:**
+  - a live interactive auto-mode prompt shown to a human;
+  - the real Codex hook-trust review flow;
+  - what Codex does on a hook timeout;
+  - macOS and Linux runs, beyond CI on ubuntu.
+
+### Release procedure
+
+1. Merge this release PR.
+2. Run `release.yml` with `tag = krylo--v0.3.0`. It re-validates, runs the tests, checks that the tag matches `plugin.json`, builds the archive with checksum and attestation, and creates a **draft** release pinned to the dispatched commit.
+3. Publishing the draft is a separate, human decision.
 
 ## Update 2026-11-12 (Claude host compatibility checkpoint) — supersedes the Claude Code floor stated in every section below
 
