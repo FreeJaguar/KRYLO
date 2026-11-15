@@ -585,7 +585,23 @@ function touchesPluginInstallation({ toolName, toolInput, cwd, pluginRoot }) {
 // match an exact prefix (case, spacing) is reported as ambiguous, and the
 // caller denies -- KRYLO never guesses what Codex will make of it.
 const APPLY_PATCH_HEADER_PREFIXES = ['*** Add File: ', '*** Delete File: ', '*** Update File: ', '*** Move to: '];
-const APPLY_PATCH_TRIM_RE = /^[\s\u0085]+|[\s\u0085]+$/g;
+// Trimmed by scanning code points from each end, not by a regex: an
+// unanchored trailing-whitespace pattern is quadratic on a long whitespace
+// run (300,000 spaces took about 70 s). The set is JavaScript's whitespace
+// plus U+0085, which Rust's trim() also removes.
+const APPLY_PATCH_TRIM_CODES = new Set([
+  0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20, 0x85, 0xa0, 0x1680,
+  0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200a,
+  0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff,
+]);
+
+function trimPatchLine(s) {
+  let start = 0;
+  let end = s.length;
+  while (start < end && APPLY_PATCH_TRIM_CODES.has(s.charCodeAt(start))) start++;
+  while (end > start && APPLY_PATCH_TRIM_CODES.has(s.charCodeAt(end - 1))) end--;
+  return s.slice(start, end);
+}
 const APPLY_PATCH_HEADER_LOOKALIKE_RE = /^\*+\s*(?:add|delete|update)\s*file\s*:|^\*+\s*move\s*to\s*:/i;
 
 // Bounds keep classification well inside the 30 s PreToolUse timeout: each
@@ -606,10 +622,10 @@ function extractApplyPatchTargets(patchText) {
   const targets = [];
   let ambiguous = false;
   for (const rawLine of patchText.split('\n')) {
-    const line = rawLine.replace(APPLY_PATCH_TRIM_RE, '');
+    const line = trimPatchLine(rawLine);
     const prefix = APPLY_PATCH_HEADER_PREFIXES.find((p) => line.startsWith(p));
     if (prefix) {
-      const target = line.slice(prefix.length).replace(APPLY_PATCH_TRIM_RE, '');
+      const target = trimPatchLine(line.slice(prefix.length));
       if (target.length > MAX_APPLY_PATCH_TARGET_LENGTH) return { targets: [], ambiguous: false, oversized: true };
       if (target === '' || APPLY_PATCH_TARGET_FORBIDDEN_RE.test(target)) ambiguous = true;
       else targets.push(target);

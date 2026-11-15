@@ -1621,6 +1621,13 @@ test('shared risk policy: apply_patch classification is bounded -- oversized pat
   const longPath = classify(`*** Begin Patch\n*** Add File: ${'a/'.repeat(16000)}x.md\n+x\n*** End Patch\n`);
   assert.equal(longPath.action, 'deny');
   assert.ok(Date.now() - started < 5000, `a 32 KB target path must be refused quickly, took ${Date.now() - started} ms`);
+  // A trim regex with an unanchored trailing-whitespace branch is quadratic
+  // on a long whitespace run: 300,000 spaces in one content line took about
+  // 70 s, far past the hook timeout, inside the length cap.
+  started = Date.now();
+  const spaces = classify('*** Begin Patch\n*** Add File: notes.md\n+' + ' '.repeat(300_000) + 'x\n*** End Patch\n');
+  assert.equal(spaces.action, 'pass');
+  assert.ok(Date.now() - started < 5000, `a 300,000-space content line must classify quickly, took ${Date.now() - started} ms`);
   const normal = classify('*** Begin Patch\n*** Add File: notes.md\n+' + 'y'.repeat(200_000) + '\n*** End Patch\n');
   assert.equal(normal.action, 'pass', 'a single-target patch with large but ordinary file content stays allowed');
 });
