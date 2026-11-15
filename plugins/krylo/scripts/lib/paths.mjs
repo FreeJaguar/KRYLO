@@ -185,6 +185,17 @@ function assertValidHost(host) {
   }
 }
 
+/**
+ * Top-level directory of one per-project index (`active-runs` or
+ * `bootstrap-failures`), whose children are project-root hashes. Used only
+ * to enumerate those hashes when resolving by host session id rather than by
+ * path (docs/adr/0043-session-keyed-run-resolution.md).
+ */
+export function perProjectIndexDir(index) {
+  if (index !== 'active-runs' && index !== 'bootstrap-failures') throw new Error(`unknown per-project index: ${index}`);
+  return safeJoin(getDataRoot(), index);
+}
+
 /** Directory holding every session pointer for one project, scoped to one host. */
 export function activeRunsHostDir(projectRootHash, host) {
   assertValidHost(host);

@@ -31,7 +31,7 @@ import {
 } from '../lib/cross-harness.mjs';
 import { crossHarnessInvocationDir, ensureDir } from '../lib/paths.mjs';
 import { deepRedact } from '../lib/redact.mjs';
-import { readActiveRunPointer, computeProjectRootHash } from '../lib/state.mjs';
+import { locateActiveRunPointer, computeProjectRootHash } from '../lib/state.mjs';
 import { bootstrapStorageEnvironment, resolveSessionId, detectHost } from '../lib/host-dispatch.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { detectClaudeWorkerCapability, spawnClaudeWorker, parseClaudeWorkerOutput } from '../host/cross-harness/claude-worker.mjs';
@@ -149,9 +149,10 @@ async function main() {
   const projectRootHash = computeProjectRootHash(projectRoot);
   const nativeHost = detectHost();
   const hostSessionId = resolveSessionId({ explicitSessionId: args.session }) || undefined;
-  const pointer = readActiveRunPointer({ projectRootHash, host: nativeHost, hostSessionId });
+  // See update-state.mjs: tolerant of a working directory below the run's project root.
+  const pointer = locateActiveRunPointer({ projectRoot, host: nativeHost, hostSessionId, requireActive: true, ambiguity: 'fail' });
   if (!pointer.ok || !pointer.value?.runId) {
-    output({ ok: false, failureCode: 'NO_ACTIVE_RUN', error: 'no-current-run' });
+    output({ ok: false, failureCode: 'NO_ACTIVE_RUN', error: pointer.error === 'ambiguous-session-run' ? 'ambiguous-session-run' : 'no-current-run' });
     process.exit(1);
     return;
   }
@@ -161,7 +162,9 @@ async function main() {
     nativeHost,
     nativeSessionId: hostSessionId || runId,
     runId,
-    projectRootHash,
+    // The run's own project, not the caller's working directory, which may
+    // be a subdirectory that only the session-tolerant lookup resolved.
+    projectRootHash: pointer.value.projectRootHash || projectRootHash,
     role: args.role,
     task: args.task,
   });

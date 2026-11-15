@@ -11,7 +11,7 @@
 // transport module (e.g. scripts/host/claude/hook-transport.mjs) before
 // calling resolveActiveRun() here.
 
-import { readActiveRunPointer, loadState, computeProjectRootHash } from './state.mjs';
+import { locateActiveRunPointer } from './state.mjs';
 
 const STDIN_LIMIT = 1024 * 1024; // 1 MB guard against unbounded input
 
@@ -50,19 +50,22 @@ export function eventName(payload) {
  * unidentifiable session as "no run is active" and bypassing the gate
  * entirely. `readActiveRunPointer` already implements this fallback scoped
  * to one host's own directory; it is never applied across hosts.
+ *
+ * When `hostSessionId` IS known and the path-keyed lookup misses, the
+ * session is looked up under the nearest ancestor directory, then under any
+ * project, before this returns { active: false }; see locateActiveRunPointer()
+ * in state.mjs and docs/adr/0043-session-keyed-run-resolution.md.
+ * `projectRoot` comes from the payload's `cwd`, which the session itself can
+ * move: Claude Code documents that a `cd` inside the project carries over to
+ * later calls, and Codex 0.166.0 reports the command's own working directory.
+ * A path miss for a named session is therefore never proof that the session
+ * is ungoverned, and treating it as such switched every gate off mid-run.
  */
 export function resolveActiveRun({ projectRoot, host, hostSessionId } = {}) {
   try {
-    const projectRootHash = computeProjectRootHash(projectRoot ?? process.cwd());
     if (!host) return { active: false };
-    const pointer = readActiveRunPointer({ projectRootHash, host, hostSessionId });
-    if (!pointer.ok || !pointer.value?.runId) return { active: false };
-    if (pointer.value.projectRootHash && pointer.value.projectRootHash !== projectRootHash) return { active: false };
-    const loaded = loadState(pointer.value.runId);
-    if (!loaded.ok || loaded.value.terminalState !== null) return { active: false };
-    if (loaded.value.host.name !== host) return { active: false };
-    if (hostSessionId && loaded.value.host.sessionId !== hostSessionId) return { active: false };
-    return { active: true, state: loaded.value };
+    const found = locateActiveRunPointer({ projectRoot, host, hostSessionId, requireActive: true });
+    return found.ok && found.state ? { active: true, state: found.state } : { active: false };
   } catch {
     return { active: false };
   }
