@@ -645,7 +645,8 @@ function extractApplyPatchTargets(patchText) {
       // Codex trims the whole line, strips the exact prefix, and keeps the
       // rest VERBATIM (PathBuf::from(path)). A target that would change under
       // trimming therefore names a different path to Codex than to these
-      // checks -- ' /../../data/x' is cwd/' '/../../data/x to Codex but a
+      // checks -- per Codex's PathUri::join source (rust-v0.167.2; read, not
+      // executed), ' /../../data/x' is cwd/' '/../../data/x to Codex but a
       // filesystem-root path here -- so it is denied, never classified by its
       // trimmed name. U+FEFF is trimmed by JavaScript but kept by Rust.
       const target = line.slice(prefix.length);
