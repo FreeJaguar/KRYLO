@@ -137,12 +137,17 @@ function homeExpandedVariants(command, home) {
  * suffix, so a not-yet-created file inside a symlinked directory still
  * resolves to where it would actually land.
  */
+// fs.realpathSync.native, not fs.realpathSync: only the native variant
+// expands Windows 8.3 short names (CODEX~1 -> .codex). Every protected-root
+// comparison passes BOTH the target and the root through this function, so
+// both sides are canonicalized identically whichever one is spelled short
+// (ADR-0044; a one-sided expansion was flagged by an automated review).
 function realpathBestEffort(candidatePath) {
   let current = candidatePath;
   const suffix = [];
   for (;;) {
     try {
-      const real = fs.realpathSync(current);
+      const real = fs.realpathSync.native(current);
       return suffix.length > 0 ? path.join(real, ...suffix.reverse()) : real;
     } catch {
       const parent = path.dirname(current);
@@ -1567,9 +1572,14 @@ function commandTouchesSensitivePath(policy, command) {
  * deterministic deny, not an unconfirmed-safe "ask") for a malformed input
  * (missing/invalid dataRoot, unreadable policy file, etc).
  */
-export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginRoot } = {}) {
+export function classifyRiskAction(args = {}) {
+  return classifyRiskActionInternal(args, { canonicalizePaths: true });
+}
+
+function classifyRiskActionInternal({ toolName, toolInput, cwd, dataRoot, pluginRoot } = {}, { canonicalizePaths }) {
   const name = String(toolName ?? '');
-  let input = toolInput && typeof toolInput === 'object' ? toolInput : {};
+  const originalInput = toolInput && typeof toolInput === 'object' ? toolInput : {};
+  let input = originalInput;
   const resolvedDataRoot = typeof dataRoot === 'string' && dataRoot.trim() !== '' ? dataRoot : getDataRoot();
   const policy = loadPolicy();
 
@@ -1591,10 +1601,17 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
   // Structured path fields: device/stream forms are denied, and 8.3 short
   // names are expanded so every check below sees the real file's name.
   for (const field of structuredPathFieldNames(name)) {
-    if (typeof input[field] !== 'string') continue;
+    if (!canonicalizePaths || typeof input[field] !== 'string') continue;
     const canonical = canonicalizeAliasPath(input[field], cwd);
     if (!canonical.ok) return PATH_ALIAS_FORM_DENY;
     if (canonical.path !== input[field]) input = { ...input, [field]: canonical.path };
+  }
+  // When an expansion rewrote a path, the original spelling is classified
+  // too and a deny on either side wins, so no check can be weaker on the
+  // expanded form than it was on the raw one.
+  if (input !== originalInput) {
+    const raw = classifyRiskActionInternal({ toolName, toolInput: originalInput, cwd, dataRoot, pluginRoot }, { canonicalizePaths: false });
+    if (raw.action === 'deny') return raw;
   }
 
   if (touchesDataRoot({ toolName: name, toolInput: input, cwd, dataRoot: resolvedDataRoot })) {
@@ -1747,10 +1764,16 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
         reason: 'KRYLO could not determine which file(s) this apply_patch call targets, so it cannot verify the action is safe. Denied as a fail-safe.',
       };
     }
+    // Each target is checked under its expanded spelling AND its original
+    // one, as for structured path fields above: a deny on either wins.
+    const spellings = [];
     for (const rawTarget of targets) {
       const canonical = canonicalizeAliasPath(rawTarget, cwd);
       if (!canonical.ok) return PATH_ALIAS_FORM_DENY;
-      const target = canonical.path;
+      spellings.push(canonical.path);
+      if (canonical.path !== rawTarget) spellings.push(rawTarget);
+    }
+    for (const target of spellings) {
       const syntheticInput = { file_path: target };
       if (touchesDataRoot({ toolName: name, toolInput: syntheticInput, cwd, dataRoot: resolvedDataRoot })) {
         return { action: 'deny', category: 'data-root-protection', reason: DATA_ROOT_REASON };

@@ -1813,3 +1813,40 @@ test('shared risk policy: a legitimate path under an existing 8.3 short-name anc
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// Automated security review of the short-name expansion: expanding only the
+// TARGET while the data root and plugin root went through the non-native
+// realpath left a one-sided differential -- a data root configured in short
+// form (CI's C:\Users\RUNNER~1\...) no longer matched a long-form target.
+// Both sides must be canonicalized the same way, in either direction.
+test('shared risk policy: data-root and plugin-root protection hold whichever side is spelled with an 8.3 short name', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-shortname-roots-'));
+  try {
+    const longData = path.join(root, 'krylo-long-data-root');
+    const longPlugin = path.join(root, 'krylo-long-plugin-root');
+    fs.mkdirSync(longData, { recursive: true });
+    fs.mkdirSync(longPlugin, { recursive: true });
+    const shortData = windowsShortPath(longData);
+    const shortPlugin = windowsShortPath(longPlugin);
+    if (!shortData || !shortPlugin) {
+      t.skip('8.3 short names are not available on this volume');
+      return;
+    }
+    const cwd = path.join(root, 'proj');
+    for (const [rootSpelling, targetSpelling] of [[shortData, longData], [longData, shortData], [shortData, shortData]]) {
+      for (const [toolName, toolInput] of [
+        ['Write', { file_path: path.join(targetSpelling, 'state.json'), content: 'x' }],
+        ['apply_patch', { command: `*** Begin Patch\n*** Add File: ${path.join(targetSpelling, 'state.json')}\n+x\n*** End Patch\n` }],
+      ]) {
+        const r = classifyRiskAction({ toolName, toolInput, cwd, dataRoot: rootSpelling });
+        assert.equal(r.category, 'data-root-protection', `${toolName} target ${targetSpelling} vs data root ${rootSpelling}`);
+      }
+    }
+    for (const [rootSpelling, targetSpelling] of [[shortPlugin, longPlugin], [longPlugin, shortPlugin]]) {
+      const r = classifyRiskAction({ toolName: 'Write', toolInput: { file_path: path.join(targetSpelling, 'hooks', 'x.json'), content: 'x' }, cwd, dataRoot: longData, pluginRoot: rootSpelling });
+      assert.equal(r.category, 'plugin-installation-protection', `target ${targetSpelling} vs plugin root ${rootSpelling}`);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
