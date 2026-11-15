@@ -22,19 +22,16 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
-      # The npm registry for @anthropic-ai/claude-code has not published a
-      # version past 2.1.197 (confirmed via `npm view @anthropic-ai/claude-code
-      # versions`/`dist-tags` during this checkpoint's live verification), while
-      # upstream's GitHub Releases are current (v2.1.223 published 2026-08-06,
-      # with real, checksummed binaries). `npm install -g
-      # @anthropic-ai/claude-code@2.1.223` would fail with a 404 here. Until
-      # npm publishing catches up, install the pinned floor from the upstream
-      # GitHub release binary instead, verifying its published SHA-256 before
-      # ever executing it.
-      - name: Install pinned Claude Code CLI (2.1.223, GitHub release binary -- npm has not published past 2.1.197)
+      # The pinned floor is installed from the upstream GitHub release binary,
+      # verifying the SHA-256 published in that release's SHASUMS256.txt before
+      # ever executing it. This began when npm lagged behind GitHub Releases
+      # (ADR-0022); npm has since caught up, but a checksum-pinned binary stays
+      # the more deterministic install for a PR-blocking gate. The floor is
+      # 2.1.318, the build KRYLO was last verified on live (ADR-0042).
+      - name: Install pinned Claude Code CLI (2.1.318, checksum-verified GitHub release binary)
         run: |
-          curl -fsSL -o claude-linux-x64.tar.gz "https://github.com/anthropics/claude-code/releases/download/v2.1.223/claude-linux-x64.tar.gz"
-          echo "0b516307190edfb776501e5c12a32d7d0c0b01d1110fa6539fd187a8482ad24f  claude-linux-x64.tar.gz" | sha256sum -c -
+          curl -fsSL -o claude-linux-x64.tar.gz "https://github.com/anthropics/claude-code/releases/download/v2.1.318/claude-linux-x64.tar.gz"
+          echo "e6d426ca0c123f61fad58a361da0329f2a93cd206bc87040ed8d9576dd9eb583  claude-linux-x64.tar.gz" | sha256sum -c -
           tar -xzf claude-linux-x64.tar.gz
           sudo install -m 0755 claude /usr/local/bin/claude
           rm -f claude claude-linux-x64.tar.gz

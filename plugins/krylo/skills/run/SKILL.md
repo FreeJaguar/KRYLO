@@ -12,11 +12,13 @@ hooks:
         - type: command
           command: "node \"${CLAUDE_PLUGIN_ROOT}/scripts/security/question-gate.mjs\""
           timeout: 30
+          onFailure: "block"
     - matcher: "Bash|PowerShell|Write|Edit|NotebookEdit|Read|Glob|Grep|mcp__.*"
       hooks:
         - type: command
           command: "node \"${CLAUDE_PLUGIN_ROOT}/scripts/security/risk-gate.mjs\""
           timeout: 30
+          onFailure: "block"
   PostToolUse:
     - hooks:
         - type: command

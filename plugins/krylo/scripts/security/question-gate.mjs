@@ -5,7 +5,13 @@
 // question is allowed when the workflow has explicitly granted a token for an
 // approved category via: update-state.mjs --grant-question <category>.
 //
-// Fail mode: fail OPEN (allow) — asking a human is always safe.
+// Fail mode: once this script is running, every internal failure fails OPEN
+// (allow) — asking a human is always safe. A failure to START (Node or the
+// plugin missing, the script crashing on import) is different: the run
+// skill declares `onFailure: "block"` on this hook, so Claude Code blocks
+// the AskUserQuestion call instead (docs/adr/0042-claude-host-reverified-on-2-1-318.md,
+// a deliberate choice for consistency with the risk gate). The model can
+// still ask in plain text; it only loses the structured question tool.
 
 import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
 import { normalizeClaudeHookPayload, emitClaudePreToolDecision, allowClaudeSilently } from '../host/claude/hook-transport.mjs';
