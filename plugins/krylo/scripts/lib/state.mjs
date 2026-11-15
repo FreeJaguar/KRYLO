@@ -17,7 +17,7 @@ import {
   bootstrapFailurePath,
   perProjectIndexDir,
 } from './paths.mjs';
-import { writeJsonAtomic, readJson } from './atomic.mjs';
+import { writeJsonAtomic, readJson, readFileWithRetry } from './atomic.mjs';
 import { redactText } from './redact.mjs';
 import { HOST_NAMES } from './host-context.mjs';
 import { CURRENT_STATE_SCHEMA_VERSION, migrateStateDocument } from './state-migrations.mjs';
@@ -705,6 +705,15 @@ export function loadState(runId) {
     if (result.error === 'not-found') {
       return { ok: false, error: 'not-found' };
     }
+    if (result.error === 'busy' || result.error === 'read-error') {
+      // The file could not be READ (a sharing error that outlasted
+      // readJson's bounded retry, or another fs failure). That says nothing
+      // about its contents, so it is never recorded as corruption and never
+      // copied aside: a live run momentarily held open by another process
+      // must not be reported, or preserved, as corrupt (ADR-0044). Callers
+      // treat it like any other !ok result.
+      return { ok: false, error: 'unreadable', transient: result.error === 'busy', code: result.code ?? null };
+    }
     return preserveCorruptState(statePath, result);
   }
 
@@ -742,8 +751,10 @@ export function loadState(runId) {
  * Migration backup safety: "no prior file exists" (a brand-new run -- there
  * is nothing to back up, and none is attempted) and "the backup write
  * itself failed" (a real I/O error -- permissions, disk full, ...) are
- * deliberately NOT the same code path. Only the read of the existing file is
- * allowed to fail silently (nothing to back up); if a prior file exists and
+ * deliberately NOT the same code path. Only an ABSENT existing file (ENOENT)
+ * means "nothing to back up"; a present-but-unreadable one refuses the save
+ * with 'state-unreadable' (ADR-0044) after a bounded retry of transient
+ * sharing errors. If a prior file exists and
  * needs backing up but the backup write throws, this refuses the save
  * entirely rather than falling through to overwrite the original -- losing
  * the original after failing to preserve a copy of it would be exactly the
@@ -759,10 +770,17 @@ export function saveState(state) {
 
   let currentRaw = null;
   try {
-    currentRaw = fs.readFileSync(statePath, 'utf8');
-  } catch {
-    // No existing file (a brand-new run): nothing to back up, and the
-    // absence of a file is never itself a failure.
+    currentRaw = readFileWithRetry(statePath);
+  } catch (err) {
+    // Only a genuinely absent file (a brand-new run) means "nothing to back
+    // up". A file that exists but cannot be read right now (a transient
+    // sharing error that outlasted the bounded retry, or any other fs
+    // failure) is NOT the same condition: proceeding would decide the
+    // pre-migration backup question on a false premise, so refuse the save
+    // instead (ADR-0044).
+    if (err?.code !== 'ENOENT') {
+      return { ok: false, error: 'state-unreadable', details: err?.code || 'unknown' };
+    }
     currentRaw = null;
   }
 

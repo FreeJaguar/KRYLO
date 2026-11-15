@@ -3,18 +3,42 @@
 // Writes go to a temp file in the same directory, are fsynced when the
 // platform supports it, then renamed over the target. Readers never receive
 // a raw fs error; failures are reported as a discriminated result object.
+//
+// Transient sharing errors (docs/adr/0044-transient-state-io-retry.md).
+// On Windows, replacing a file by rename fails with EPERM while ANY other
+// process holds the target open, even briefly and even with full sharing
+// flags (Node opens every file with FILE_SHARE_READ|WRITE|DELETE; that does
+// not let MoveFileEx replace it). Antivirus, indexers, and -- most often --
+// KRYLO's own lock-free readers (every Hook reads state.json at startup to
+// resolve its run) all open it. A sharing violation from a holder that
+// denies sharing surfaces as EBUSY. Both are retried here against a
+// wall-clock deadline with jittered exponential backoff; every other error
+// code is a real failure and is surfaced immediately.
 
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 
-// Windows can transiently deny a rename onto an existing file (EPERM/EBUSY)
-// when antivirus or an indexer briefly holds the target open. Retrying a
-// handful of times with a short synchronous pause makes the atomic write
-// robust to that without weakening atomicity (each attempt is still a
-// single rename call).
-const RENAME_RETRY_ATTEMPTS = 5;
-const RENAME_RETRY_DELAY_MS = 20;
+const TRANSIENT_FS_CODES = new Set(['EPERM', 'EBUSY']);
+
+// Rename budget. Measured under 15-way concurrent posttool-telemetry load,
+// six runs in parallel, with the full test suite running alongside
+// (ADR-0044): a contended rename that eventually succeeded needed a median
+// of ~40ms, a p99 of ~160ms and at most 204ms, and the old fixed budget (5
+// attempts x 20ms, 113-151ms of wall clock in practice) gave up on that
+// tail, losing the write. 1500ms is about seven times the slowest measured
+// success while staying small against the 6s lock budget the
+// renaming writer already holds (scripts/lib/lock.mjs) and the 15s
+// PostToolUse/SubagentStart hook timeouts that budget must fit inside.
+const RENAME_RETRY_BUDGET_MS = 1500;
+
+// Read budget. Readers share access with each other, so only a holder that
+// denies sharing (or a delete-pending file) can block one; keep this short
+// because some callers read many small files in a loop (pointer scans).
+const READ_RETRY_BUDGET_MS = 250;
+
+const RETRY_BASE_DELAY_MS = 4;
+const RETRY_MAX_DELAY_MS = 50;
 
 function sleepSync(ms) {
   try {
@@ -25,17 +49,45 @@ function sleepSync(ms) {
   }
 }
 
-function renameWithRetry(tmpPath, filePath) {
-  for (let attempt = 1; attempt <= RENAME_RETRY_ATTEMPTS; attempt++) {
+// Exponential backoff with jitter in [ceiling/2, ceiling]: contending
+// writers that collided once do not retry in lockstep again.
+function retryDelayMs(attempt) {
+  const ceiling = Math.min(RETRY_MAX_DELAY_MS, RETRY_BASE_DELAY_MS * 2 ** attempt);
+  return ceiling / 2 + Math.random() * (ceiling / 2);
+}
+
+/**
+ * Run a synchronous fs operation, retrying only a transient sharing error
+ * (EPERM/EBUSY) until `budgetMs` of wall-clock time has elapsed. Any other
+ * error, or the last transient error once the budget is spent, is thrown
+ * unchanged.
+ */
+function withTransientRetry(op, budgetMs) {
+  const deadline = Date.now() + budgetMs;
+  for (let attempt = 0; ; attempt++) {
     try {
-      fs.renameSync(tmpPath, filePath);
-      return;
+      return op();
     } catch (err) {
-      const transient = err && (err.code === 'EPERM' || err.code === 'EBUSY');
-      if (!transient || attempt === RENAME_RETRY_ATTEMPTS) throw err;
-      sleepSync(RENAME_RETRY_DELAY_MS);
+      if (!err || !TRANSIENT_FS_CODES.has(err.code)) throw err;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw err;
+      sleepSync(Math.min(retryDelayMs(attempt), remaining));
     }
   }
+}
+
+/** True for an fs error code this module treats as a transient sharing error. */
+export function isTransientFsError(err) {
+  return Boolean(err && TRANSIENT_FS_CODES.has(err.code));
+}
+
+/**
+ * Read a file as UTF-8, riding out a transient sharing error within the
+ * read budget. Throws the underlying fs error otherwise (ENOENT included),
+ * so a caller can tell "absent" from "present but unreadable".
+ */
+export function readFileWithRetry(filePath) {
+  return withTransientRetry(() => fs.readFileSync(filePath, 'utf8'), READ_RETRY_BUDGET_MS);
 }
 
 /**
@@ -66,7 +118,9 @@ export function writeJsonAtomic(filePath, obj) {
     } finally {
       fs.closeSync(fd);
     }
-    renameWithRetry(tmpPath, filePath);
+    // Each attempt is still a single rename call, so atomicity is
+    // unaffected by retrying: readers see the old file or the new one.
+    withTransientRetry(() => fs.renameSync(tmpPath, filePath), RENAME_RETRY_BUDGET_MS);
   } catch (err) {
     try {
       fs.rmSync(tmpPath, { force: true });
@@ -94,17 +148,23 @@ export function writeJsonAtomic(filePath, obj) {
 /**
  * Read and parse a JSON file without throwing.
  * Returns { ok: true, value } on success, or
- * { ok: false, error: 'not-found' | 'read-error' | 'parse-error', raw? }.
+ * { ok: false, error: 'not-found' | 'busy' | 'read-error' | 'parse-error', code?, raw? }.
+ *
+ * 'busy' means a transient sharing error outlasted the read budget: the
+ * file exists and nothing is known to be wrong with its contents. It is
+ * deliberately distinct from 'read-error' (a non-transient fs failure) and
+ * from 'parse-error' (bytes were read and are not JSON) -- only the last is
+ * evidence about the file's contents.
  */
 export function readJson(filePath) {
   let raw;
   try {
-    raw = fs.readFileSync(filePath, 'utf8');
+    raw = readFileWithRetry(filePath);
   } catch (err) {
     if (err && err.code === 'ENOENT') {
       return { ok: false, error: 'not-found' };
     }
-    return { ok: false, error: 'read-error' };
+    return { ok: false, error: isTransientFsError(err) ? 'busy' : 'read-error', code: err?.code ?? null };
   }
 
   try {

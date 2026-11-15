@@ -60,6 +60,8 @@ Migration to the current schema happens purely in memory, inside `loadState()`; 
 
 Refused or corrupted state is never overwritten with a fabricated replacement. `loadState()` copies the original file (or, if the file itself was already missing, the raw bytes it tried to parse) to `state.corrupt-<epoch>.json` beside it, then returns `{ ok: false, error: 'corrupted', recovered: true, corruptPath }` so the caller can report the problem; it never initializes a fresh recovery state on the caller's behalf. This corrupt-state preservation write is the one real exception to "`loadState()` never writes a migrated document": it writes a *copy of the untrusted original*, never a migrated or fabricated replacement.
 
+Corruption is a property of bytes that were actually read (`docs/adr/0044-transient-state-io-retry.md`). Only unparseable JSON and a schema-invalid document are `corrupted`. A file that could not be read at all -- a transient Windows sharing error (`EPERM`/`EBUSY`) that outlasted the bounded read retry, or any other fs failure -- is reported as `{ ok: false, error: 'unreadable', transient, code }` and is never copied aside, so a live run momentarily held open by another process is never reported or preserved as corrupt. For the same reason `saveState()` treats only an absent file (`ENOENT`) as "no prior file"; a present-but-unreadable one refuses the save with `state-unreadable`.
+
 ## Persistence
 
 State is stored under a KRYLO-owned data root resolved by the active host adapter (`${CLAUDE_PLUGIN_DATA}` on the Claude Host) using atomic writes:
@@ -68,6 +70,8 @@ State is stored under a KRYLO-owned data root resolved by the active host adapte
 2. Flush when supported.
 3. Rename over the prior state.
 4. Validate against the schema.
+
+On Windows the rename in step 3 fails with `EPERM` while any other process holds the target open, and every Hook reads `state.json` lock-free at startup, so under parallel hook load this is routine rather than exceptional. The rename, and every state read, retries only `EPERM`/`EBUSY` against a wall-clock deadline with jittered exponential backoff (1500ms for the rename, 250ms for a read); any other error fails immediately (`docs/adr/0044-transient-state-io-retry.md`).
 
 Corrupted or schema-invalid state must not be trusted. KRYLO preserves the original file as `state.corrupt-<epoch>.json` for diagnosis and reports the problem; it does not initialize a fresh state on its own.
 

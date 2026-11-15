@@ -34,7 +34,11 @@ async function main() {
   try {
     withFileLock(runLockPath(runId), () => {
       const reloaded = loadState(runId);
-      if (!reloaded.ok) return;
+      if (!reloaded.ok) {
+        // Not persisted: say so, as the Claude entrypoint does (ADR-0044).
+        counterSaveFailed = true;
+        return;
+      }
       const state = reloaded.value;
       state.toolCounters[toolName] = (state.toolCounters[toolName] ?? 0) + 1;
       const saved = saveState(state);
