@@ -226,7 +226,7 @@ for (const [command, label] of REQUIRE_APPROVAL_COMMANDS) {
 // The payload shape is the one Codex actually sends: `tool_input: { command:
 // <raw patch text> }` (codex-rs/core/src/tools/handlers/apply_patch.rs,
 // `pre_tool_use_payload`, identical at rust-v0.154.0 and rust-v0.167.2).
-// This fixture used `{ patch }`, a shape no Codex build sends, so the
+// This fixture used `{ patch }`, a shape neither checked Codex build sends, so the
 // "not a blanket deny" test below passed while every real apply_patch call
 // was denied as unparseable -- found live on 0.167.2.
 function applyPatchPayload(cwd, patch) {

@@ -43,11 +43,11 @@ The method follows ADR-0035, ADR-0037 and ADR-0038:
 | Shipped contract **without** `0.167.2`, with `0.167.2` first on PATH | the runtime gate refused the run: `SAFE_BLOCKED` with a `codex-runtime-compat` finding naming `0.167.2` as unreviewed |
 | Shipped contract **with** `0.167.2`, no override, `0.167.2` first on PATH | the gate admitted an active run, with no finding, and the Stop gate held it |
 
-## Finding: apply_patch was denied on every Codex build
+## Finding: apply_patch was denied on every reviewed Codex build checked
 
 `risk-policy.mjs` classified `apply_patch` from `tool_input.patch`. Codex sends the raw patch as `tool_input.command` (`codex-rs/core/src/tools/handlers/apply_patch.rs`, `pre_tool_use_payload`, identical at `rust-v0.154.0` and `rust-v0.167.2`). `patch` was never set, no file target could be extracted, and every real `apply_patch` call was denied as `apply-patch-unparseable`.
 
-This failed closed, so nothing unsafe got through. But a KRYLO run on the Codex host could not edit files at all. The test fixture used `{ patch }`, a shape no Codex build sends, so the test asserting "not a blanket apply_patch deny" passed while the real behavior was exactly that. ADR-0037 exercised only shell commands.
+This failed closed, so nothing unsafe got through. But a KRYLO run on the Codex host could not edit files at all. The test fixture used `{ patch }`, a shape neither checked Codex build (rust-v0.154.0, rust-v0.167.2) sends, so the test asserting "not a blanket apply_patch deny" passed while the real behavior was exactly that. ADR-0037 exercised only shell commands.
 
 ## Finding: reading the real field exposed a parser differential, closed before merge
 
@@ -59,6 +59,17 @@ The extractor now reads headers as Codex does:
 - It classifies the trimmed path. Codex keeps the path after the prefix verbatim, and Windows drops trailing spaces when opening a file, so the trimmed name is the conservative one to check.
 
 Any line that looks like a header but is not in the exact form (other case, missing spaces) is denied as `apply-patch-ambiguous` rather than guessed at. A benign `apply_patch` edit was re-verified live on `0.167.2` after this change, and the `.env` edit was denied.
+
+### Hardening from the independent review
+
+An independent security review of this change confirmed the parser differential above and found three more gaps, each closed with a test that fails on the previous revision:
+
+- **Targets with hidden characters are denied.** A target containing a control character (NUL, other C0, DEL) or U+2028/U+2029 is denied as ambiguous. Lines are split on `
+` only, so those separators can no longer cut a path short either.
+- **Classification is bounded.** Each target runs the full per-path checks; the review measured about 22 s for 5,000 targets and 45 s for one 32 KB path, against a 30 s hook timeout. A patch over 1,000,000 characters, over 100 targets, or with a path over 1,024 characters is denied as `apply-patch-oversized`. Large file content in a single-target patch is unaffected.
+- **Fields must be text.** A `command` or `patch` field that is present but not a string is denied, instead of being ignored beside a benign string in the other field.
+
+Not verified: what Codex does with the tool call when a PreToolUse hook exceeds its timeout. The bounds above keep KRYLO's own classification well inside it.
 
 ## Finding: the runtime gate verifies the binary PATH resolves, not the one running the session
 

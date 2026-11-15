@@ -588,8 +588,21 @@ const APPLY_PATCH_HEADER_PREFIXES = ['*** Add File: ', '*** Delete File: ', '***
 const APPLY_PATCH_TRIM_RE = /^[\s\u0085]+|[\s\u0085]+$/g;
 const APPLY_PATCH_HEADER_LOOKALIKE_RE = /^\*+\s*(?:add|delete|update)\s*file\s*:|^\*+\s*move\s*to\s*:/i;
 
+// Bounds keep classification well inside the 30 s PreToolUse timeout: each
+// target goes through the full per-path checks, which an independent review
+// measured at about 22 s for 5,000 targets and 45 s for one 32 KB path.
+// A patch over any bound is denied as oversized, never partially checked.
+const MAX_APPLY_PATCH_LENGTH = 1_000_000;
+const MAX_APPLY_PATCH_TARGETS = 100;
+const MAX_APPLY_PATCH_TARGET_LENGTH = 1024;
+// A control character or Unicode line/paragraph separator inside a target
+// has no legitimate use and could be read differently by Codex and by the
+// path checks here.
+const APPLY_PATCH_TARGET_FORBIDDEN_RE = /[\u0000-\u001f\u007f\u2028\u2029]/;
+
 function extractApplyPatchTargets(patchText) {
-  if (typeof patchText !== 'string') return { targets: [], ambiguous: false };
+  if (typeof patchText !== 'string') return { targets: [], ambiguous: false, oversized: false };
+  if (patchText.length > MAX_APPLY_PATCH_LENGTH) return { targets: [], ambiguous: false, oversized: true };
   const targets = [];
   let ambiguous = false;
   for (const rawLine of patchText.split('\n')) {
@@ -597,13 +610,15 @@ function extractApplyPatchTargets(patchText) {
     const prefix = APPLY_PATCH_HEADER_PREFIXES.find((p) => line.startsWith(p));
     if (prefix) {
       const target = line.slice(prefix.length).replace(APPLY_PATCH_TRIM_RE, '');
-      if (target !== '') targets.push(target);
-      else ambiguous = true;
+      if (target.length > MAX_APPLY_PATCH_TARGET_LENGTH) return { targets: [], ambiguous: false, oversized: true };
+      if (target === '' || APPLY_PATCH_TARGET_FORBIDDEN_RE.test(target)) ambiguous = true;
+      else targets.push(target);
+      if (targets.length > MAX_APPLY_PATCH_TARGETS) return { targets: [], ambiguous: false, oversized: true };
     } else if (APPLY_PATCH_HEADER_LOOKALIKE_RE.test(line)) {
       ambiguous = true;
     }
   }
-  return { targets, ambiguous };
+  return { targets, ambiguous, oversized: false };
 }
 
 function loadPolicy() {
@@ -1543,14 +1558,32 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
     // Codex sends the raw patch as `tool_input.command`
     // (codex-rs/core/src/tools/handlers/apply_patch.rs, pre_tool_use_payload,
     // identical at rust-v0.154.0 and rust-v0.167.2). This read only `patch`,
-    // a field no Codex build sends, so every real apply_patch call was
+    // a field neither checked Codex build sends, so every real apply_patch call was
     // denied below as unparseable -- fail-closed, but it left the Codex host
     // unable to edit files at all. `patch` is still accepted for any caller
     // that uses it; when both are present, each is classified, so a benign
     // `command` can never mask a dangerous `patch` or the reverse.
+    // A field that is present but not a string cannot be classified, so it is
+    // denied rather than ignored beside a benign string in the other field.
+    for (const field of ['command', 'patch']) {
+      if (input[field] !== undefined && input[field] !== null && typeof input[field] !== 'string') {
+        return {
+          action: 'deny',
+          category: 'apply-patch-unparseable',
+          reason: `KRYLO received an apply_patch "${field}" that is not text, so it cannot verify which files would change. Denied as a fail-safe.`,
+        };
+      }
+    }
     const patchTexts = [input.command, input.patch].filter((v) => typeof v === 'string');
     const patchText = patchTexts.join('\n');
-    const { targets, ambiguous } = extractApplyPatchTargets(patchText);
+    const { targets, ambiguous, oversized } = extractApplyPatchTargets(patchText);
+    if (oversized) {
+      return {
+        action: 'deny',
+        category: 'apply-patch-oversized',
+        reason: `This apply_patch call is too large to classify safely (over ${MAX_APPLY_PATCH_LENGTH.toLocaleString('en-US')} characters, over ${MAX_APPLY_PATCH_TARGETS} files, or a path over ${MAX_APPLY_PATCH_TARGET_LENGTH} characters). Denied as a fail-safe; split it into smaller patches.`,
+      };
+    }
     if (ambiguous) {
       return {
         action: 'deny',

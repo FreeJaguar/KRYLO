@@ -1590,3 +1590,46 @@ test('shared risk policy: apply_patch headers are read the way Codex reads them 
   const contentLine = '*** Begin Patch\n*** Add File: docs/patch-format.md\n+*** Update File: example.txt\n*** End Patch\n';
   assert.equal(classify(contentLine).action, 'pass', 'a + content line that merely mentions a header is file content, not a header');
 });
+
+// Independent security review of ADR-0044, findings F2-F4.
+test('shared risk policy: apply_patch targets with line separators or control characters fail closed (F2)', () => {
+  const dataRoot = path.join(os.tmpdir(), 'krylo-apply-patch-f2-data');
+  const cwd = path.join(os.tmpdir(), 'krylo-apply-patch-f2-project');
+  const classify = (command) => classifyRiskAction({ toolName: 'apply_patch', toolInput: { command }, cwd, dataRoot });
+  for (const [label, target] of [
+    ['U+2028', 'notes\u2028/../.env'],
+    ['U+2029', 'notes\u2029/../.env'],
+    ['bare CR', 'x\r/../.env'],
+    ['NUL', 'notes\u0000.md'],
+    ['other C0 control', 'notes\u001b.md'],
+  ]) {
+    const r = classify(`*** Begin Patch\n*** Add File: ${target}\n+hi\n*** End Patch\n`);
+    assert.equal(r.action, 'deny', `${label} inside a target must be denied, got ${r.action}`);
+  }
+});
+
+test('shared risk policy: apply_patch classification is bounded -- oversized patches and too many targets are denied (F3)', () => {
+  const dataRoot = path.join(os.tmpdir(), 'krylo-apply-patch-f3-data');
+  const cwd = path.join(os.tmpdir(), 'krylo-apply-patch-f3-project');
+  const classify = (command) => classifyRiskAction({ toolName: 'apply_patch', toolInput: { command }, cwd, dataRoot });
+  const manyHeaders = Array.from({ length: 5000 }, (_, i) => `*** Add File: f${i}.md\n+x`).join('\n');
+  let started = Date.now();
+  const many = classify(`*** Begin Patch\n${manyHeaders}\n*** Add File: .env\n+X=1\n*** End Patch\n`);
+  assert.equal(many.action, 'deny');
+  assert.ok(Date.now() - started < 5000, `a patch with 5001 targets must be refused quickly, took ${Date.now() - started} ms`);
+  started = Date.now();
+  const longPath = classify(`*** Begin Patch\n*** Add File: ${'a/'.repeat(16000)}x.md\n+x\n*** End Patch\n`);
+  assert.equal(longPath.action, 'deny');
+  assert.ok(Date.now() - started < 5000, `a 32 KB target path must be refused quickly, took ${Date.now() - started} ms`);
+  const normal = classify('*** Begin Patch\n*** Add File: notes.md\n+' + 'y'.repeat(200_000) + '\n*** End Patch\n');
+  assert.equal(normal.action, 'pass', 'a single-target patch with large but ordinary file content stays allowed');
+});
+
+test('shared risk policy: an apply_patch field that is present but not a string is denied, even beside a benign string (F4)', () => {
+  const dataRoot = path.join(os.tmpdir(), 'krylo-apply-patch-f4-data');
+  const cwd = path.join(os.tmpdir(), 'krylo-apply-patch-f4-project');
+  const benign = '*** Begin Patch\n*** Add File: notes.md\n+hi\n*** End Patch\n';
+  for (const toolInput of [{ command: ['*** Update File: .env'], patch: benign }, { command: benign, patch: { x: 1 } }, { command: 42 }]) {
+    assert.equal(classifyRiskAction({ toolName: 'apply_patch', toolInput, cwd, dataRoot }).action, 'deny', JSON.stringify(Object.keys(toolInput)));
+  }
+});
