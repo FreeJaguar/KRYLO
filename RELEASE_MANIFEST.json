@@ -136,8 +136,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 51752,
-      "sha256": "864eebbd6e8504f419b135f0d8e2198a11bf40cd1e9649d5375134bbd758d619"
+      "bytes": 52042,
+      "sha256": "e0e13d893891b666053a5d0b10e735155b9ce21ac4e85133eb1c0b021e891b79"
     },
     {
       "path": "CLAUDE.md",
@@ -736,8 +736,8 @@
     },
     {
       "path": "docs/adr/0044-codex-0167-supported.md",
-      "bytes": 10266,
-      "sha256": "b7fb476ea0f0c813db51b7f5cbc82b02be59df558d59a54d25aa4a94e84258be"
+      "bytes": 12186,
+      "sha256": "0f9fff21e29ca8abd54fc92f0737c0c8730454ba9b3da8649c76c460673e3b23"
     },
     {
       "path": "docs/adr/README.md",
@@ -1476,8 +1476,8 @@
     },
     {
       "path": "plugins/krylo/scripts/security/risk-policy.mjs",
-      "bytes": 89936,
-      "sha256": "0c5ebb123afbd4bebdae15b902c71e80e8ab0098182d4c8f6ec0ccf87e827c5d"
+      "bytes": 91753,
+      "sha256": "a4ddb80e498dd687d117cc522ca48bf8ad0c102fec1db5747128d9d93d3cdb54"
     },
     {
       "path": "plugins/krylo/scripts/security/session-start-codex.mjs",
@@ -1926,8 +1926,8 @@
     },
     {
       "path": "plugins/krylo/tests/unit/risk-policy.test.mjs",
-      "bytes": 85556,
-      "sha256": "c8dbf5478c0392a62712581ef53df69c0ef3394a0b7af604b47ff57564681708"
+      "bytes": 89463,
+      "sha256": "0d945a8c79f544c9f122d696a26b8f15e6ac8544c783e6725e722d1f3fa67ed0"
     },
     {
       "path": "plugins/krylo/tests/unit/runtime-compat.test.mjs",
