@@ -736,8 +736,8 @@
     },
     {
       "path": "docs/adr/0044-codex-0167-supported.md",
-      "bytes": 14791,
-      "sha256": "033f0147fa0cdebb631420f5cf3a43bb75563c8493407398a4f42f2bd9c687b3"
+      "bytes": 14960,
+      "sha256": "2e973ef55b36f5a1970eed63cc60c04bbfe4dbce95c767d5ff46afc7d9653921"
     },
     {
       "path": "docs/adr/README.md",
