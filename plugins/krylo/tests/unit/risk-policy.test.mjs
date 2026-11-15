@@ -1640,3 +1640,59 @@ test('shared risk policy: an apply_patch field that is present but not a string 
     assert.equal(classifyRiskAction({ toolName: 'apply_patch', toolInput, cwd, dataRoot }).action, 'deny', JSON.stringify(Object.keys(toolInput)));
   }
 });
+
+// Second review round of ADR-0044.
+test('shared risk policy: an apply_patch target with surrounding whitespace is denied, never classified by its trimmed name (round 2 F1)', () => {
+  const root = path.join(os.tmpdir(), 'krylo-apply-patch-r2');
+  const cwd = path.join(root, 'proj');
+  const dataRoot = path.join(root, 'data');
+  const pluginRoot = path.join(root, 'plugin');
+  const classify = (command) => classifyRiskAction({ toolName: 'apply_patch', toolInput: { command }, cwd, dataRoot, pluginRoot });
+  // Codex keeps the path after the exact prefix verbatim, so ' /../../data/x'
+  // is cwd/' '/../../data/x = <root>/data/x to Codex, while the trimmed name
+  // is an absolute path at the filesystem root that no check covers.
+  for (const header of [
+    '*** Add File:  /../../data/state.json',
+    '*** Add File:  /../../data/state.json',
+    '*** Delete File:  /../../data/state.json',
+    '*** Add File:  /../../plugin/hooks/hooks.json',
+  ]) {
+    const r = classify(`*** Begin Patch\n${header}\n+x\n*** End Patch\n`);
+    assert.equal(r.action, 'deny', `${JSON.stringify(header)} must be denied`);
+  }
+  const move = classify('*** Begin Patch\n*** Update File: notes.md\n*** Move to:  /../../data/state.json\n@@\n-a\n+b\n*** End Patch\n');
+  assert.equal(move.action, 'deny', 'a Move to with a whitespace-prefixed path must be denied');
+  assert.equal(classify('*** Begin Patch\n*** Add File: notes.md\n+x\n*** End Patch\n').action, 'pass', 'an exact, clean target stays allowed');
+  // Codex trims the whole line before stripping the prefix, so trailing
+  // whitespace never reaches its path: 'notes.md ' is exactly 'notes.md'.
+  assert.equal(classify('*** Begin Patch\n*** Add File: notes.md \n+x\n*** End Patch\n').action, 'pass', 'trailing whitespace is trimmed by Codex too');
+  // U+FEFF is trimmed by JavaScript but is not Unicode White_Space, so Rust keeps it.
+  assert.equal(classify('*** Begin Patch\n*** Add File: notes.md﻿\n+x\n*** End Patch\n').action, 'deny', 'a BOM that only one side trims must be denied');
+});
+
+test('shared risk policy: apply_patch path work is bounded by total path components, deterministically (round 2 F2 and mutation e)', () => {
+  const root = path.join(os.tmpdir(), 'krylo-apply-patch-r2b');
+  const classify = (command) => classifyRiskAction({ toolName: 'apply_patch', toolInput: { command }, cwd: path.join(root, 'proj'), dataRoot: path.join(root, 'data') });
+  const deep = Array.from({ length: 100 }, (_, i) => `*** Add File: ${'a/'.repeat(508)}f${i}.md\n+x`).join('\n');
+  const started = Date.now();
+  const r = classify(`*** Begin Patch\n${deep}\n*** End Patch\n`);
+  assert.equal(r.action, 'deny');
+  assert.equal(r.category, 'apply-patch-oversized');
+  assert.ok(Date.now() - started < 5000, `100 deep targets must be refused quickly, took ${Date.now() - started} ms`);
+  const tooMany = Array.from({ length: 101 }, (_, i) => `*** Add File: f${i}.md\n+x`).join('\n');
+  assert.equal(classify(`*** Begin Patch\n${tooMany}\n*** End Patch\n`).category, 'apply-patch-oversized', '101 benign targets must be refused by the count cap, not by timing');
+  const ordinary = Array.from({ length: 40 }, (_, i) => `*** Add File: src/module${i}/index.js\n+x`).join('\n');
+  assert.equal(classify(`*** Begin Patch\n${ordinary}\n*** End Patch\n`).action, 'pass', 'an ordinary multi-file patch stays allowed');
+});
+
+test('shared risk policy: an apply_patch for another execution environment is denied (round 2 F4)', () => {
+  const root = path.join(os.tmpdir(), 'krylo-apply-patch-r2c');
+  const r = classifyRiskAction({
+    toolName: 'apply_patch',
+    toolInput: { command: '*** Begin Patch\n*** Environment ID: remote-1\n*** Add File: notes.md\n+x\n*** End Patch\n' },
+    cwd: path.join(root, 'proj'),
+    dataRoot: path.join(root, 'data'),
+  });
+  assert.equal(r.action, 'deny');
+  assert.equal(r.category, 'apply-patch-remote-environment');
+});

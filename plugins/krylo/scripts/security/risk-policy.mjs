@@ -608,33 +608,65 @@ const APPLY_PATCH_HEADER_LOOKALIKE_RE = /^\*+\s*(?:add|delete|update)\s*file\s*:
 // target goes through the full per-path checks, which an independent review
 // measured at about 22 s for 5,000 targets and 45 s for one 32 KB path.
 // A patch over any bound is denied as oversized, never partially checked.
+//
+// Path work, not only length, is bounded: the per-path checks resolve each
+// component on disk, and a second review measured 52-81 s for 100 deep
+// targets that were inside the length and count caps. The total number of
+// path components across all targets is capped as well.
 const MAX_APPLY_PATCH_LENGTH = 1_000_000;
 const MAX_APPLY_PATCH_TARGETS = 100;
 const MAX_APPLY_PATCH_TARGET_LENGTH = 1024;
+const MAX_APPLY_PATCH_PATH_COMPONENTS = 1000;
 // A control character or Unicode line/paragraph separator inside a target
 // has no legitimate use and could be read differently by Codex and by the
 // path checks here.
 const APPLY_PATCH_TARGET_FORBIDDEN_RE = /[\u0000-\u001f\u007f\u2028\u2029]/;
+// Codex addresses a different execution environment's filesystem with this
+// marker; its targets cannot be checked against this machine's paths.
+const APPLY_PATCH_ENVIRONMENT_MARKER = '*** Environment ID:';
+const BYTE_ORDER_MARK = 0xfeff;
 
 function extractApplyPatchTargets(patchText) {
-  if (typeof patchText !== 'string') return { targets: [], ambiguous: false, oversized: false };
-  if (patchText.length > MAX_APPLY_PATCH_LENGTH) return { targets: [], ambiguous: false, oversized: true };
+  const result = (fields) => ({ targets: [], ambiguous: false, oversized: false, remoteEnvironment: false, ...fields });
+  if (typeof patchText !== 'string') return result({});
+  if (patchText.length > MAX_APPLY_PATCH_LENGTH) return result({ oversized: true });
   const targets = [];
   let ambiguous = false;
+  let remoteEnvironment = false;
+  let components = 0;
   for (const rawLine of patchText.split('\n')) {
     const line = trimPatchLine(rawLine);
+    if (line.startsWith(APPLY_PATCH_ENVIRONMENT_MARKER)) {
+      remoteEnvironment = true;
+      continue;
+    }
     const prefix = APPLY_PATCH_HEADER_PREFIXES.find((p) => line.startsWith(p));
     if (prefix) {
-      const target = trimPatchLine(line.slice(prefix.length));
-      if (target.length > MAX_APPLY_PATCH_TARGET_LENGTH) return { targets: [], ambiguous: false, oversized: true };
-      if (target === '' || APPLY_PATCH_TARGET_FORBIDDEN_RE.test(target)) ambiguous = true;
-      else targets.push(target);
-      if (targets.length > MAX_APPLY_PATCH_TARGETS) return { targets: [], ambiguous: false, oversized: true };
+      // Codex trims the whole line, strips the exact prefix, and keeps the
+      // rest VERBATIM (PathBuf::from(path)). A target that would change under
+      // trimming therefore names a different path to Codex than to these
+      // checks -- ' /../../data/x' is cwd/' '/../../data/x to Codex but a
+      // filesystem-root path here -- so it is denied, never classified by its
+      // trimmed name. U+FEFF is trimmed by JavaScript but kept by Rust.
+      const target = line.slice(prefix.length);
+      if (target.length > MAX_APPLY_PATCH_TARGET_LENGTH) return result({ oversized: true });
+      if (
+        target === ''
+        || trimPatchLine(target) !== target
+        || APPLY_PATCH_TARGET_FORBIDDEN_RE.test(target)
+        || rawLine.includes(String.fromCharCode(BYTE_ORDER_MARK))
+      ) {
+        ambiguous = true;
+      } else {
+        targets.push(target);
+        components += target.split(/[\\/]+/).length;
+      }
+      if (targets.length > MAX_APPLY_PATCH_TARGETS || components > MAX_APPLY_PATCH_PATH_COMPONENTS) return result({ oversized: true });
     } else if (APPLY_PATCH_HEADER_LOOKALIKE_RE.test(line)) {
       ambiguous = true;
     }
   }
-  return { targets, ambiguous, oversized: false };
+  return result({ targets, ambiguous, remoteEnvironment });
 }
 
 function loadPolicy() {
@@ -1592,7 +1624,14 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
     }
     const patchTexts = [input.command, input.patch].filter((v) => typeof v === 'string');
     const patchText = patchTexts.join('\n');
-    const { targets, ambiguous, oversized } = extractApplyPatchTargets(patchText);
+    const { targets, ambiguous, oversized, remoteEnvironment } = extractApplyPatchTargets(patchText);
+    if (remoteEnvironment) {
+      return {
+        action: 'deny',
+        category: 'apply-patch-remote-environment',
+        reason: 'This apply_patch call targets another execution environment ("*** Environment ID:"), whose files KRYLO cannot check against this machine\'s protected paths. Denied as a fail-safe.',
+      };
+    }
     if (oversized) {
       return {
         action: 'deny',

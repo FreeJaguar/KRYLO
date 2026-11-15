@@ -51,24 +51,51 @@ This failed closed, so nothing unsafe got through. But a KRYLO run on the Codex 
 
 ## Finding: reading the real field exposed a parser differential, closed before merge
 
-Once `command` was read, an automated security review found that KRYLO extracted headers only at column 0. Codex's parser (`codex-rs/apply-patch/src/streaming_parser.rs`, `rust-v0.167.2`) trims every line before matching the exact header prefixes, even on lines inside an Update hunk. A patch could therefore pair a benign `*** Add File: notes.md` with an indented `   *** Update File: .env`. KRYLO saw only the benign target and passed the patch. Per Codex's parser source, Codex would have applied the indented header to `.env`; that half was read from source, not executed. A unit test reproduced KRYLO's half on the first revision of this change.
+Once `command` was read, an automated security review found that KRYLO extracted headers only at column 0.
 
-The extractor now reads headers as Codex does:
-- It splits on line breaks and trims every line with the union of Rust's and JavaScript's whitespace sets. Rust's set includes U+0085, JavaScript's does not; over-trimming can only reveal more headers.
-- It matches the exact prefixes.
-- It classifies the trimmed path. Codex keeps the path after the prefix verbatim, and Windows drops trailing spaces when opening a file, so the trimmed name is the conservative one to check.
+Codex's parser (`codex-rs/apply-patch/src/streaming_parser.rs`, `rust-v0.167.2`) works differently:
+- It trims each line before it matches the exact header prefixes.
+- Inside an Update hunk it trims only the end of the line, so an indented header there is context.
+- After the prefix it keeps the path **verbatim** (`PathBuf::from(path)`). That path is joined to the working directory and `..` is resolved lexically.
 
-Any line that looks like a header but is not in the exact form (other case, missing spaces) is denied as `apply-patch-ambiguous` rather than guessed at. A benign `apply_patch` edit was re-verified live on `0.167.2` after this change, and the `.env` edit was denied.
+A patch could therefore pair a benign `*** Add File: notes.md` with an indented `*** Update File: .env` on the following line. KRYLO saw only the benign target and passed the patch. Per Codex's parser source, Codex would have treated the indented line as a header for `.env`. That half was read from source, not executed. A unit test reproduced KRYLO's half on the first revision of this change.
 
-### Hardening from the independent review
+The extractor now works as follows.
 
-An independent security review of this change confirmed the parser differential above and found three more gaps, each closed with a test that fails on the previous revision:
+1. **Splitting and trimming.** It splits on `\n` only and trims each line with the union of Rust's and JavaScript's whitespace sets. Rust's set includes U+0085, JavaScript's does not. It trims by scanning code points from each end, not with a regex; see below. Over-trimming can only reveal more headers.
+2. **Exact prefixes.** It matches the exact header prefixes.
+3. **Whitespace-padded targets are denied.** A target that would change under trimming is denied as ambiguous, never classified by its trimmed name. Codex keeps that whitespace in the path, so for example ` /../../data/x` is `<cwd>/ /../../data/x` to Codex (KRYLO's data directory) but a filesystem-root path to a check that trims it first. Trailing whitespace is not affected: Codex trims the whole line first, so it never reaches the path. U+FEFF is trimmed by JavaScript but kept by Rust, so a header line containing it is denied too.
+4. **Look-alike lines fail closed.** Any line that looks like a header but is not in the exact form (other case, missing spaces) is denied as `apply-patch-ambiguous` rather than guessed at.
+5. **Other environments are denied.** A patch carrying `*** Environment ID:` addresses another execution environment's filesystem, which cannot be checked against this machine's protected paths. It is denied as `apply-patch-remote-environment`.
 
-- **Targets with hidden characters are denied.** A target containing a control character (NUL, other C0, DEL) or U+2028/U+2029 is denied as ambiguous. Lines are split on `
-` only, so those separators can no longer cut a path short either.
-- **Classification is bounded.** Each target runs the full per-path checks; the review measured about 22 s for 5,000 targets and 45 s for one 32 KB path, against a 30 s hook timeout. A patch over 1,000,000 characters, over 100 targets, or with a path over 1,024 characters is denied as `apply-patch-oversized`. Large file content in a single-target patch is unaffected.
-- **Trimming is linear.** The first union-whitespace trim was a regex with an unanchored trailing branch, which made it quadratic. One content line of 300,000 spaces, inside the length cap, took about 70 s. Lines are now trimmed by scanning code points from each end, and 300,000 spaces, `*` or U+0085 classify in about 10 ms.
+Accepted cost of failing closed: header-like context lines in an Update hunk (for example a Markdown line ` **Update file:** …`, or an indented `*** Move to:` that Codex treats as context) are denied, although Codex would not treat them as headers. Mirroring Codex's per-mode trimming exactly would remove these false positives, at the price of a bypass if that mode tracking ever diverged from Codex's.
+
+A benign `apply_patch` edit was re-verified live on `0.167.2` with the final code and no override, and the `.env` edit was denied.
+
+### Hardening from two independent review rounds
+
+Each item below has a test that fails on the revision before it.
+
+- **Targets with hidden characters are denied.** A target containing a control character (NUL, other C0, DEL) or U+2028/U+2029 is denied as ambiguous. Because lines are split on `\n` only, those separators can no longer cut a path short.
+- **Path work is bounded.** Each target runs the full per-path checks, which resolve its components on disk. The reviews measured about 22 s for 5,000 targets, 45 s for one 32 KB path, and 52–81 s for 100 deep targets inside the length and count caps, against a 30 s hook timeout. A patch is denied as `apply-patch-oversized` if it exceeds any of these:
+  - 1,000,000 characters;
+  - 100 targets;
+  - a path over 1,024 characters;
+  - 1,000 path components across all targets.
+
+  The worst case inside the bounds measured under 0.7 s on Windows. Large file content in a single-target patch is unaffected.
+- **Trimming is linear.** The first union-whitespace trim was a regex with an unanchored trailing branch, which made it quadratic. One content line of 300,000 spaces, inside the length cap, took about 70 s. Code-point scanning classifies 300,000 spaces, `*` or U+0085 in about 10 ms.
 - **Fields must be text.** A `command` or `patch` field that is present but not a string is denied, instead of being ignored beside a benign string in the other field.
+- **Mutation testing.** The second round removed, one at a time:
+  - ASCII-only trimming;
+  - U+0085 handling;
+  - the look-alike check;
+  - the forbidden-character check;
+  - the target cap;
+  - `patch` handling;
+  - non-string handling.
+
+  Each mutation was caught by a test. The target cap is now pinned by a deterministic test (101 benign targets) instead of a timing assertion.
 
 Not verified: what Codex does with the tool call when a PreToolUse hook exceeds its timeout. The bounds above keep KRYLO's own classification well inside it.
 
