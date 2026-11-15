@@ -595,6 +595,40 @@ const APPLY_PATCH_TRIM_CODES = new Set([
   0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff,
 ]);
 
+// Windows path forms that name a file under a different spelling than the
+// per-path checks compare, so Windows opens a protected file while the
+// checks see an ordinary name: an 8.3 short-name segment (`CODEX~1` for
+// `.codex`, `ENV~1` for `.env`), NTFS stream syntax (`.codex::$INDEX_ALLOCATION`,
+// `file:stream`) and UNC/device/volume prefixes (`\\localhost\C$\...`,
+// `\\?\...`, `\\?\Volume{...}`). Found by a path-equivalence review of
+// ADR-0044 by writing through each alias. No ordinary project path needs
+// these forms, so a structured path field using one is denied rather than
+// resolved: `fs.realpathSync` does not expand them reliably.
+function isWindowsPathAliasForm(rawPath) {
+  if (typeof rawPath !== 'string' || rawPath === '') return false;
+  const p = stripSurroundingQuotes(rawPath);
+  if (/^[\\/]{2}/.test(p)) return true;
+  if (p.replace(/^[A-Za-z]:/, '').includes(':')) return true;
+  return /(^|[\\/])[^\\/]*~\d/.test(p);
+}
+
+// The structured path fields of the tools the classifier knows.
+function structuredPathFields(name, input) {
+  switch (name) {
+    case 'Write':
+    case 'Edit':
+    case 'Read':
+      return [input.file_path];
+    case 'NotebookEdit':
+      return [input.notebook_path, input.file_path];
+    case 'Glob':
+    case 'Grep':
+      return [input.path];
+    default:
+      return [];
+  }
+}
+
 function trimPatchLine(s) {
   let start = 0;
   let end = s.length;
@@ -656,6 +690,7 @@ function extractApplyPatchTargets(patchText) {
         || trimPatchLine(target) !== target
         || APPLY_PATCH_TARGET_FORBIDDEN_RE.test(target)
         || rawLine.includes(String.fromCharCode(BYTE_ORDER_MARK))
+        || isWindowsPathAliasForm(target)
       ) {
         ambiguous = true;
       } else {
@@ -1509,6 +1544,14 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
   // that happens to appear later in an otherwise-padded string).
   if ((name === 'Bash' || name === 'PowerShell') && typeof input.command === 'string' && input.command.length > MAX_BASH_COMMAND_LENGTH) {
     return { action: 'deny', category: 'oversized-command', reason: OVERSIZED_COMMAND_REASON };
+  }
+
+  if (structuredPathFields(name, input).some(isWindowsPathAliasForm)) {
+    return {
+      action: 'deny',
+      category: 'path-alias-form',
+      reason: 'This path uses a Windows alias form (an 8.3 short name such as NAME~1, NTFS stream syntax with ":", or a \\\\ UNC/device prefix) that can name a protected file under another spelling. Denied as a fail-safe; use the plain path.',
+    };
   }
 
   if (touchesDataRoot({ toolName: name, toolInput: input, cwd, dataRoot: resolvedDataRoot })) {

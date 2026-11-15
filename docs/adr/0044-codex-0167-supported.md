@@ -99,6 +99,36 @@ Each item below has a test that fails on the revision before it.
 
 Not verified: what Codex does with the tool call when a PreToolUse hook exceeds its timeout. The bounds above keep KRYLO's own classification well inside it.
 
+## Finding: Windows alias path forms bypassed the per-path checks on both hosts
+
+A path-equivalence review of the final `apply_patch` code asked whether, for every target the extractor accepts, Codex and KRYLO's checks name the same file. For ordinary paths they do: Codex's lexical join and Node's `path.resolve` produce the same string. But Windows itself opens a protected file under other spellings that the checks never compared:
+
+- **8.3 short names.** `CODEX~1\hooks.json` opens `.codex\hooks.json`, `CLAUDE~1\settings.json` opens `.claude\settings.json`, `ENV~1` opens `.env`, and `..\KRYLO-~1\state.json` opens a file in the data root. This applies when 8.3 name generation is enabled on the volume, as it was on the test machine.
+- **NTFS stream syntax.** `.codex::$INDEX_ALLOCATION\hooks.json` and `file:stream`.
+- **UNC, device and volume prefixes.** `\\localhost\C$\...`, `\\?\...` and `\\?\Volume{...}\...`.
+
+The reviewer confirmed the effect by writing through each alias with Node: the bytes landed on the protected file. Codex itself was not run.
+
+The gap was in the shared classifier, so it was not limited to `apply_patch`. `Write` and `Edit` on the **released Claude host** classified the same alias forms as `pass`.
+
+**Fix.** A structured path field written in one of these forms is denied as `path-alias-form` before any other check runs. That covers:
+- `Write`, `Edit` and `Read` (`file_path`);
+- `NotebookEdit` (`notebook_path` and `file_path`);
+- `Glob` and `Grep` (`path`);
+- every `apply_patch` target.
+
+The rule fails closed. It denies:
+- any segment containing `~` followed by a digit;
+- any `:` other than a leading drive letter;
+- any path starting with `\\` or `//`.
+
+No ordinary project path needs these forms. Expanding them instead was rejected, because `fs.realpathSync` does not expand them reliably.
+
+**Residuals.**
+- Shell commands (`Bash`, `PowerShell`) remain a best-effort text heuristic. A rule matching `~1` would block every `git diff HEAD~1`, so `cat ENV~1` is not caught by this rule.
+- Glob and Grep *patterns* are not checked for these forms.
+- Both the shell and pattern gaps are covered only by the existing defense-in-depth position: the Risk Gate is not an OS sandbox.
+
 ## Finding: the runtime gate verifies the binary PATH resolves, not the one running the session
 
 In the first sessions a different Codex installation (`0.154.0`, supported) came first on PATH. The gate admitted an active run while the session itself ran on the then-unreviewed `0.167.2`. With `0.167.2` first on PATH, the gate refused it as it should. Hooks do inherit the session's PATH; the gap is per-binary identity when more than one installation exists. ADR-0038 already disclosed it, and it was observed live here.
@@ -109,6 +139,7 @@ Codex records the running binary's version as `cli_version` in the first (`sessi
 
 1. `0.167.2` is added to `supported`, with the evidence and the residuals below in its own `evidence` and `notes` fields. `0.120.0` and `0.154.0` are unchanged; `blocked` stays empty.
 2. `risk-policy.mjs` classifies `apply_patch` from `tool_input.command`, still accepting `tool_input.patch`. When both are present, both are classified, so neither can mask the other. Headers are extracted the way Codex parses them, and header look-alikes fail closed. The fixtures in `tests/hooks/risk-gate-codex.test.mjs` now use the real shape, and `tests/unit/risk-policy.test.mjs` pins the masking rule and the parser differential.
+3. Structured path fields in a Windows alias form (8.3 short name, NTFS stream syntax, UNC/device/volume prefix) are denied on both hosts, as described above.
 
 ## Residuals this approval accepts
 

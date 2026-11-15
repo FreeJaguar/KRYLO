@@ -421,7 +421,11 @@ test('shared risk policy denies a quoted sensitive path containing an internal s
   for (const [toolName, toolInput] of mustDeny) {
     const result = classifyRiskAction({ toolName, toolInput, cwd: process.cwd(), dataRoot });
     assert.equal(result.action, 'deny', `expected deny for ${toolName}(${JSON.stringify(toolInput)})`);
-    assert.equal(result.category, 'sensitive-path');
+    // A structured path (Read/Write file_path) in NTFS stream syntax is now
+    // caught first by the Windows alias-form rule (ADR-0044); shell commands
+    // are still classified by the sensitive-path check.
+    const expected = ['Read', 'Write'].includes(toolName) ? 'path-alias-form' : 'sensitive-path';
+    assert.equal(result.category, expected);
   }
 
   // A benign quoted path with an internal space must still pass.
@@ -728,7 +732,8 @@ test('shared risk policy: settings.json protection resolves the path before comp
   for (const target of mustDeny) {
     const result = classifyRiskAction({ toolName: 'Write', toolInput: { file_path: target, content: '{}' }, cwd: process.cwd(), dataRoot });
     assert.equal(result.action, 'deny', `expected deny for Write(${target})`);
-    assert.equal(result.category, 'security-config-protection');
+    // The `::$DATA` target is now caught first by the Windows alias-form rule (ADR-0044).
+    assert.equal(result.category, target.includes('::') ? 'path-alias-form' : 'security-config-protection');
   }
 });
 
@@ -1695,4 +1700,52 @@ test('shared risk policy: an apply_patch for another execution environment is de
   });
   assert.equal(r.action, 'deny');
   assert.equal(r.category, 'apply-patch-remote-environment');
+});
+
+// Windows alias forms (path-equivalence review of ADR-0044): an 8.3 short
+// name, NTFS stream syntax or a UNC/device/volume prefix names a protected
+// file under a spelling the per-path checks do not compare, so Windows opens
+// .codex\hooks.json, .claude\settings.json, .env or the data root while the
+// checks see an ordinary name. Observed by writing through the alias with
+// Node; affects Write/Edit/NotebookEdit/Read/Glob/Grep on both hosts and
+// apply_patch targets. Structured path fields in these forms are denied.
+const ALIAS_FORMS = [
+  String.raw`CODEX~1\hooks.json`,
+  String.raw`CLAUDE~1\settings.json`,
+  'ENV~1',
+  String.raw`..\KRYLO-~1\state.json`,
+  String.raw`.codex::$INDEX_ALLOCATION\hooks.json`,
+  String.raw`.claude::$INDEX_ALLOCATION\settings.json`,
+  'notes.txt:hidden-stream',
+  String.raw`\\localhost\C$\x\state.json`,
+  String.raw`\\?\Volume{00000000-0000-0000-0000-000000000000}\x\state.json`,
+  String.raw`\\?\C:\x\state.json`,
+  '//server/share/x.json',
+];
+
+test('shared risk policy: Windows alias path forms are denied on every structured path field and in apply_patch', () => {
+  const root = path.join(os.tmpdir(), 'krylo-alias-forms');
+  const ctx = { cwd: path.join(root, 'proj'), dataRoot: path.join(root, 'krylo-data-root'), pluginRoot: path.join(root, 'plugin') };
+  for (const p of ALIAS_FORMS) {
+    for (const [toolName, toolInput] of [
+      ['Write', { file_path: p, content: 'x' }],
+      ['Edit', { file_path: p, old_string: 'a', new_string: 'b' }],
+      ['NotebookEdit', { notebook_path: p, new_source: 'x' }],
+      ['Read', { file_path: p }],
+      ['Glob', { path: p, pattern: '*' }],
+      ['Grep', { path: p, pattern: 'x' }],
+      ['apply_patch', { command: `*** Begin Patch\n*** Add File: ${p}\n+x\n*** End Patch\n` }],
+    ]) {
+      const r = classifyRiskAction({ toolName, toolInput, ...ctx });
+      assert.equal(r.action, 'deny', `${toolName} ${JSON.stringify(p)} must be denied, got ${r.action}`);
+    }
+  }
+});
+
+test('shared risk policy: ordinary paths are not mistaken for Windows alias forms', () => {
+  const root = path.join(os.tmpdir(), 'krylo-alias-forms-ok');
+  const ctx = { cwd: path.join(root, 'proj'), dataRoot: path.join(root, 'krylo-data-root'), pluginRoot: path.join(root, 'plugin') };
+  for (const p of [String.raw`C:\work\notes.md`, 'C:/work/notes.md', 'src/index.js', String.raw`docs\guide.md`, '/home/user/notes.md', 'notes~draft.md']) {
+    assert.equal(classifyRiskAction({ toolName: 'Write', toolInput: { file_path: p, content: 'x' }, ...ctx }).action, 'pass', `${JSON.stringify(p)} must stay allowed`);
+  }
 });
