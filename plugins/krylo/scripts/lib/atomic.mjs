@@ -6,11 +6,10 @@
 //
 // Transient sharing errors (docs/adr/0044-transient-state-io-retry.md).
 // On Windows, replacing a file by rename fails with EPERM while ANY other
-// process holds the target open, even briefly and even with full sharing
-// flags (Node opens every file with FILE_SHARE_READ|WRITE|DELETE; that does
-// not let MoveFileEx replace it). Antivirus, indexers, and -- most often --
-// KRYLO's own lock-free readers (every Hook reads state.json at startup to
-// resolve its run) all open it. A sharing violation from a holder that
+// process holds the target open, even briefly -- including a plain Node
+// fs.readFileSync in another process (measured, ADR-0044). Antivirus,
+// indexers, and -- most often -- KRYLO's own lock-free readers (every Hook
+// reads state.json at startup to resolve its run) all open it. A sharing violation from a holder that
 // denies sharing surfaces as EBUSY. Both are retried here against a
 // wall-clock deadline with jittered exponential backoff; every other error
 // code is a real failure and is surfaced immediately.
@@ -26,11 +25,19 @@ const TRANSIENT_FS_CODES = new Set(['EPERM', 'EBUSY']);
 // (ADR-0044): a contended rename that eventually succeeded needed a median
 // of ~40ms, a p99 of ~160ms and at most 204ms, and the old fixed budget (5
 // attempts x 20ms, 113-151ms of wall clock in practice) gave up on that
-// tail, losing the write. 1500ms is about seven times the slowest measured
-// success while staying small against the 6s lock budget the
-// renaming writer already holds (scripts/lib/lock.mjs) and the 15s
-// PostToolUse/SubagentStart hook timeouts that budget must fit inside.
-const RENAME_RETRY_BUDGET_MS = 1500;
+// tail, losing the write. 1000ms is about five times the slowest measured
+// success. It is also spent while HOLDING the run lock, so it is kept well
+// below what the lock and the hook can absorb: lock.mjs's 600 x 10ms budget
+// is about 10s of wall clock on Windows (each 10ms pause measures ~16.6ms),
+// and a hook's worst case is that lock wait plus its own hold (this budget
+// plus two bounded reads) inside the 15s PostToolUse/SubagentStart timeout.
+//
+// On POSIX, rename(2) replaces an open target, so this retry is normally
+// never exercised there; an EPERM/EBUSY that does occur there (a permission
+// or mount problem) is persistent and costs at most this budget before it
+// is surfaced. The same holds for a Windows read-only or ACL-denied file,
+// which also reports EPERM and cannot be told apart from a sharing error.
+const RENAME_RETRY_BUDGET_MS = 1000;
 
 // Read budget. Readers share access with each other, so only a holder that
 // denies sharing (or a delete-pending file) can block one; keep this short
@@ -63,13 +70,15 @@ function retryDelayMs(attempt) {
  * unchanged.
  */
 function withTransientRetry(op, budgetMs) {
-  const deadline = Date.now() + budgetMs;
+  // performance.now() is monotonic: a wall-clock adjustment mid-retry can
+  // neither extend nor cut short the budget.
+  const deadline = performance.now() + budgetMs;
   for (let attempt = 0; ; attempt++) {
     try {
       return op();
     } catch (err) {
       if (!err || !TRANSIENT_FS_CODES.has(err.code)) throw err;
-      const remaining = deadline - Date.now();
+      const remaining = deadline - performance.now();
       if (remaining <= 0) throw err;
       sleepSync(Math.min(retryDelayMs(attempt), remaining));
     }

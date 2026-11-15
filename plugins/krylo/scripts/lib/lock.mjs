@@ -40,7 +40,7 @@ function sleepSync(ms) {
 // fail-open `catch {}` (posttool-telemetry.mjs, orbit/fingerprint.mjs,
 // status/agent-events.mjs) silently discarded its mutation with exit 0,
 // observed as an intermittent lost-increment failure under real 15-way
-// concurrent load. atomic.mjs's renameWithRetry() already treats this same
+// concurrent load. atomic.mjs's writeJsonAtomic() already treats this same
 // EPERM/EBUSY pair as transient for the analogous rename case; this applies
 // the identical, already-established reasoning to lock acquisition.
 const TRANSIENT_LOCK_ERROR_CODES = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);

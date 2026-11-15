@@ -22,7 +22,14 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { writeJsonAtomic, readJson } from '../../scripts/lib/atomic.mjs';
-import { createInitialState, saveState, loadState } from '../../scripts/lib/state.mjs';
+import {
+  createInitialState,
+  saveState,
+  loadState,
+  writeActiveRunPointer,
+  pruneStaleActiveRunPointers,
+  computeProjectRootHash,
+} from '../../scripts/lib/state.mjs';
 
 function mkTempDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-transient-io-'));
@@ -35,7 +42,10 @@ function fsError(code) {
 }
 
 function withTempDataRoot(fn) {
-  const dir = mkTempDir();
+  // Real path: state.mjs builds run paths from the realpath of the data root
+  // (paths.mjs safeJoin), so on macOS (/var -> /private/var) a fault keyed
+  // on the unresolved temp path would never match.
+  const dir = fs.realpathSync(mkTempDir());
   const prev = process.env.KRYLO_DATA_ROOT;
   process.env.KRYLO_DATA_ROOT = dir;
   try {
@@ -222,6 +232,52 @@ test('saveState does not mistake a transient read of the existing state for "no 
     const savedAfter = saveState(state);
     mock.restoreAll();
     assert.equal(savedAfter.ok, true);
+  });
+});
+
+// ------------------------------------------------------- pointer pruning
+
+function activePointerFor(dir, state) {
+  const projectRootHash = computeProjectRootHash(dir);
+  writeActiveRunPointer({ runId: state.runId, projectRootHash, host: 'claude', hostSessionId: 's' });
+  const root = path.join(dir, 'active-runs');
+  const pointerPath = path.join(root, projectRootHash, 'claude', 's.json');
+  assert.ok(fs.existsSync(pointerPath), 'fixture pointer written');
+  return { root, pointerPath };
+}
+
+test('pruning keeps the pointer of a live run whose state.json is only transiently unreadable', () => {
+  withTempDataRoot((dir) => {
+    const { state, statePath } = newSavedRun(dir);
+    const { root, pointerPath } = activePointerFor(dir, state);
+    failReadsOf(statePath, 'EBUSY', Infinity);
+    const removed = pruneStaleActiveRunPointers(root);
+    mock.restoreAll();
+    assert.deepEqual(removed, []);
+    assert.ok(fs.existsSync(pointerPath), 'a live run must not be switched off by a sharing error');
+  });
+});
+
+test('pruning keeps a pointer file that is itself only transiently unreadable', () => {
+  withTempDataRoot((dir) => {
+    const { state } = newSavedRun(dir);
+    const { root, pointerPath } = activePointerFor(dir, state);
+    failReadsOf(pointerPath, 'EPERM', Infinity);
+    const removed = pruneStaleActiveRunPointers(root);
+    mock.restoreAll();
+    assert.deepEqual(removed, []);
+    assert.ok(fs.existsSync(pointerPath));
+  });
+});
+
+test('pruning still removes the pointer of a run that is genuinely gone', () => {
+  withTempDataRoot((dir) => {
+    const { state, statePath } = newSavedRun(dir);
+    const { root, pointerPath } = activePointerFor(dir, state);
+    fs.rmSync(statePath);
+    const removed = pruneStaleActiveRunPointers(root);
+    assert.equal(removed.length, 1);
+    assert.ok(!fs.existsSync(pointerPath));
   });
 });
 

@@ -258,6 +258,8 @@ plugins/krylo/tests/unit/*.test.mjs          # state, redact, atomic, telemetry,
                                               # risk-policy (host-neutral classification policy cases)
 plugins/krylo/tests/unit/state-io-transient.test.mjs   # + transient EPERM/EBUSY retry and unreadable-not-corrupt (docs/adr/0044)
 plugins/krylo/tests/stress/state-io-contention.mjs     # + opt-in concurrent-hook stress reproduction, not in npm test (docs/adr/0044)
+plugins/krylo/tests/hooks/posttool-reload-failure.test.mjs   # + reload failure under the lock reports counter-not-persisted, both hosts (docs/adr/0044)
+plugins/krylo/tests/fixtures/state-io/                 # + test-only --import fault preload for state.json re-reads (docs/adr/0044)
 plugins/krylo/tests/platform/paths.test.mjs
 plugins/krylo/tests/hooks/*.test.mjs         # question-gate, risk-gate, stop-gate, fingerprint, posttool (+helpers.mjs)
 plugins/krylo/tests/security/injection.test.mjs

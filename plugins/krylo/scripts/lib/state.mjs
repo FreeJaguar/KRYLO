@@ -672,7 +672,10 @@ function preserveCorruptState(statePath, failure) {
 /**
  * Load a run's state. Never throws. Corrupted or schema-invalid state is
  * preserved as state.corrupt-<epoch>.json beside the original and reported
- * via a recovery indicator instead of being trusted.
+ * via a recovery indicator instead of being trusted. A file that cannot be
+ * read at all is reported as 'unreadable' (with `transient` set for a
+ * sharing error that outlasted the bounded retry) and is never preserved,
+ * because nothing about its contents is known (ADR-0044).
  *
  * Version-aware: a real prior-schema document is migrated to the CURRENT
  * schema IN MEMORY ONLY and validated against the current validator. A
@@ -1072,6 +1075,12 @@ export function clearActiveRunPointerForState(state) {
   });
 }
 
+// True when a pointer, or the state it names, could not be read only because
+// of a transient sharing error (ADR-0044).
+function isTransientlyUnreadable(pointer, loaded) {
+  return pointer.error === 'busy' || (loaded.error === 'unreadable' && loaded.transient === true);
+}
+
 /**
  * Remove pointer files whose run no longer exists or has reached a terminal
  * state. Best-effort; never throws. Traverses the nested
@@ -1085,6 +1094,12 @@ export function clearActiveRunPointerForState(state) {
  * scoping (0.1.1) flat pointer files sitting directly under a project
  * directory: a still-active one is migrated into the `claude` host
  * directory rather than discarded; a genuinely stale one is removed.
+ *
+ * A pointer, or the state it names, that is only TRANSIENTLY unreadable (a
+ * sharing error that outlasted the bounded read retry) is left untouched:
+ * "could not read it right now" is not evidence that the run is over, and
+ * deleting the pointer would silently switch off a live run's governance
+ * (ADR-0044).
  */
 export function pruneStaleActiveRunPointers(activeRunsRoot) {
   const removed = [];
@@ -1110,6 +1125,7 @@ export function pruneStaleActiveRunPointers(activeRunsRoot) {
       const runId = pointer.ok && pointer.value ? pointer.value.runId : null;
       const loaded = typeof runId === 'string' ? loadState(runId) : { ok: false };
       const isActive = Boolean(pointer.ok && runId && loaded.ok && loaded.value.terminalState === null);
+      if (isTransientlyUnreadable(pointer, loaded)) continue;
       if (isActive) {
         const sessionId = typeof pointer.value.sessionId === 'string' && pointer.value.sessionId.trim() !== ''
           ? pointer.value.sessionId
@@ -1153,6 +1169,7 @@ export function pruneStaleActiveRunPointers(activeRunsRoot) {
         const pointer = readJson(pointerPath);
         const runId = pointer.ok && pointer.value ? pointer.value.runId : null;
         const loaded = typeof runId === 'string' ? loadState(runId) : { ok: false };
+        if (isTransientlyUnreadable(pointer, loaded)) continue;
         const isStale = !pointer.ok || !runId || !loaded.ok || loaded.value.terminalState !== null;
         if (isStale) {
           try {
