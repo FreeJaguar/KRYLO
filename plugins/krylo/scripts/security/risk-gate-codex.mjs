@@ -53,9 +53,10 @@ import {
   allowCodexSilently,
   codexCwdFallbackIdentity,
 } from '../host/codex/hook-transport.mjs';
+import { resolveCodexSessionId } from '../host/codex/context.mjs';
 import { recordEvent } from '../lib/telemetry.mjs';
 import { classifyRiskAction } from './risk-policy.mjs';
-import { computeProjectRootHash, readBootstrapFailureMarker } from '../lib/state.mjs';
+import { computeProjectRootHash, readBootstrapFailureMarker, readBootstrapFailureMarkerForSession } from '../lib/state.mjs';
 
 // Shared by both call sites below (the normal !run.active path, and
 // failSafeOnUnreadablePayload's own invalid-host-identity path): if a
@@ -63,11 +64,18 @@ import { computeProjectRootHash, readBootstrapFailureMarker } from '../lib/state
 // instead of falling through to the ordinary silent-allow. Never throws --
 // any lookup failure here must fall through to the caller's own existing
 // fail-safe behavior, not introduce a new crash path.
+//
+// The marker is keyed by the project root the failed invocation saw, but a
+// later PreToolUse payload's cwd can be the command's own working directory
+// (Codex 0.166.0), so a path miss falls back to the same session's marker
+// under any project (docs/adr/0043-session-keyed-run-resolution.md).
 function denyIfBootstrapFailureMarked(host, projectRoot, hostSessionId) {
-  if (!projectRoot || !hostSessionId) return;
+  if (!hostSessionId) return;
   try {
-    const projectRootHash = computeProjectRootHash(projectRoot);
-    const failure = readBootstrapFailureMarker({ projectRootHash, host, hostSessionId });
+    const byPath = projectRoot
+      ? readBootstrapFailureMarker({ projectRootHash: computeProjectRootHash(projectRoot), host, hostSessionId })
+      : { active: false };
+    const failure = byPath.active ? byPath : readBootstrapFailureMarkerForSession({ host, hostSessionId });
     if (failure.active) {
       emitCodexPreToolDeny(
         `KRYLO failed to initialize for this session (${failure.reason}) after an explicit $krylo-run invocation. `
@@ -97,17 +105,26 @@ function normalizeCodexToolName(rawName) {
 // for was silently allowed here regardless: session_id/cwd are read
 // directly off the raw payload (the same authoritative host-supplied
 // fields the marker was written against), never trusted for anything else.
+//
+// The raw `session_id` is also passed to the active-run lookup, solely to
+// find a run to deny under, so it tolerates a process cwd below the run's
+// project root like the normal path does; and the marker check no longer
+// needs a `cwd`, since it falls back to the session under any project
+// (docs/adr/0043-session-keyed-run-resolution.md).
 function failSafeOnUnreadablePayload(rawPayload) {
+  // The host adapter's own resolution (payload session_id, then CODEX_THREAD_ID).
+  const rawSessionId = resolveCodexSessionId({ hookPayload: rawPayload && typeof rawPayload === 'object' ? rawPayload : undefined });
   const identity = codexCwdFallbackIdentity();
   if (identity) {
-    const run = resolveActiveRun({ projectRoot: identity.projectRoot, host: identity.host, hostSessionId: identity.hostSessionId });
+    const run = resolveActiveRun({ projectRoot: identity.projectRoot, host: identity.host, hostSessionId: rawSessionId ?? identity.hostSessionId });
     if (run.active) emitCodexPreToolDeny('KRYLO risk gate could not read this action and denied it as a fail-safe. Re-run with a well-formed request.');
   }
-  const rawSessionId = typeof rawPayload?.session_id === 'string' && rawPayload.session_id.trim() !== '' ? rawPayload.session_id.trim() : null;
-  const rawCwd = typeof rawPayload?.cwd === 'string' && rawPayload.cwd.trim() !== '' ? rawPayload.cwd : null;
-  if (rawSessionId && rawCwd) {
+  if (rawSessionId) {
+    const rawCwd = typeof rawPayload?.cwd === 'string' && rawPayload.cwd.trim() !== '' ? rawPayload.cwd : null;
     let projectRoot = null;
-    try { projectRoot = path.resolve(rawCwd); } catch { projectRoot = null; }
+    if (rawCwd) {
+      try { projectRoot = path.resolve(rawCwd); } catch { projectRoot = null; }
+    }
     denyIfBootstrapFailureMarked('codex', projectRoot, rawSessionId);
   }
   allowCodexSilently();
