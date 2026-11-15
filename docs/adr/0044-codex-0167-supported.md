@@ -70,7 +70,7 @@ The extractor now works as follows.
 
 Accepted cost of failing closed: header-like context lines in an Update hunk (for example a Markdown line ` **Update file:** …`, or an indented `*** Move to:` that Codex treats as context) are denied, although Codex would not treat them as headers. Mirroring Codex's per-mode trimming exactly would remove these false positives, at the price of a bypass if that mode tracking ever diverged from Codex's.
 
-A benign `apply_patch` edit was re-verified live on `0.167.2` with the final code and no override, and the `.env` edit was denied.
+A benign `apply_patch` edit was re-verified live on `0.167.2` with no override at commit `2e9317f`, and the `.env` edit was denied. The Windows alias-form rule added after that run only denies paths in alias forms; it was verified by unit tests and the classification probe, not by another live run.
 
 ### Hardening from two independent review rounds
 
