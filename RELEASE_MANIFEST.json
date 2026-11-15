@@ -136,8 +136,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 47318,
-      "sha256": "dc7e8782d616e296d79d25bc597eacb9ecc6d158c33c1ec42d015f30f0c51c3b"
+      "bytes": 47449,
+      "sha256": "21fed148a6e3ae72d3e3cdb15a23885dfdb9954979723d9f69cfd3221067e2cd"
     },
     {
       "path": "CLAUDE.md",
@@ -171,8 +171,8 @@
     },
     {
       "path": "RELEASE_READINESS.md",
-      "bytes": 47549,
-      "sha256": "608eff1a4c47dd4471ad942c81a74ccd62e4e5c3820be399670df66b962a94de"
+      "bytes": 47847,
+      "sha256": "3582fb409a4f57f383482bb0852ac896e950bb0a31c6a96ddc606c175986a779"
     },
     {
       "path": "SECURITY.md",
@@ -726,8 +726,8 @@
     },
     {
       "path": "docs/adr/0042-claude-host-reverified-on-2-1-318.md",
-      "bytes": 8883,
-      "sha256": "66423866a15e46b87a00f9c3af05f837ca36e2df99523876b51a8e8bf9923c67"
+      "bytes": 9338,
+      "sha256": "9660808992b2dcda936be91561638079da286e3c0c2d74b65b0e45e4056e78e4"
     },
     {
       "path": "docs/adr/README.md",
