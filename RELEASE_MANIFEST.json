@@ -136,8 +136,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 47096,
-      "sha256": "82a112412e0a41468cb4567714166027891ff16de673a71aa7f5758266808c9d"
+      "bytes": 48098,
+      "sha256": "729a0b56a228288a77cb3576220fe5880eb87a543ed7ffd2ed61420805c6a282"
     },
     {
       "path": "CLAUDE.md",
@@ -1336,8 +1336,8 @@
     },
     {
       "path": "plugins/krylo/scripts/maintenance/checks/codex-compat.mjs",
-      "bytes": 6873,
-      "sha256": "9016b3b24a328e4602e4fea6b0704873a639708005a6f6bd85d9e6c488919503"
+      "bytes": 9348,
+      "sha256": "35c494d307109da0b43e1c349a8772e505d0c6c9e49e14a33dfd30c0d8a95b53"
     },
     {
       "path": "plugins/krylo/scripts/maintenance/checks/dependencies.mjs",
@@ -1741,8 +1741,8 @@
     },
     {
       "path": "plugins/krylo/tests/maintenance/codex-compat.test.mjs",
-      "bytes": 4960,
-      "sha256": "07447b9b76dda570d2a8566c7be0df687a2ec921c75ff94ddbdae1b9a347ba0a"
+      "bytes": 10765,
+      "sha256": "8b7cdc3cfddb36d3c9163ad865a6ceec63e739557aa495efc941f9be36f2339f"
     },
     {
       "path": "plugins/krylo/tests/maintenance/dependencies.test.mjs",
