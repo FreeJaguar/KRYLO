@@ -8,6 +8,7 @@ Status legend: `locally passed` (executed and verified in this environment), `st
 
 - **Pinned minimum-supported Claude Code floor**: `2.1.318`, raised from `2.1.223` by `docs/adr/0042-claude-host-reverified-on-2-1-318.md`. **Claude Code CLI installed in this environment**: `2.1.318`, the same build, so every live result in that ADR was obtained on the floor itself. Status: `locally passed` for the native-ask matrix (seven cases plus a negative control), the skill-hook lifetime probe, and the `onFailure` failure-behavior probes; `GitHub-hosted CI pending` for the re-pinned `validate-plugin.yml` and `release.yml` install steps.
 - Not established: a live interactive auto-mode session showing the native prompt to a present human (headless mode reports `ask` and `deny` alike as a denial).
+- Scope of the native-ask result: every case ran with the hook's `cwd` at the project root. A `cwd` elsewhere made the released gate miss the active run (verified live); the fix is `docs/adr/0043-session-keyed-run-resolution.md`, a separate change that must land for the result to hold in general.
 
 ## Update 2026-09-10 (final, pre-release) — this section supersedes every status section below
 
