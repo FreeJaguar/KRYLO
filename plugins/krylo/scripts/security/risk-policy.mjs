@@ -571,16 +571,39 @@ function touchesPluginInstallation({ toolName, toolInput, cwd, pluginRoot }) {
 // fell through to the unconditional final `pass` any genuinely unrecognized
 // tool name reaches -- a real, reproduced .env read/write/exfiltration
 // bypass, not a hypothetical gap.
+//
+// Headers are read the way Codex reads them, not by a column-0 regex:
+// codex-rs/apply-patch/src/streaming_parser.rs (rust-v0.167.2) splits on
+// line breaks, TRIMS each line, and then matches the exact prefixes below,
+// even on lines inside an Update hunk -- so an indented `*** Update File:
+// .env` is a real header to Codex. Reading only column-0 headers let a
+// benign header vouch for a patch that also edited .env (a parser
+// differential found by an automated security review). Rust's trim()
+// removes Unicode White_Space, which differs from JavaScript's trim() (it
+// includes U+0085, JS does not); trimming the union can only reveal more
+// headers, never hide one. A line that LOOKS like a header but does not
+// match an exact prefix (case, spacing) is reported as ambiguous, and the
+// caller denies -- KRYLO never guesses what Codex will make of it.
+const APPLY_PATCH_HEADER_PREFIXES = ['*** Add File: ', '*** Delete File: ', '*** Update File: ', '*** Move to: '];
+const APPLY_PATCH_TRIM_RE = /^[\s\u0085]+|[\s\u0085]+$/g;
+const APPLY_PATCH_HEADER_LOOKALIKE_RE = /^\*+\s*(?:add|delete|update)\s*file\s*:|^\*+\s*move\s*to\s*:/i;
+
 function extractApplyPatchTargets(patchText) {
-  if (typeof patchText !== 'string') return [];
+  if (typeof patchText !== 'string') return { targets: [], ambiguous: false };
   const targets = [];
-  const headerRe = /^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)$/gm;
-  let match;
-  while ((match = headerRe.exec(patchText)) !== null) {
-    const target = match[1].trim();
-    if (target !== '') targets.push(target);
+  let ambiguous = false;
+  for (const rawLine of patchText.split('\n')) {
+    const line = rawLine.replace(APPLY_PATCH_TRIM_RE, '');
+    const prefix = APPLY_PATCH_HEADER_PREFIXES.find((p) => line.startsWith(p));
+    if (prefix) {
+      const target = line.slice(prefix.length).replace(APPLY_PATCH_TRIM_RE, '');
+      if (target !== '') targets.push(target);
+      else ambiguous = true;
+    } else if (APPLY_PATCH_HEADER_LOOKALIKE_RE.test(line)) {
+      ambiguous = true;
+    }
   }
-  return targets;
+  return { targets, ambiguous };
 }
 
 function loadPolicy() {
@@ -1527,7 +1550,14 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
     // `command` can never mask a dangerous `patch` or the reverse.
     const patchTexts = [input.command, input.patch].filter((v) => typeof v === 'string');
     const patchText = patchTexts.join('\n');
-    const targets = extractApplyPatchTargets(patchText);
+    const { targets, ambiguous } = extractApplyPatchTargets(patchText);
+    if (ambiguous) {
+      return {
+        action: 'deny',
+        category: 'apply-patch-ambiguous',
+        reason: 'KRYLO found a line in this apply_patch call that resembles a file header but does not match the exact header form, so it cannot be sure which files Codex would change. Denied as a fail-safe; use the exact "*** Update File: <path>" form.',
+      };
+    }
     // A real apply_patch call always specifies at least one target file via
     // its own required header syntax -- zero extractable targets means the
     // patch content was not recognized (malformed, unexpected shape, or a

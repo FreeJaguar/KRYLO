@@ -1550,3 +1550,43 @@ test('shared risk policy: apply_patch reads the real Codex shape (command) and n
   assert.equal(classifyRiskAction({ toolName: 'apply_patch', toolInput: { command: benign, patch: secret }, cwd, dataRoot }).action, 'deny');
   assert.equal(classifyRiskAction({ toolName: 'apply_patch', toolInput: { command: secret, patch: benign }, cwd, dataRoot }).action, 'deny');
 });
+
+// Parser differential (automated security review of ADR-0044): Codex trims
+// every patch line before matching a header (codex-rs/apply-patch/src/
+// streaming_parser.rs, `let trimmed = line.trim()` then
+// `trimmed.strip_prefix(UPDATE_FILE_MARKER)` etc., rust-v0.167.2), so an
+// indented header is a real header to Codex. Extracting only column-0
+// headers let a benign header vouch for a patch that also edits .env.
+test('shared risk policy: apply_patch headers are read the way Codex reads them (trimmed), and look-alikes fail closed', () => {
+  const dataRoot = path.join(os.tmpdir(), 'krylo-apply-patch-diff-data');
+  const cwd = path.join(os.tmpdir(), 'krylo-apply-patch-diff-project');
+  const classify = (command) => classifyRiskAction({ toolName: 'apply_patch', toolInput: { command }, cwd, dataRoot });
+  const benignThen = (secondHeader) => `*** Begin Patch\n*** Add File: notes.md\n+hello\n${secondHeader}\n@@\n-A=1\n+A=2\n*** End Patch\n`;
+  for (const [label, header] of [
+    ['leading spaces', '   *** Update File: .env'],
+    ['leading tab', '\t*** Update File: .env'],
+    ['leading NEL (U+0085, trimmed by Rust, not by JS trim)', '\u0085*** Update File: .env'],
+    ['leading no-break space', ' *** Update File: .env'],
+    ['CRLF line ending', '*** Update File: .env\r'],
+  ]) {
+    assert.equal(classify(benignThen(header)).action, 'deny', `${label}: a hidden .env header must be seen`);
+  }
+  for (const [label, header] of [
+    ['different case', '*** update file: notes2.md'],
+    ['missing space after stars', '***Update File: notes2.md'],
+  ]) {
+    const r = classify(benignThen(header));
+    assert.equal(r.action, 'deny', `${label}: a header-like line the strict reader does not take must fail closed`);
+  }
+  // Codex keeps the path after the exact prefix verbatim (PathBuf::from(path)),
+  // so a double space is a real header for a name with a leading space, and
+  // Windows drops trailing spaces when opening a file. KRYLO classifies the
+  // trimmed name: the conservative direction for both.
+  for (const header of ['*** Update File:  .env', '*** Update File: .env  ']) {
+    assert.equal(classify(benignThen(header)).action, 'deny', `${JSON.stringify(header)} must be denied`);
+  }
+  const moveInHunk = '*** Begin Patch\n*** Update File: notes.md\n  *** Move to: .env\n@@\n-a\n+b\n*** End Patch\n';
+  assert.equal(classify(moveInHunk).action, 'deny', 'an indented Move to into .env must be seen');
+  const contentLine = '*** Begin Patch\n*** Add File: docs/patch-format.md\n+*** Update File: example.txt\n*** End Patch\n';
+  assert.equal(classify(contentLine).action, 'pass', 'a + content line that merely mentions a header is file content, not a header');
+});

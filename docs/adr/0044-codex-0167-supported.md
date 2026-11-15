@@ -49,6 +49,17 @@ The method follows ADR-0035, ADR-0037 and ADR-0038:
 
 This failed closed, so nothing unsafe got through. But a KRYLO run on the Codex host could not edit files at all. The test fixture used `{ patch }`, a shape no Codex build sends, so the test asserting "not a blanket apply_patch deny" passed while the real behavior was exactly that. ADR-0037 exercised only shell commands.
 
+## Finding: reading the real field exposed a parser differential, closed before merge
+
+Once `command` was read, an automated security review found that KRYLO extracted headers only at column 0. Codex's parser (`codex-rs/apply-patch/src/streaming_parser.rs`, `rust-v0.167.2`) trims every line before matching the exact header prefixes, even on lines inside an Update hunk. A patch could therefore pair a benign `*** Add File: notes.md` with an indented `   *** Update File: .env`. KRYLO saw only the benign target and passed the patch, while Codex edited `.env`. A unit test reproduced the bypass on the first revision of this change.
+
+The extractor now reads headers as Codex does:
+- It splits on line breaks and trims every line with the union of Rust's and JavaScript's whitespace sets. Rust's set includes U+0085, JavaScript's does not; over-trimming can only reveal more headers.
+- It matches the exact prefixes.
+- It classifies the trimmed path. Codex keeps the path after the prefix verbatim, and Windows drops trailing spaces when opening a file, so the trimmed name is the conservative one to check.
+
+Any line that looks like a header but is not in the exact form (other case, missing spaces) is denied as `apply-patch-ambiguous` rather than guessed at. A benign `apply_patch` edit was re-verified live on `0.167.2` after this change, and the `.env` edit was denied.
+
 ## Finding: the runtime gate verifies the binary PATH resolves, not the one running the session
 
 In the first sessions a different Codex installation (`0.154.0`, supported) came first on PATH. The gate admitted an active run while the session itself ran on the then-unreviewed `0.167.2`. With `0.167.2` first on PATH, the gate refused it as it should. Hooks do inherit the session's PATH; the gap is per-binary identity when more than one installation exists. ADR-0038 already disclosed it, and it was observed live here.
@@ -58,7 +69,7 @@ Codex records the running binary's version as `cli_version` in the first (`sessi
 ## Decision
 
 1. `0.167.2` is added to `supported`, with the evidence and the residuals below in its own `evidence` and `notes` fields. `0.120.0` and `0.154.0` are unchanged; `blocked` stays empty.
-2. `risk-policy.mjs` classifies `apply_patch` from `tool_input.command`, still accepting `tool_input.patch`. When both are present, both are classified, so neither can mask the other. The fixtures in `tests/hooks/risk-gate-codex.test.mjs` now use the real shape, and `tests/unit/risk-policy.test.mjs` pins the masking rule.
+2. `risk-policy.mjs` classifies `apply_patch` from `tool_input.command`, still accepting `tool_input.patch`. When both are present, both are classified, so neither can mask the other. Headers are extracted the way Codex parses them, and header look-alikes fail closed. The fixtures in `tests/hooks/risk-gate-codex.test.mjs` now use the real shape, and `tests/unit/risk-policy.test.mjs` pins the masking rule and the parser differential.
 
 ## Residuals this approval accepts
 
