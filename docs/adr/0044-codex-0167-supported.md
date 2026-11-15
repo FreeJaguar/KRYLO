@@ -111,18 +111,12 @@ The reviewer confirmed the effect by writing through each alias with Node: the b
 
 The gap was in the shared classifier, so it was not limited to `apply_patch`. `Write` and `Edit` on the **released Claude host** classified the same alias forms as `pass`.
 
-**Fix.** A structured path field written in one of these forms is denied as `path-alias-form` before any other check runs. That covers:
-- `Write`, `Edit` and `Read` (`file_path`);
-- `NotebookEdit` (`notebook_path` and `file_path`);
-- `Glob` and `Grep` (`path`);
-- every `apply_patch` target.
+**Fix.**
 
-The rule fails closed. It denies:
-- any segment containing `~` followed by a digit;
-- any `:` other than a leading drive letter;
-- any path starting with `\\` or `//`.
-
-No ordinary project path needs these forms. Expanding them instead was rejected, because `fs.realpathSync` does not expand them reliably.
+- **Device and stream forms are denied.** A structured path field (`Write`, `Edit` and `Read` `file_path`; `NotebookEdit` paths; `Glob` and `Grep` `path`) or an `apply_patch` target is denied as `path-alias-form` if it starts with `\` or `//`, or contains any `:` other than a leading drive letter. No ordinary project path needs these forms.
+- **8.3 short names are expanded, not denied.** Short names appear in legitimate paths on many machines: a long user name yields a temp directory such as `C:UsersRUNNER~1...`. CI exposed this when the first version of this fix, which denied every `~<digit>` segment, rejected such a path. The existing part of the path is now resolved with `fs.realpathSync.native`, which returns the long name. Plain `fs.realpathSync`, which the checks used before, does not. Every protection check then runs on the expanded path, so `CODEX~1hooks.json` is denied as `.codexhooks.json`.
+- **Unexpandable short names are denied.** A short-name segment in a part of the path that does not exist yet cannot be expanded, so it is denied.
+- **Tests.** They query a real directory's short name from Windows, and skip explicitly where 8.3 names are disabled.
 
 **Residuals.**
 - Shell commands (`Bash`, `PowerShell`) remain a best-effort text heuristic. A rule matching `~1` would block every `git diff HEAD~1`, so `cat ENV~1` is not caught by this rule.

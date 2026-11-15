@@ -601,29 +601,71 @@ const APPLY_PATCH_TRIM_CODES = new Set([
 // `.codex`, `ENV~1` for `.env`), NTFS stream syntax (`.codex::$INDEX_ALLOCATION`,
 // `file:stream`) and UNC/device/volume prefixes (`\\localhost\C$\...`,
 // `\\?\...`, `\\?\Volume{...}`). Found by a path-equivalence review of
-// ADR-0044 by writing through each alias. No ordinary project path needs
-// these forms, so a structured path field using one is denied rather than
-// resolved: `fs.realpathSync` does not expand them reliably.
-function isWindowsPathAliasForm(rawPath) {
+// ADR-0044 by writing through each alias.
+//
+// Device/UNC prefixes and stream syntax have no use in an ordinary project
+// path and are denied outright. An 8.3 short name, by contrast, appears in
+// legitimate paths on many machines (a long user name gives a temp
+// directory like C:\Users\RUNNER~1\..., which is how CI exposed the first,
+// deny-everything version of this rule). It is therefore EXPANDED with
+// fs.realpathSync.native, which, unlike fs.realpathSync, returns the long
+// name, and every protection check then runs on the expanded path. A
+// short-name segment in a part of the path that does not exist yet cannot be
+// expanded and is denied.
+const SHORT_NAME_SEGMENT_RE = /(^|[\\/])[^\\/]*~\d/;
+
+const PATH_ALIAS_FORM_DENY = Object.freeze({
+  action: 'deny',
+  category: 'path-alias-form',
+  reason: 'This path uses a Windows alias form that can name a protected file under another spelling (a \\\\ UNC/device prefix, NTFS stream syntax with ":", or an 8.3 short name such as NAME~1 that could not be resolved to a real name). Denied as a fail-safe; use the plain, full path.',
+});
+
+function isWindowsDeviceOrStreamForm(rawPath) {
   if (typeof rawPath !== 'string' || rawPath === '') return false;
   const p = stripSurroundingQuotes(rawPath);
   if (/^[\\/]{2}/.test(p)) return true;
-  if (p.replace(/^[A-Za-z]:/, '').includes(':')) return true;
-  return /(^|[\\/])[^\\/]*~\d/.test(p);
+  return p.replace(/^[A-Za-z]:/, '').includes(':');
+}
+
+// { ok: true, path } with any 8.3 short-name segment expanded to its long
+// name (an absolute path when an expansion happened, the input unchanged
+// otherwise), or { ok: false } when the path is a device/stream form or a
+// short-name segment cannot be expanded. Never throws.
+function canonicalizeAliasPath(rawPath, cwd) {
+  if (typeof rawPath !== 'string' || rawPath === '') return { ok: true, path: rawPath };
+  if (isWindowsDeviceOrStreamForm(rawPath)) return { ok: false };
+  const p = stripSurroundingQuotes(rawPath);
+  if (!SHORT_NAME_SEGMENT_RE.test(p)) return { ok: true, path: rawPath };
+  try {
+    let existing = path.resolve(cwd || process.cwd(), p);
+    const missing = [];
+    while (!fs.existsSync(existing)) {
+      const parent = path.dirname(existing);
+      if (parent === existing) return { ok: false };
+      missing.unshift(path.basename(existing));
+      existing = parent;
+    }
+    if (missing.some((segment) => /~\d/.test(segment))) return { ok: false };
+    const expanded = path.join(fs.realpathSync.native(existing), ...missing);
+    if (SHORT_NAME_SEGMENT_RE.test(expanded)) return { ok: false };
+    return { ok: true, path: expanded };
+  } catch {
+    return { ok: false };
+  }
 }
 
 // The structured path fields of the tools the classifier knows.
-function structuredPathFields(name, input) {
+function structuredPathFieldNames(name) {
   switch (name) {
     case 'Write':
     case 'Edit':
     case 'Read':
-      return [input.file_path];
+      return ['file_path'];
     case 'NotebookEdit':
-      return [input.notebook_path, input.file_path];
+      return ['notebook_path', 'file_path'];
     case 'Glob':
     case 'Grep':
-      return [input.path];
+      return ['path'];
     default:
       return [];
   }
@@ -690,7 +732,7 @@ function extractApplyPatchTargets(patchText) {
         || trimPatchLine(target) !== target
         || APPLY_PATCH_TARGET_FORBIDDEN_RE.test(target)
         || rawLine.includes(String.fromCharCode(BYTE_ORDER_MARK))
-        || isWindowsPathAliasForm(target)
+        || isWindowsDeviceOrStreamForm(target)
       ) {
         ambiguous = true;
       } else {
@@ -1527,7 +1569,7 @@ function commandTouchesSensitivePath(policy, command) {
  */
 export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginRoot } = {}) {
   const name = String(toolName ?? '');
-  const input = toolInput && typeof toolInput === 'object' ? toolInput : {};
+  let input = toolInput && typeof toolInput === 'object' ? toolInput : {};
   const resolvedDataRoot = typeof dataRoot === 'string' && dataRoot.trim() !== '' ? dataRoot : getDataRoot();
   const policy = loadPolicy();
 
@@ -1546,12 +1588,13 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
     return { action: 'deny', category: 'oversized-command', reason: OVERSIZED_COMMAND_REASON };
   }
 
-  if (structuredPathFields(name, input).some(isWindowsPathAliasForm)) {
-    return {
-      action: 'deny',
-      category: 'path-alias-form',
-      reason: 'This path uses a Windows alias form (an 8.3 short name such as NAME~1, NTFS stream syntax with ":", or a \\\\ UNC/device prefix) that can name a protected file under another spelling. Denied as a fail-safe; use the plain path.',
-    };
+  // Structured path fields: device/stream forms are denied, and 8.3 short
+  // names are expanded so every check below sees the real file's name.
+  for (const field of structuredPathFieldNames(name)) {
+    if (typeof input[field] !== 'string') continue;
+    const canonical = canonicalizeAliasPath(input[field], cwd);
+    if (!canonical.ok) return PATH_ALIAS_FORM_DENY;
+    if (canonical.path !== input[field]) input = { ...input, [field]: canonical.path };
   }
 
   if (touchesDataRoot({ toolName: name, toolInput: input, cwd, dataRoot: resolvedDataRoot })) {
@@ -1704,7 +1747,10 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
         reason: 'KRYLO could not determine which file(s) this apply_patch call targets, so it cannot verify the action is safe. Denied as a fail-safe.',
       };
     }
-    for (const target of targets) {
+    for (const rawTarget of targets) {
+      const canonical = canonicalizeAliasPath(rawTarget, cwd);
+      if (!canonical.ok) return PATH_ALIAS_FORM_DENY;
+      const target = canonical.path;
       const syntheticInput = { file_path: target };
       if (touchesDataRoot({ toolName: name, toolInput: syntheticInput, cwd, dataRoot: resolvedDataRoot })) {
         return { action: 'deny', category: 'data-root-protection', reason: DATA_ROOT_REASON };

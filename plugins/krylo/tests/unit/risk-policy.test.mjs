@@ -9,6 +9,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync as spawnSyncForShortName } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 import { classifyRiskAction } from '../../scripts/security/risk-policy.mjs';
@@ -1747,5 +1748,68 @@ test('shared risk policy: ordinary paths are not mistaken for Windows alias form
   const ctx = { cwd: path.join(root, 'proj'), dataRoot: path.join(root, 'krylo-data-root'), pluginRoot: path.join(root, 'plugin') };
   for (const p of [String.raw`C:\work\notes.md`, 'C:/work/notes.md', 'src/index.js', String.raw`docs\guide.md`, '/home/user/notes.md', 'notes~draft.md']) {
     assert.equal(classifyRiskAction({ toolName: 'Write', toolInput: { file_path: p, content: 'x' }, ...ctx }).action, 'pass', `${JSON.stringify(p)} must stay allowed`);
+  }
+});
+
+// 8.3 short names on real directories: the bypass (an existing protected
+// directory reached through its short name) must be denied by the same check
+// as the long name, and a legitimate path under a short-name ancestor (CI's
+// C:\Users\RUNNER~1\... temp directory) must be allowed and checked on its
+// long form. The short name is asked of Windows itself; where 8.3 generation
+// is disabled on the volume the case is skipped, never silently passed.
+function windowsShortPath(longPath) {
+  if (process.platform !== 'win32') return null;
+  // windowsVerbatimArguments: cmd.exe must receive the quoted command line
+  // as written; Node's default argument quoting mangles the inner quotes.
+  const r = spawnSyncForShortName('cmd.exe', ['/d', '/s', '/c', `"for %I in ("${longPath}") do @echo %~sI"`], { encoding: 'utf8', windowsVerbatimArguments: true });
+  const out = String(r.stdout || '').trim();
+  return out && out.toLowerCase() !== longPath.toLowerCase() ? out : null;
+}
+
+test('shared risk policy: an existing protected directory reached through its 8.3 short name is denied like its long name', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-shortname-'));
+  try {
+    const proj = path.join(root, 'proj');
+    fs.mkdirSync(path.join(proj, '.codex'), { recursive: true });
+    fs.mkdirSync(path.join(proj, '.claude'), { recursive: true });
+    const codexShort = windowsShortPath(path.join(proj, '.codex'));
+    const claudeShort = windowsShortPath(path.join(proj, '.claude'));
+    if (!codexShort || !claudeShort) {
+      t.skip('8.3 short names are not available on this volume');
+      return;
+    }
+    const ctx = { cwd: proj, dataRoot: path.join(root, 'data'), pluginRoot: path.join(root, 'plugin') };
+    for (const [toolName, toolInput] of [
+      ['Write', { file_path: path.join(codexShort, 'hooks.json'), content: '{}' }],
+      ['Write', { file_path: path.join(claudeShort, 'settings.json'), content: '{}' }],
+      ['apply_patch', { command: `*** Begin Patch\n*** Add File: ${path.join(path.basename(codexShort), 'hooks.json')}\n+{}\n*** End Patch\n` }],
+    ]) {
+      const r = classifyRiskAction({ toolName, toolInput, ...ctx });
+      assert.equal(r.action, 'deny', `${toolName} ${JSON.stringify(toolInput)} must be denied`);
+      assert.equal(r.category, 'security-config-protection', 'the expanded path must reach the real protection check');
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('shared risk policy: a legitimate path under an existing 8.3 short-name ancestor is allowed and checked on its long form', (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-shortname-ok-'));
+  try {
+    const longDir = path.join(root, 'a-long-directory-name');
+    fs.mkdirSync(longDir, { recursive: true });
+    const shortDir = windowsShortPath(longDir);
+    if (!shortDir) {
+      t.skip('8.3 short names are not available on this volume');
+      return;
+    }
+    const ctx = { cwd: root, dataRoot: path.join(root, 'data'), pluginRoot: path.join(root, 'plugin') };
+    assert.equal(classifyRiskAction({ toolName: 'Write', toolInput: { file_path: path.join(shortDir, 'notes.md'), content: 'x' }, ...ctx }).action, 'pass');
+    const dataRoot = path.join(longDir, 'krylo-data');
+    fs.mkdirSync(dataRoot);
+    const r = classifyRiskAction({ toolName: 'Write', toolInput: { file_path: path.join(shortDir, 'krylo-data', 'state.json'), content: 'x' }, cwd: root, dataRoot });
+    assert.equal(r.category, 'data-root-protection', 'a short-name spelling of the data root must be recognized as the data root');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });
