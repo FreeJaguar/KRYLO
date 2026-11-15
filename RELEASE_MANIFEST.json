@@ -136,8 +136,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 52042,
-      "sha256": "e0e13d893891b666053a5d0b10e735155b9ce21ac4e85133eb1c0b021e891b79"
+      "bytes": 52105,
+      "sha256": "379f9dec2e1dd072a580418822f7d7689a0e8f9fcfa63fe59b3c65b1be6d1241"
     },
     {
       "path": "CLAUDE.md",
@@ -736,8 +736,8 @@
     },
     {
       "path": "docs/adr/0044-codex-0167-supported.md",
-      "bytes": 12186,
-      "sha256": "0f9fff21e29ca8abd54fc92f0737c0c8730454ba9b3da8649c76c460673e3b23"
+      "bytes": 12409,
+      "sha256": "8d570ba9ab9979701f340e06fbc2552abd4a52c3160b4461b2ec79886d044b1b"
     },
     {
       "path": "docs/adr/README.md",
@@ -751,8 +751,8 @@
     },
     {
       "path": "docs/codex-capability-matrix.md",
-      "bytes": 42698,
-      "sha256": "1f91df342cb6911b0623a3a491394395811e8722aa3d235cb44bdddc7af07d7a"
+      "bytes": 43223,
+      "sha256": "33180ac4e8ef4fe0f4a47d435e57371c29e85190993b80dcde166b6019cd23e2"
     },
     {
       "path": "docs/external-adapter-audit-2026-07-27.md",
@@ -1476,8 +1476,8 @@
     },
     {
       "path": "plugins/krylo/scripts/security/risk-policy.mjs",
-      "bytes": 91753,
-      "sha256": "a4ddb80e498dd687d117cc522ca48bf8ad0c102fec1db5747128d9d93d3cdb54"
+      "bytes": 91832,
+      "sha256": "ae993c72bd94b52a273496e49ca23e95c040f49df64412fb9f621afb49be37bd"
     },
     {
       "path": "plugins/krylo/scripts/security/session-start-codex.mjs",
