@@ -222,11 +222,18 @@ for (const [command, label] of REQUIRE_APPROVAL_COMMANDS) {
 // extracting every `*** Add|Update|Delete File:`/`*** Move to:` target from
 // the patch text and running each through the same hard-deny/sensitive-path
 // checks Write/Edit/NotebookEdit already get.
+//
+// The payload shape is the one Codex actually sends: `tool_input: { command:
+// <raw patch text> }` (codex-rs/core/src/tools/handlers/apply_patch.rs,
+// `pre_tool_use_payload`, identical at rust-v0.154.0 and rust-v0.167.2).
+// This fixture used `{ patch }`, a shape no Codex build sends, so the
+// "not a blanket deny" test below passed while every real apply_patch call
+// was denied as unparseable -- found live on 0.167.2.
 function applyPatchPayload(cwd, patch) {
   return {
     hook_event_name: 'PreToolUse',
     tool_name: 'apply_patch',
-    tool_input: { patch },
+    tool_input: { command: patch },
     cwd,
     session_id: 'codex-hook-session',
     permission_mode: 'default',

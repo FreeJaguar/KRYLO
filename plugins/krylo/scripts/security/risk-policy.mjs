@@ -1517,7 +1517,16 @@ export function classifyRiskAction({ toolName, toolInput, cwd, dataRoot, pluginR
   }
 
   if (name === 'apply_patch') {
-    const patchText = typeof input.patch === 'string' ? input.patch : '';
+    // Codex sends the raw patch as `tool_input.command`
+    // (codex-rs/core/src/tools/handlers/apply_patch.rs, pre_tool_use_payload,
+    // identical at rust-v0.154.0 and rust-v0.167.2). This read only `patch`,
+    // a field no Codex build sends, so every real apply_patch call was
+    // denied below as unparseable -- fail-closed, but it left the Codex host
+    // unable to edit files at all. `patch` is still accepted for any caller
+    // that uses it; when both are present, each is classified, so a benign
+    // `command` can never mask a dangerous `patch` or the reverse.
+    const patchTexts = [input.command, input.patch].filter((v) => typeof v === 'string');
+    const patchText = patchTexts.join('\n');
     const targets = extractApplyPatchTargets(patchText);
     // A real apply_patch call always specifies at least one target file via
     // its own required header syntax -- zero extractable targets means the

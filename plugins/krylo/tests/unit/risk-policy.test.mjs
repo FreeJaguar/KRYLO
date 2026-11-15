@@ -1535,3 +1535,18 @@ test('module source never reads a CLAUDE_-prefixed environment variable', () => 
   assert.doesNotMatch(source, /process\.env\.CLAUDE_/);
   assert.doesNotMatch(source, /env\[.CLAUDE_/);
 });
+
+// Codex sends apply_patch as `tool_input.command` (rust-v0.154.0 and
+// rust-v0.167.2); the classifier used to read only `patch` and denied every
+// real call as unparseable. Both fields are classified, so neither can mask
+// the other.
+test('shared risk policy: apply_patch reads the real Codex shape (command) and never lets one field mask the other', () => {
+  const dataRoot = path.join(os.tmpdir(), 'krylo-apply-patch-shape-data');
+  const benign = '*** Begin Patch\n*** Add File: notes.md\n+hello\n*** End Patch\n';
+  const secret = '*** Begin Patch\n*** Update File: .env\n@@\n-A=1\n+A=2\n*** End Patch\n';
+  const cwd = path.join(os.tmpdir(), 'krylo-apply-patch-shape-project');
+  assert.equal(classifyRiskAction({ toolName: 'apply_patch', toolInput: { command: benign }, cwd, dataRoot }).action, 'pass');
+  assert.equal(classifyRiskAction({ toolName: 'apply_patch', toolInput: { command: secret }, cwd, dataRoot }).action, 'deny');
+  assert.equal(classifyRiskAction({ toolName: 'apply_patch', toolInput: { command: benign, patch: secret }, cwd, dataRoot }).action, 'deny');
+  assert.equal(classifyRiskAction({ toolName: 'apply_patch', toolInput: { command: secret, patch: benign }, cwd, dataRoot }).action, 'deny');
+});
