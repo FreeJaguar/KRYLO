@@ -15,6 +15,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawnSync } from 'node:child_process';
 
 import {
   SCRIPTS_ROOT,
@@ -186,6 +187,67 @@ test('risk-gate-codex: a session with no KRYLO pointer stays a silent allow, eve
     const res = runHookCodexOnly('security/risk-gate-codex.mjs', codexPayload(dataDir, 'unrelated-codex-session'), dataDir, { env: faultEnv(dataDir, statePath, 'EBUSY') });
     assert.equal(res.status, 0);
     assert.equal(res.stdout, '', 'an ungoverned session must never be intercepted');
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+// ------------------------------------------- unreadable-payload fail-safe
+
+// Unparseable stdin: the gates cannot classify anything and fall back to the
+// process cwd plus the host's session environment variable to find a run to
+// deny under. An indeterminate run must be denied there too.
+function spawnGateWithGarbage(script, dataDir, env) {
+  const res = spawnSync(process.execPath, [path.join(SCRIPTS_ROOT, script)], { encoding: 'utf8', input: 'not valid json {{{', cwd: dataDir, env });
+  let json = null;
+  try { json = JSON.parse(res.stdout.trim()); } catch { json = null; }
+  return { status: res.status, stdout: res.stdout, json };
+}
+
+function claudeGarbageEnv(dataDir, extra) {
+  const env = { ...process.env, CLAUDE_PLUGIN_DATA: dataDir, KRYLO_DATA_ROOT: dataDir, KRYLO_LOCAL_TELEMETRY: 'true', ...extra };
+  if (!('CLAUDE_SESSION_ID' in extra)) delete env.CLAUDE_SESSION_ID;
+  return env;
+}
+
+test('risk-gate (Claude) fail-safe path: unparseable stdin with an unreadable run state denies for that reason', () => {
+  const dataDir = mkTempDataDir('krylo-unreadable-claude-garbage-');
+  try {
+    const { statePath } = createActiveRun(dataDir);
+    const res = spawnGateWithGarbage('security/risk-gate.mjs', dataDir, claudeGarbageEnv(dataDir, { CLAUDE_SESSION_ID: 'hook-session', ...faultEnv(dataDir, statePath, 'EBUSY') }));
+    assert.equal(res.status, 0);
+    assert.ok(faultsFired(dataDir) > 0, 'the injected fault must actually have fired');
+    assert.equal(decision(res), 'deny', `expected a fail-safe deny, got: ${res.stdout}`);
+    assert.match(reason(res), UNREADABLE_REASON);
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate (Claude) fail-safe path: with no session id at all, the unreadable state of the newest pointer still denies (ADR-0020 fallback)', () => {
+  const dataDir = mkTempDataDir('krylo-unreadable-claude-garbage-nosession-');
+  try {
+    const { statePath } = createActiveRun(dataDir);
+    const res = spawnGateWithGarbage('security/risk-gate.mjs', dataDir, claudeGarbageEnv(dataDir, faultEnv(dataDir, statePath, 'EBUSY')));
+    assert.ok(faultsFired(dataDir) > 0, 'the injected fault must actually have fired');
+    assert.equal(decision(res), 'deny', `expected a fail-safe deny, got: ${res.stdout}`);
+    assert.match(reason(res), UNREADABLE_REASON);
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
+test('risk-gate-codex fail-safe path: unparseable stdin with an unreadable run state denies for that reason', () => {
+  const dataDir = mkTempDataDir('krylo-unreadable-codex-garbage-');
+  try {
+    const { statePath } = createActiveRunCodexOnly(dataDir);
+    const env = { ...process.env, PLUGIN_DATA: dataDir, PLUGIN_ROOT: dataDir, KRYLO_HOST: 'codex', KRYLO_LOCAL_TELEMETRY: 'true', CODEX_THREAD_ID: 'codex-hook-session', ...faultEnv(dataDir, statePath, 'EBUSY') };
+    for (const key of ['KRYLO_DATA_ROOT', 'CLAUDE_PLUGIN_DATA', 'CLAUDE_PLUGIN_ROOT', 'CLAUDE_SESSION_ID']) delete env[key];
+    const res = spawnGateWithGarbage('security/risk-gate-codex.mjs', dataDir, env);
+    assert.equal(res.status, 0);
+    assert.ok(faultsFired(dataDir) > 0, 'the injected fault must actually have fired');
+    assert.equal(decision(res), 'deny', `expected a fail-safe deny, got: ${res.stdout}`);
+    assert.match(reason(res), UNREADABLE_REASON);
   } finally {
     cleanup(dataDir);
   }

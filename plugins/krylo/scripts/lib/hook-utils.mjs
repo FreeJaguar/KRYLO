@@ -62,8 +62,9 @@ export function eventName(payload) {
  * is ungoverned, and treating it as such switched every gate off mid-run.
  */
 //
-// `indeterminate: true` (with active: false) means this session has a
-// pointer, or the state it names, that exists but could not be read
+// `indeterminate: true` (with active: false) means this session's own
+// pointer, or the state behind the pointer this lookup picked (with no
+// session id, the newest one per ADR-0020), exists but could not be read
 // (docs/adr/0045-transient-state-io-retry.md): the session may be governed,
 // so it is not the same as "no run". The risk gates deny on it; every other
 // hook keeps its inactive-run behavior, because none of them is a security
