@@ -25,12 +25,18 @@ const TRANSIENT_FS_CODES = new Set(['EPERM', 'EBUSY']);
 // (ADR-0045): a contended rename that eventually succeeded needed a median
 // of ~40ms, a p99 of ~160ms and at most 204ms, and the old fixed budget (5
 // attempts x 20ms, 113-151ms of wall clock in practice) gave up on that
-// tail, losing the write. 1000ms is about five times the slowest measured
-// success. It is also spent while HOLDING the run lock, so it is kept well
-// below what the lock and the hook can absorb: lock.mjs's 600 x 10ms budget
-// is about 10s of wall clock on Windows (each 10ms pause measures ~16.6ms),
-// and a hook's worst case is that lock wait plus its own hold (this budget
-// plus two bounded reads) inside the 15s PostToolUse/SubagentStart timeout.
+// tail, losing the write. An independent re-run with every fs error traced
+// saw a longer tail: from first to last EPERM within one hook, p99 384ms and
+// at most 597ms. So 1000ms leaves well under 2x headroom over the slowest
+// rename seen, not a wide margin.
+//
+// The budget is spent while HOLDING the run lock, so it cannot grow freely.
+// A state mutation holds the lock for up to three bounded operations
+// (loadState's read, saveState's pre-read, this rename: ~1.5s); a terminal
+// transition adds clearActiveRunPointer()'s pointer read (~1.75s), but runs
+// only from update-state.mjs and the 60s Stop gates. lock.mjs's budget is
+// ~10.8s of wall clock on Windows, so a 15s PostToolUse/SubagentStart hook's
+// worst case (startup, lock-free lookup, lock wait, hold) is roughly 13s.
 //
 // On POSIX, rename(2) replaces an open target, so this retry is normally
 // never exercised there; an EPERM/EBUSY that does occur there (a permission

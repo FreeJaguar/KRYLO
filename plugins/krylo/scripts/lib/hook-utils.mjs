@@ -61,12 +61,39 @@ export function eventName(payload) {
  * A path miss for a named session is therefore never proof that the session
  * is ungoverned, and treating it as such switched every gate off mid-run.
  */
+//
+// `indeterminate: true` (with active: false) means this session has a
+// pointer, or the state it names, that exists but could not be read
+// (docs/adr/0045-transient-state-io-retry.md): the session may be governed,
+// so it is not the same as "no run". The risk gates deny on it; every other
+// hook keeps its inactive-run behavior, because none of them is a security
+// boundary (telemetry, status, Stop and question gates fail open by design).
 export function resolveActiveRun({ projectRoot, host, hostSessionId } = {}) {
   try {
     if (!host) return { active: false };
     const found = locateActiveRunPointer({ projectRoot, host, hostSessionId, requireActive: true });
-    return found.ok && found.state ? { active: true, state: found.state } : { active: false };
+    if (found.ok && found.state) return { active: true, state: found.state };
+    if (found.indeterminate) {
+      return {
+        active: false,
+        indeterminate: true,
+        reason: found.reason,
+        runId: found.runId ?? null,
+        transient: found.transient === true,
+        code: found.code ?? null,
+      };
+    }
+    return { active: false };
   } catch {
     return { active: false };
   }
+}
+
+/** The model-facing deny reason for an indeterminate run (see resolveActiveRun()). */
+export function indeterminateRunDenyReason(run) {
+  const what = run.reason === 'pointer-unreadable' ? "this session's KRYLO run pointer" : "this session's KRYLO run state";
+  const code = typeof run.code === 'string' && /^[A-Z]{2,12}$/.test(run.code) ? ` (${run.code})` : '';
+  return `KRYLO could not read ${what}${code}, so it cannot tell whether this action is allowed in the run, and denied it as a fail-safe. `
+    + 'This is usually another process holding the file for a moment: retry the action. '
+    + 'If it keeps happening, stop and ask the user: a human must restore read access to the file, or end KRYLO governance for this session.';
 }

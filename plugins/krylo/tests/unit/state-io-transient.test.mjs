@@ -29,6 +29,7 @@ import {
   writeActiveRunPointer,
   pruneStaleActiveRunPointers,
   computeProjectRootHash,
+  locateActiveRunPointer,
 } from '../../scripts/lib/state.mjs';
 
 function mkTempDir() {
@@ -278,6 +279,205 @@ test('pruning still removes the pointer of a run that is genuinely gone', () => 
     const removed = pruneStaleActiveRunPointers(root);
     assert.equal(removed.length, 1);
     assert.ok(!fs.existsSync(pointerPath));
+  });
+});
+
+// Pruning deletes only on positive evidence that the run is over.
+
+test('pruning keeps the pointer of a live run whose state.json fails with a non-transient read error', () => {
+  withTempDataRoot((dir) => {
+    const { state, statePath } = newSavedRun(dir);
+    const { root, pointerPath } = activePointerFor(dir, state);
+    failReadsOf(statePath, 'EISDIR', Infinity);
+    const removed = pruneStaleActiveRunPointers(root);
+    mock.restoreAll();
+    assert.deepEqual(removed, []);
+    assert.ok(fs.existsSync(pointerPath), '"could not read the state" is not evidence that the run is over');
+  });
+});
+
+test('pruning keeps a pointer file that fails with a non-transient read error', () => {
+  withTempDataRoot((dir) => {
+    const { state } = newSavedRun(dir);
+    const { root, pointerPath } = activePointerFor(dir, state);
+    failReadsOf(pointerPath, 'EISDIR', Infinity);
+    const removed = pruneStaleActiveRunPointers(root);
+    mock.restoreAll();
+    assert.deepEqual(removed, []);
+    assert.ok(fs.existsSync(pointerPath));
+  });
+});
+
+test('pruning keeps the pointer of a run whose state uses a schema version this build cannot load', () => {
+  withTempDataRoot((dir) => {
+    const { state, statePath } = newSavedRun(dir);
+    const { root, pointerPath } = activePointerFor(dir, state);
+    const doc = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    fs.writeFileSync(statePath, JSON.stringify({ ...doc, schemaVersion: '99.0.0' }), 'utf8');
+    const loaded = loadState(state.runId);
+    assert.equal(loaded.ok, false);
+    assert.ok(!['corrupted', 'not-found', 'unreadable'].includes(loaded.error), `fixture must hit the unsupported-schema path, got ${loaded.error}`);
+
+    const removed = pruneStaleActiveRunPointers(root);
+    assert.deepEqual(removed, []);
+    assert.ok(fs.existsSync(pointerPath), 'a newer build may still own this run');
+  });
+});
+
+test('pruning still removes a pointer file that is not valid JSON', () => {
+  withTempDataRoot((dir) => {
+    const { state } = newSavedRun(dir);
+    const { root, pointerPath } = activePointerFor(dir, state);
+    fs.writeFileSync(pointerPath, '{ not json', 'utf8');
+    const removed = pruneStaleActiveRunPointers(root);
+    assert.equal(removed.length, 1);
+    assert.ok(!fs.existsSync(pointerPath));
+  });
+});
+
+test('pruning does not delete a pointer that was rewritten for a new run after it was judged stale', () => {
+  withTempDataRoot((dir) => {
+    const { state: oldRun, statePath: oldStatePath } = newSavedRun(dir);
+    const { root, pointerPath } = activePointerFor(dir, oldRun);
+    fs.rmSync(oldStatePath); // the run the pointer names is gone: stale
+    const { state: newRun } = newSavedRun(dir);
+    const rewritten = JSON.stringify({ runId: newRun.runId, projectRootHash: computeProjectRootHash(dir), host: 'claude', hostSessionId: 's', updatedAt: new Date().toISOString() });
+
+    // Between the first read (stale verdict) and the delete, the session
+    // starts a new run and its pointer is rewritten.
+    const real = fs.readFileSync;
+    let pointerReads = 0;
+    mock.method(fs, 'readFileSync', function (p, ...rest) {
+      if (path.resolve(String(p)) === path.resolve(pointerPath)) {
+        pointerReads++;
+        if (pointerReads === 2) fs.writeFileSync(pointerPath, rewritten, 'utf8');
+      }
+      return real.call(fs, p, ...rest);
+    });
+    const removed = pruneStaleActiveRunPointers(root);
+    mock.restoreAll();
+
+    assert.ok(pointerReads >= 2, 'the pointer must be re-read before it is deleted');
+    assert.deepEqual(removed, []);
+    assert.ok(fs.existsSync(pointerPath), 'the new run\'s pointer must survive');
+    assert.equal(JSON.parse(fs.readFileSync(pointerPath, 'utf8')).runId, newRun.runId);
+  });
+});
+
+function legacyFlatPointerFor(dir, state) {
+  const projectRootHash = computeProjectRootHash(dir);
+  const root = path.join(dir, 'active-runs');
+  const legacyPath = path.join(root, projectRootHash, 's.json');
+  fs.mkdirSync(path.dirname(legacyPath), { recursive: true });
+  fs.writeFileSync(legacyPath, JSON.stringify({ runId: state.runId, projectRootHash, sessionId: 's', updatedAt: new Date().toISOString() }), 'utf8');
+  return { root, legacyPath, migratedPath: path.join(root, projectRootHash, 'claude', 's.json') };
+}
+
+test('pruning leaves a legacy flat pointer alone while the state it names is transiently unreadable', () => {
+  withTempDataRoot((dir) => {
+    const { state, statePath } = newSavedRun(dir);
+    const { root, legacyPath, migratedPath } = legacyFlatPointerFor(dir, state);
+    failReadsOf(statePath, 'EBUSY', Infinity);
+    const removed = pruneStaleActiveRunPointers(root);
+    mock.restoreAll();
+    assert.deepEqual(removed, []);
+    assert.ok(fs.existsSync(legacyPath), 'neither deleted nor migrated on an unreadable state');
+    assert.ok(!fs.existsSync(migratedPath));
+  });
+});
+
+test('pruning leaves a legacy flat pointer alone while the state it names fails with a non-transient read error', () => {
+  withTempDataRoot((dir) => {
+    const { state, statePath } = newSavedRun(dir);
+    const { root, legacyPath } = legacyFlatPointerFor(dir, state);
+    failReadsOf(statePath, 'EISDIR', Infinity);
+    const removed = pruneStaleActiveRunPointers(root);
+    mock.restoreAll();
+    assert.deepEqual(removed, []);
+    assert.ok(fs.existsSync(legacyPath));
+  });
+});
+
+test('control: pruning still migrates a readable live legacy flat pointer into the claude host directory', () => {
+  withTempDataRoot((dir) => {
+    const { state } = newSavedRun(dir);
+    const { root, legacyPath, migratedPath } = legacyFlatPointerFor(dir, state);
+    const removed = pruneStaleActiveRunPointers(root);
+    assert.deepEqual(removed, []);
+    assert.ok(!fs.existsSync(legacyPath));
+    assert.equal(JSON.parse(fs.readFileSync(migratedPath, 'utf8')).runId, state.runId);
+  });
+});
+
+// ------------------------------------------------- run resolution (gates)
+
+test('locateActiveRunPointer reports an unreadable state as indeterminate, never as "no run"', () => {
+  withTempDataRoot((dir) => {
+    const { state, statePath } = newSavedRun(dir);
+    activePointerFor(dir, state);
+    failReadsOf(statePath, 'EBUSY', Infinity);
+    const found = locateActiveRunPointer({ projectRoot: dir, host: 'claude', hostSessionId: 's', requireActive: true });
+    mock.restoreAll();
+    assert.equal(found.ok, false);
+    assert.equal(found.error, 'run-state-unreadable');
+    assert.equal(found.indeterminate, true);
+    assert.equal(found.reason, 'state-unreadable');
+    assert.equal(found.runId, state.runId);
+    assert.equal(found.transient, true);
+  });
+});
+
+test('locateActiveRunPointer reports this session\'s unreadable pointer as indeterminate', () => {
+  withTempDataRoot((dir) => {
+    const { state } = newSavedRun(dir);
+    const { pointerPath } = activePointerFor(dir, state);
+    failReadsOf(pointerPath, 'EPERM', Infinity);
+    const found = locateActiveRunPointer({ projectRoot: dir, host: 'claude', hostSessionId: 's', requireActive: true });
+    mock.restoreAll();
+    assert.equal(found.error, 'run-state-unreadable');
+    assert.equal(found.reason, 'pointer-unreadable');
+    assert.equal(found.runId, null);
+  });
+});
+
+test('locateActiveRunPointer session scan: a hook still gates on a readable live run, a mutating CLI refuses to guess', () => {
+  withTempDataRoot((dir) => {
+    const projectA = fs.realpathSync(mkTempDir());
+    const projectB = fs.realpathSync(mkTempDir());
+    const elsewhere = fs.realpathSync(mkTempDir());
+    try {
+      const runFor = (projectDir) => {
+        const s = createInitialState({ goalText: 'x', hostIdentity: { host: 'claude', hostSessionId: 's' }, projectDir, lane: 'BUILD', risk: 'low' });
+        assert.equal(saveState(s).ok, true);
+        writeActiveRunPointer({ runId: s.runId, projectRootHash: computeProjectRootHash(projectDir), host: 'claude', hostSessionId: 's' });
+        return s;
+      };
+      const readable = runFor(projectA);
+      const unreadable = runFor(projectB);
+      failReadsOf(path.join(dir, 'runs', unreadable.runId, 'state.json'), 'EBUSY', Infinity);
+
+      const hook = locateActiveRunPointer({ projectRoot: elsewhere, host: 'claude', hostSessionId: 's', requireActive: true });
+      assert.equal(hook.ok, true);
+      assert.equal(hook.state.runId, readable.runId);
+
+      const cli = locateActiveRunPointer({ projectRoot: elsewhere, host: 'claude', hostSessionId: 's', requireActive: true, ambiguity: 'fail' });
+      assert.equal(cli.ok, false);
+      assert.equal(cli.error, 'run-state-unreadable');
+    } finally {
+      mock.restoreAll();
+      for (const d of [projectA, projectB, elsewhere]) fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+});
+
+test('control: a session with no pointer of its own is still "no run", not indeterminate', () => {
+  withTempDataRoot((dir) => {
+    const { state, statePath } = newSavedRun(dir);
+    activePointerFor(dir, state); // session 's'
+    failReadsOf(statePath, 'EBUSY', Infinity);
+    const found = locateActiveRunPointer({ projectRoot: dir, host: 'claude', hostSessionId: 'another-session', requireActive: true });
+    mock.restoreAll();
+    assert.deepEqual(found, { ok: false, error: 'not-found' });
   });
 });
 
