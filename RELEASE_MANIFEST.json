@@ -396,8 +396,8 @@
     },
     {
       "path": "docs/02-runtime-state-machine.md",
-      "bytes": 7409,
-      "sha256": "321cde0bc1613aad5c2ec26b0930d7b8b1895dde57372a3be05f21e3b60d1b57"
+      "bytes": 7455,
+      "sha256": "70d83000a888988acaaeae113a8a18d3e2927eb8a144985ff8522ec40c775147"
     },
     {
       "path": "docs/03-orbit-loop.md",
@@ -741,8 +741,8 @@
     },
     {
       "path": "docs/adr/0045-transient-state-io-retry.md",
-      "bytes": 26125,
-      "sha256": "61f934a221666356aed3496e0b041ef7b79922013528b2a4723950fd8ac29355"
+      "bytes": 26286,
+      "sha256": "9e371c51bb36f81cf991b72fdffb97efe7327ad8b897633da497eedc7760e2a3"
     },
     {
       "path": "docs/adr/README.md",
@@ -1251,8 +1251,8 @@
     },
     {
       "path": "plugins/krylo/scripts/lib/atomic.mjs",
-      "bytes": 7360,
-      "sha256": "141fef0fd355d3e36503e656f5c51781aa5441edaac07619d747282ebcb2bf3e"
+      "bytes": 7751,
+      "sha256": "3bd867ad66924b1fe67bc83791e52f92f6ed841652516d8e6a2731b5454043a7"
     },
     {
       "path": "plugins/krylo/scripts/lib/cross-harness.mjs",
@@ -1306,8 +1306,8 @@
     },
     {
       "path": "plugins/krylo/scripts/lib/state.mjs",
-      "bytes": 65878,
-      "sha256": "3d05d61f59dde82c99765a428abdf3d34181b8323058eb4c618cf14d958dbd40"
+      "bytes": 65933,
+      "sha256": "af55a20f65f7d06247277559839e06725836b4e56752f2b3ee7be13201d35dba"
     },
     {
       "path": "plugins/krylo/scripts/lib/telemetry.mjs",
@@ -1981,8 +1981,8 @@
     },
     {
       "path": "plugins/krylo/tests/unit/state-io-transient.test.mjs",
-      "bytes": 22616,
-      "sha256": "4be0405256067d91c1eb75fcf5018c940a6401314b1135a13cbaba63e54bf62e"
+      "bytes": 23414,
+      "sha256": "7771ccf0671ff2217ebf940cbc7b158d3da2839dbfa4ad8495f4f90ac38642c2"
     },
     {
       "path": "plugins/krylo/tests/unit/state-migrations.test.mjs",
