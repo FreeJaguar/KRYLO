@@ -24,7 +24,7 @@
 // for pre-tool-use, silent allow for the other three) -- see the
 // SILENT_ON_FAILURE_EVENTS comment below for why.
 //
-// krylo-hook-launcher-version: 0.3.0
+// krylo-hook-launcher-version: 0.3.1
 
 import fs from 'node:fs';
 import os from 'node:os';

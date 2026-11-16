@@ -8,7 +8,7 @@
 
 KRYLO is an autonomous, evidence-driven software-development workflow, built on one Shared Core with two first-class hosts: the Claude Code plugin, and an OpenAI Codex CLI plugin. One explicit command turns a task into a controlled run: acceptance criteria, a minimal agent team, deterministic verification, independent review, a bounded correction loop (Orbit), and an evidence-backed final report.
 
-Current release: `0.3.0` (minimum Claude Code `2.1.318`; reviewed Codex CLI `0.120.0`, `0.154.0` and `0.167.2`). Not yet submitted to any official/curated marketplace on either host; install directly from this repository (below). The Claude Code host is released; the Codex host is implemented and shipped in this repository but not yet submitted to a curated Codex marketplace. A native `codex plugin` CLI install path (`marketplace add` + `add`, confirmed on `codex-cli 0.153.4`, `0.154.0` and `0.167.2`; absent on the originally-tested `0.120.0`) is now available -- see "Codex" below.
+Current release: `0.3.1` (minimum Claude Code `2.1.318`; reviewed Codex CLI `0.120.0`, `0.154.0` and `0.167.2`). Not yet submitted to any official/curated marketplace on either host; install directly from this repository (below). The Claude Code host is released; the Codex host is implemented and shipped in this repository but not yet submitted to a curated Codex marketplace. A native `codex plugin` CLI install path (`marketplace add` + `add`, confirmed on `codex-cli 0.153.4`, `0.154.0` and `0.167.2`; absent on the originally-tested `0.120.0`) is now available -- see "Codex" below.
 
 ## Installation (Claude Code)
 
