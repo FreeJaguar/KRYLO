@@ -8,8 +8,10 @@
 // structurally, but the approval boundary itself is rewritten for Codex's
 // real, current capabilities rather than ported from Claude.
 //
-// Fail mode: fail SAFE (deny) while a run is active; silent pass-through
-// when no KRYLO run is active for this project (same inactive-run contract
+// Fail mode: fail SAFE (deny) while a run is active, and while this
+// session's own run pointer or run state exists but cannot be read
+// (ADR-0045); silent pass-through when no KRYLO run is active for this
+// project (same inactive-run contract
 // as the Claude gate, and the same one every Codex hook needs per
 // docs/process/MULTI_HOST_CODEX_MAINTENANCE_DESIGN.md Section 10.6, since
 // Codex has no Skill-scoped hook lifecycle -- these hooks fire for every
@@ -46,7 +48,7 @@
 
 import path from 'node:path';
 
-import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
+import { readStdinJson, resolveActiveRun, indeterminateRunDenyReason } from '../lib/hook-utils.mjs';
 import {
   normalizeCodexHookPayload,
   emitCodexPreToolDeny,
@@ -118,6 +120,7 @@ function failSafeOnUnreadablePayload(rawPayload) {
   if (identity) {
     const run = resolveActiveRun({ projectRoot: identity.projectRoot, host: identity.host, hostSessionId: rawSessionId ?? identity.hostSessionId });
     if (run.active) emitCodexPreToolDeny('KRYLO risk gate could not read this action and denied it as a fail-safe. Re-run with a well-formed request.');
+    if (run.indeterminate) denyIndeterminateRun(run);
   }
   if (rawSessionId) {
     const rawCwd = typeof rawPayload?.cwd === 'string' && rawPayload.cwd.trim() !== '' ? rawPayload.cwd : null;
@@ -128,6 +131,21 @@ function failSafeOnUnreadablePayload(rawPayload) {
     denyIfBootstrapFailureMarked('codex', projectRoot, rawSessionId);
   }
   allowCodexSilently();
+}
+
+// This session has a KRYLO pointer, or run state, that exists but could not
+// be read (docs/adr/0045-transient-state-io-retry.md). Whether this action
+// is allowed in the run is unknown, so deny rather than pass silently. A
+// session with no KRYLO pointer at all never reaches this.
+function denyIndeterminateRun(run) {
+  if (run.runId) {
+    try {
+      recordEvent(run.runId, { event: 'risk-gate-codex', category: 'run-state-unreadable', status: 'denied' });
+    } catch {
+      // telemetry is best-effort; the deny below is what matters
+    }
+  }
+  emitCodexPreToolDeny(indeterminateRunDenyReason(run));
 }
 
 async function main() {
@@ -142,6 +160,7 @@ async function main() {
     host: normalized.identity.host,
     hostSessionId: normalized.identity.hostSessionId,
   });
+  if (run.indeterminate) denyIndeterminateRun(run);
   if (!run.active) {
     // No active run is normally the "ordinary Codex session" case (silent
     // pass-through, by design -- see this file's header). But it is ALSO

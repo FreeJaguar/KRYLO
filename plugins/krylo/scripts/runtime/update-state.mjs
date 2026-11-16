@@ -503,7 +503,7 @@ function main() {
     // 'fail': never guess which of one session's live runs to change.
     const pointer = locateActiveRunPointer({ projectRoot: path.resolve(projectDir || process.cwd()), host: detectHost(), hostSessionId, requireActive: true, ambiguity: 'fail' });
     if (!pointer.ok || !pointer.value || !pointer.value.runId) {
-      fail(pointer.error === 'ambiguous-session-run' ? 'ambiguous-session-run' : 'no-current-run');
+      fail(pointer.error === 'ambiguous-session-run' || pointer.error === 'run-state-unreadable' ? pointer.error : 'no-current-run');
       return;
     }
     runId = pointer.value.runId;

@@ -17,7 +17,7 @@ import {
   bootstrapFailurePath,
   perProjectIndexDir,
 } from './paths.mjs';
-import { writeJsonAtomic, readJson } from './atomic.mjs';
+import { writeJsonAtomic, readJson, readFileWithRetry, isAbsentFsError } from './atomic.mjs';
 import { redactText } from './redact.mjs';
 import { HOST_NAMES } from './host-context.mjs';
 import { CURRENT_STATE_SCHEMA_VERSION, migrateStateDocument } from './state-migrations.mjs';
@@ -672,7 +672,10 @@ function preserveCorruptState(statePath, failure) {
 /**
  * Load a run's state. Never throws. Corrupted or schema-invalid state is
  * preserved as state.corrupt-<epoch>.json beside the original and reported
- * via a recovery indicator instead of being trusted.
+ * via a recovery indicator instead of being trusted. A file that cannot be
+ * read at all is reported as 'unreadable' (with `transient` set for a
+ * sharing error that outlasted the bounded retry) and is never preserved,
+ * because nothing about its contents is known (ADR-0045).
  *
  * Version-aware: a real prior-schema document is migrated to the CURRENT
  * schema IN MEMORY ONLY and validated against the current validator. A
@@ -704,6 +707,15 @@ export function loadState(runId) {
   if (!result.ok) {
     if (result.error === 'not-found') {
       return { ok: false, error: 'not-found' };
+    }
+    if (result.error === 'busy' || result.error === 'read-error') {
+      // The file could not be READ (a sharing error that outlasted
+      // readJson's bounded retry, or another fs failure). That says nothing
+      // about its contents, so it is never recorded as corruption and never
+      // copied aside: a live run momentarily held open by another process
+      // must not be reported, or preserved, as corrupt (ADR-0045). Callers
+      // treat it like any other !ok result.
+      return { ok: false, error: 'unreadable', transient: result.error === 'busy', code: result.code ?? null };
     }
     return preserveCorruptState(statePath, result);
   }
@@ -742,8 +754,11 @@ export function loadState(runId) {
  * Migration backup safety: "no prior file exists" (a brand-new run -- there
  * is nothing to back up, and none is attempted) and "the backup write
  * itself failed" (a real I/O error -- permissions, disk full, ...) are
- * deliberately NOT the same code path. Only the read of the existing file is
- * allowed to fail silently (nothing to back up); if a prior file exists and
+ * deliberately NOT the same code path. Only an ABSENT existing file (ENOENT,
+ * or ENOTDIR for a path below a file)
+ * means "nothing to back up"; a present-but-unreadable one refuses the save
+ * with 'state-unreadable' (ADR-0045) after a bounded retry of transient
+ * sharing errors. If a prior file exists and
  * needs backing up but the backup write throws, this refuses the save
  * entirely rather than falling through to overwrite the original -- losing
  * the original after failing to preserve a copy of it would be exactly the
@@ -759,10 +774,17 @@ export function saveState(state) {
 
   let currentRaw = null;
   try {
-    currentRaw = fs.readFileSync(statePath, 'utf8');
-  } catch {
-    // No existing file (a brand-new run): nothing to back up, and the
-    // absence of a file is never itself a failure.
+    currentRaw = readFileWithRetry(statePath);
+  } catch (err) {
+    // Only a genuinely absent file (a brand-new run) means "nothing to back
+    // up". A file that exists but cannot be read right now (a transient
+    // sharing error that outlasted the bounded retry, or any other fs
+    // failure) is NOT the same condition: proceeding would decide the
+    // pre-migration backup question on a false premise, so refuse the save
+    // instead (ADR-0045).
+    if (!isAbsentFsError(err)) {
+      return { ok: false, error: 'state-unreadable', details: err?.code || 'unknown' };
+    }
     currentRaw = null;
   }
 
@@ -906,6 +928,10 @@ function migrateLegacyGlobalPointer(projectRootHash, hostSessionId) {
  * pointer (or its own legacy-migrated equivalent) is ever resolved. If it is
  * missing or corrupt, this returns not-found -- it never falls back to a
  * sibling session's pointer just because the requested one is unavailable.
+ * If it exists but cannot be read (a sharing error that outlasted the bounded
+ * read retry, or another fs failure), this returns 'pointer-unreadable'
+ * instead, so a caller can tell "this session is not governed" from "whether
+ * this session is governed is unknown" (ADR-0045).
  * An explicitly named session must never silently read or mutate a
  * different active session's run (see ADR-0020 and the multi-host Foundation
  * security-hardening checkpoint that tightened this).
@@ -925,6 +951,12 @@ export function readActiveRunPointer({ projectRootHash, host, hostSessionId } = 
   if (hostSessionId) {
     const direct = readJson(activeRunPointerPath(projectRootHash, host, hostSessionId));
     if (direct.ok) return direct;
+    if (direct.error === 'busy' || direct.error === 'read-error') {
+      // This session's own pointer exists but cannot be read: whether the
+      // session is governed is unknown, which is not the same as "no run"
+      // (ADR-0045). Never migrate a legacy pointer over it.
+      return { ok: false, error: 'pointer-unreadable', transient: direct.error === 'busy', code: direct.code ?? null };
+    }
 
     if (host === 'claude') {
       const migratedFlat = migrateLegacyFlatPointer(projectRootHash, hostSessionId);
@@ -936,7 +968,7 @@ export function readActiveRunPointer({ projectRootHash, host, hostSessionId } = 
 
     // The exact session was named but has no pointer of its own (missing or
     // corrupt): fail safely. Do NOT fall through to another session's
-    // pointer below.
+    // pointer below. An unreadable pointer was already reported above.
     return { ok: false, error: 'not-found' };
   }
 
@@ -1054,6 +1086,37 @@ export function clearActiveRunPointerForState(state) {
   });
 }
 
+// Why a pointer no longer leads to a live run, or null when there is no
+// positive evidence of that (ADR-0045). Only these delete a pointer: the
+// pointer file is corrupt or names no run, or the run it names is missing,
+// corrupt, or terminal. An unreadable pointer or state, transient or not, a
+// state from a schema this build cannot load, or anything else unknown is
+// not evidence that the run is over, and deleting the pointer would silently
+// switch a live run's governance off.
+function stalePointerReason(pointer, loaded) {
+  if (!pointer.ok) return pointer.error === 'parse-error' ? 'pointer-corrupt' : null;
+  const runId = pointer.value?.runId;
+  if (typeof runId !== 'string' || runId === '') return 'pointer-malformed';
+  if (loaded.ok) return loaded.value.terminalState !== null ? 'run-terminal' : null;
+  if (loaded.error === 'not-found') return 'run-missing';
+  if (loaded.error === 'corrupted') return 'run-corrupt';
+  return null;
+}
+
+// Remove a pointer only if a fresh read still shows what the stale verdict
+// was based on: the same runId, or the same unparseable file. A pointer
+// rewritten for a new run since the first read is left alone. This narrows
+// the window between the check and the delete; it does not close it.
+function removePointerIfUnchanged(pointerPath, before) {
+  const again = readJson(pointerPath);
+  const unchanged = before.ok
+    ? again.ok && again.value?.runId === before.value?.runId
+    : !again.ok && again.error === before.error;
+  if (!unchanged) return false;
+  fs.rmSync(pointerPath, { force: true });
+  return true;
+}
+
 /**
  * Remove pointer files whose run no longer exists or has reached a terminal
  * state. Best-effort; never throws. Traverses the nested
@@ -1067,6 +1130,14 @@ export function clearActiveRunPointerForState(state) {
  * scoping (0.1.1) flat pointer files sitting directly under a project
  * directory: a still-active one is migrated into the `claude` host
  * directory rather than discarded; a genuinely stale one is removed.
+ *
+ * A pointer is deleted only on positive evidence that its run is over (see
+ * stalePointerReason()), and only if a fresh read just before the delete
+ * still shows the same runId (ADR-0045). A pointer, or the state it names,
+ * that cannot be read is left untouched: "could not read it" is not evidence
+ * that the run is over, and deleting the pointer would silently switch off a
+ * live run's governance. A pointer that stays unreadable is therefore never
+ * pruned; that is a known residual, not a leak of governance.
  */
 export function pruneStaleActiveRunPointers(activeRunsRoot) {
   const removed = [];
@@ -1090,7 +1161,7 @@ export function pruneStaleActiveRunPointers(activeRunsRoot) {
       const pointerPath = path.join(projectDir, fileEntry.name);
       const pointer = readJson(pointerPath);
       const runId = pointer.ok && pointer.value ? pointer.value.runId : null;
-      const loaded = typeof runId === 'string' ? loadState(runId) : { ok: false };
+      const loaded = typeof runId === 'string' && runId !== '' ? loadState(runId) : { ok: false };
       const isActive = Boolean(pointer.ok && runId && loaded.ok && loaded.value.terminalState === null);
       if (isActive) {
         const sessionId = typeof pointer.value.sessionId === 'string' && pointer.value.sessionId.trim() !== ''
@@ -1111,10 +1182,9 @@ export function pruneStaleActiveRunPointers(activeRunsRoot) {
           // best-effort: if migration fails, leave the legacy pointer in
           // place rather than losing track of a still-active run.
         }
-      } else {
+      } else if (stalePointerReason(pointer, loaded)) {
         try {
-          fs.rmSync(pointerPath, { force: true });
-          removed.push(path.join(projectEntry.name, fileEntry.name));
+          if (removePointerIfUnchanged(pointerPath, pointer)) removed.push(path.join(projectEntry.name, fileEntry.name));
         } catch {
           // best-effort
         }
@@ -1134,12 +1204,10 @@ export function pruneStaleActiveRunPointers(activeRunsRoot) {
         const pointerPath = path.join(hostDir, fileEntry.name);
         const pointer = readJson(pointerPath);
         const runId = pointer.ok && pointer.value ? pointer.value.runId : null;
-        const loaded = typeof runId === 'string' ? loadState(runId) : { ok: false };
-        const isStale = !pointer.ok || !runId || !loaded.ok || loaded.value.terminalState !== null;
-        if (isStale) {
+        const loaded = typeof runId === 'string' && runId !== '' ? loadState(runId) : { ok: false };
+        if (stalePointerReason(pointer, loaded)) {
           try {
-            fs.rmSync(pointerPath, { force: true });
-            removed.push(path.join(projectEntry.name, hostEntry.name, fileEntry.name));
+            if (removePointerIfUnchanged(pointerPath, pointer)) removed.push(path.join(projectEntry.name, hostEntry.name, fileEntry.name));
           } catch {
             // best-effort
           }
@@ -1186,10 +1254,40 @@ function listProjectRootHashes(index) {
 function readSessionPointerAt(projectRootHash, host, hostSessionId) {
   try {
     const result = readJson(activeRunPointerPath(projectRootHash, host, hostSessionId));
-    if (!result.ok || typeof result.value?.runId !== 'string' || result.value.runId === '') return null;
-    return result.value;
+    if (!result.ok) {
+      if (result.error === 'busy' || result.error === 'read-error') {
+        return { unreadable: { reason: 'pointer-unreadable', runId: null, transient: result.error === 'busy', code: result.code ?? null } };
+      }
+      return null;
+    }
+    if (typeof result.value?.runId !== 'string' || result.value.runId === '') return null;
+    return { pointer: result.value };
   } catch {
     return null;
+  }
+}
+
+/**
+ * Like activeRunStateFor(), but also says when the state could not be read:
+ * { state } for this host's and session's non-terminal run, { unreadable }
+ * when the state file exists but could not be read, {} otherwise. Never
+ * throws.
+ */
+function probeActiveRunState(pointer, { host, hostSessionId } = {}) {
+  try {
+    if (typeof pointer?.runId !== 'string' || pointer.runId === '') return {};
+    const loaded = loadState(pointer.runId);
+    if (!loaded.ok) {
+      return loaded.error === 'unreadable'
+        ? { unreadable: { reason: 'state-unreadable', runId: pointer.runId, transient: loaded.transient === true, code: loaded.code ?? null } }
+        : {};
+    }
+    if (loaded.value.terminalState !== null) return {};
+    if (loaded.value.host?.name !== host) return {};
+    if (hostSessionId && loaded.value.host.sessionId !== hostSessionId) return {};
+    return { state: loaded.value };
+  } catch {
+    return {};
   }
 }
 
@@ -1200,16 +1298,13 @@ function readSessionPointerAt(projectRootHash, host, hostSessionId) {
  * others.
  */
 export function activeRunStateFor(pointer, { host, hostSessionId } = {}) {
-  try {
-    if (typeof pointer?.runId !== 'string' || pointer.runId === '') return null;
-    const loaded = loadState(pointer.runId);
-    if (!loaded.ok || loaded.value.terminalState !== null) return null;
-    if (loaded.value.host?.name !== host) return null;
-    if (hostSessionId && loaded.value.host.sessionId !== hostSessionId) return null;
-    return loaded.value;
-  } catch {
-    return null;
-  }
+  return probeActiveRunState(pointer, { host, hostSessionId }).state ?? null;
+}
+
+// The result locateActiveRunPointer() returns when a pointer this lookup
+// would have used, or the state it names, exists but could not be read.
+function indeterminate(unreadable) {
+  return { ok: false, error: 'run-state-unreadable', indeterminate: true, ...unreadable };
 }
 
 /**
@@ -1233,6 +1328,16 @@ export function activeRunStateFor(pointer, { host, hostSessionId } = {}) {
  * session's non-terminal run. Each step is isolated: a failure in one never
  * skips the next. Returns { ok: true, value: pointer, state? } or
  * { ok: false, error }. Never throws.
+ *
+ * With `requireActive`, a pointer this lookup would use that exists but cannot
+ * be read, or whose state exists but cannot be read, ends the lookup with
+ * { ok: false, error: 'run-state-unreadable', indeterminate: true, reason,
+ * runId, transient, code } (ADR-0045): the session may well be governed, so
+ * callers must not treat it as "no run". In steps 1 and 2 it stops the lookup
+ * at once; in step 3 it wins only when no readable live run was found, or
+ * always for `ambiguity: 'fail'`. Without a session id only the state read
+ * can be indeterminate: a pointer file the session-less scan cannot read
+ * cannot be attributed to this session, so it is skipped as before.
  */
 export function locateActiveRunPointer({ projectRoot, host, hostSessionId, requireActive = false, ambiguity = 'newest' } = {}) {
   if (!host) return { ok: false, error: 'host-required' };
@@ -1246,15 +1351,18 @@ export function locateActiveRunPointer({ projectRoot, host, hostSessionId, requi
   try {
     const rootHash = computeProjectRootHash(root);
     const exact = readActiveRunPointer({ projectRootHash: rootHash, host, hostSessionId });
+    if (!exact.ok && exact.error === 'pointer-unreadable') {
+      return indeterminate({ reason: 'pointer-unreadable', runId: null, transient: exact.transient === true, code: exact.code ?? null });
+    }
     const exactUsable = exact.ok && typeof exact.value?.runId === 'string'
       && (!exact.value.projectRootHash || exact.value.projectRootHash === rootHash);
     if (exactUsable) {
       if (!requireActive) return { ok: true, value: exact.value };
-      const state = activeRunStateFor(exact.value, { host, hostSessionId });
-      if (state) return { ok: true, value: exact.value, state };
+      const probe = probeActiveRunState(exact.value, { host, hostSessionId });
+      if (probe.state) return { ok: true, value: exact.value, state: probe.state };
+      if (probe.unreadable) return indeterminate(probe.unreadable);
       // Not final when it does not lead to an active run: a stale pointer
-      // here, or a state read that failed transiently while another hook was
-      // replacing state.json, must not hide this session's live run.
+      // here must not hide this session's live run elsewhere.
     }
   } catch {
     // An unexpected failure in the exact lookup must not skip the fallbacks.
@@ -1263,9 +1371,11 @@ export function locateActiveRunPointer({ projectRoot, host, hostSessionId, requi
 
   try {
     for (let dir = path.dirname(root); ; dir = path.dirname(dir)) {
-      const pointer = readSessionPointerAt(computeProjectRootHash(dir), host, hostSessionId);
-      const state = pointer && activeRunStateFor(pointer, { host, hostSessionId });
-      if (state) return { ok: true, value: pointer, state };
+      const at = readSessionPointerAt(computeProjectRootHash(dir), host, hostSessionId);
+      if (at?.unreadable) return indeterminate(at.unreadable);
+      const probe = at?.pointer ? probeActiveRunState(at.pointer, { host, hostSessionId }) : {};
+      if (probe.state) return { ok: true, value: at.pointer, state: probe.state };
+      if (probe.unreadable) return indeterminate(probe.unreadable);
       if (path.dirname(dir) === dir) break;
     }
   } catch {
@@ -1274,11 +1384,21 @@ export function locateActiveRunPointer({ projectRoot, host, hostSessionId, requi
 
   try {
     const found = [];
+    let unreadable = null;
     for (const projectRootHash of listProjectRootHashes('active-runs')) {
-      const pointer = readSessionPointerAt(projectRootHash, host, hostSessionId);
-      const state = pointer && activeRunStateFor(pointer, { host, hostSessionId });
-      if (state) found.push({ value: pointer, state, updatedAt: String(pointer.updatedAt ?? '') });
+      const at = readSessionPointerAt(projectRootHash, host, hostSessionId);
+      if (at?.unreadable) {
+        unreadable ??= at.unreadable;
+        continue;
+      }
+      const probe = at?.pointer ? probeActiveRunState(at.pointer, { host, hostSessionId }) : {};
+      if (probe.state) found.push({ value: at.pointer, state: probe.state, updatedAt: String(at.pointer.updatedAt ?? '') });
+      else if (probe.unreadable) unreadable ??= probe.unreadable;
     }
+    // A hook gates against a live run it can read; a state-mutating CLI
+    // (ambiguity 'fail') must not pick one run while another of the same
+    // session's pointers is unreadable.
+    if (unreadable && (found.length === 0 || ambiguity === 'fail')) return indeterminate(unreadable);
     if (found.length === 0) return { ok: false, error: 'not-found' };
     if (found.length > 1 && ambiguity === 'fail') return { ok: false, error: 'ambiguous-session-run' };
     const best = found.reduce((a, b) => (b.updatedAt > a.updatedAt ? b : a));

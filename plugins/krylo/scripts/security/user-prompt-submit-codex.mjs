@@ -213,7 +213,7 @@ async function main() {
 
   // Idempotency (required behavior C/D/I): reuse an already-active,
   // non-terminal run bound to this EXACT session and project rather than
-  // silently creating a second one. Any lookup/parse failure here is
+  // silently creating a second one. Any other lookup/parse failure here is
   // treated as "no existing run found" (fail safe toward attempting a
   // fresh, correctly-scoped bootstrap, never toward silently adopting the
   // wrong state). The emit itself happens OUTSIDE this try block: an
@@ -223,12 +223,23 @@ async function main() {
   // swallowed by this function's own catch and fall through into creating a
   // second run for a session that already had one, silently contradicting
   // the "never silently duplicated" guarantee this comment documents.
+  //
+  // "Could not read" is not "no existing run" (ADR-0045): if this session's
+  // pointer, or the state it names, exists but cannot be read, a fresh
+  // bootstrap would overwrite the pointer and drop the live run's grants,
+  // approvals, and Orbit budget. Refuse instead and ask for a retry; the
+  // risk gate denies on the same condition meanwhile.
   let existingRunId = null;
+  let existingUnreadable = null;
   try {
     const existingPointer = readActiveRunPointer({ projectRootHash, host: 'codex', hostSessionId: sessionId });
-    if (existingPointer.ok && existingPointer.value?.runId) {
+    if (!existingPointer.ok && existingPointer.error === 'pointer-unreadable') {
+      existingUnreadable = existingPointer.code ?? 'unknown';
+    } else if (existingPointer.ok && existingPointer.value?.runId) {
       const existingState = loadState(existingPointer.value.runId);
-      if (
+      if (!existingState.ok && existingState.error === 'unreadable') {
+        existingUnreadable = existingState.code ?? 'unknown';
+      } else if (
         existingState.ok
         && existingState.value.terminalState === null
         && existingState.value.host?.name === 'codex'
@@ -240,6 +251,15 @@ async function main() {
     }
   } catch {
     // Fall through to a fresh bootstrap attempt below.
+  }
+  if (existingUnreadable) {
+    const code = /^[A-Z]{2,12}$/.test(existingUnreadable) ? ` (${existingUnreadable})` : '';
+    emitAdditionalContext(
+      `KRYLO could not read this session's existing run state${code}. No new run was started, so the existing run, `
+      + 'its approvals, and its Orbit budget are kept; KRYLO denies risk-gated actions until the state can be read. '
+      + 'Retry $krylo-run in a moment. If it keeps happening, report this to the user and stop.',
+    );
+    return;
   }
   if (existingRunId) {
     // Defensive cleanup: a marker from an EARLIER failed invocation in this

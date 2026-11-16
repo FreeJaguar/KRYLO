@@ -7,8 +7,10 @@
 // and translates the resulting decision into Claude's PreToolUse Hook output
 // shape. It holds no policy logic of its own.
 //
-// Fail mode: fail SAFE (deny) while a run is active; silent pass-through
-// when no KRYLO run is active for this project.
+// Fail mode: fail SAFE (deny) while a run is active, and while this
+// session's own run pointer or run state exists but cannot be read
+// (ADR-0045); silent pass-through when no KRYLO run is active for this
+// project.
 //
 // Human approval boundary (docs/adr/0025-native-permission-approval.md,
 // restored to full require-approval-class coverage by
@@ -62,7 +64,7 @@
 // oversized-command decisions are `deny`, not `require-approval`, and are
 // completely unaffected by this checkpoint -- they never reach the ask path.
 
-import { readStdinJson, resolveActiveRun } from '../lib/hook-utils.mjs';
+import { readStdinJson, resolveActiveRun, indeterminateRunDenyReason } from '../lib/hook-utils.mjs';
 import {
   normalizeClaudeHookPayload,
   emitClaudePreToolDecision,
@@ -131,8 +133,24 @@ function failSafeOnUnreadablePayload(rawPayload) {
     const rawSessionId = resolveClaudeSessionId({ hookPayload: rawPayload && typeof rawPayload === 'object' ? rawPayload : undefined }) ?? undefined;
     const run = resolveActiveRun({ projectRoot: identity.projectRoot, host: identity.host, hostSessionId: rawSessionId ?? identity.hostSessionId });
     if (run.active) emitClaudePreToolDecision('deny', 'KRYLO risk gate could not read this action and denied it as a fail-safe. Re-run with a well-formed request.');
+    if (run.indeterminate) denyIndeterminateRun(run);
   }
   allowClaudeSilently();
+}
+
+// This session has a KRYLO pointer, or run state, that exists but could not
+// be read (docs/adr/0045-transient-state-io-retry.md). Whether this action
+// is allowed in the run is unknown, so deny rather than pass silently. A
+// session with no KRYLO pointer at all never reaches this.
+function denyIndeterminateRun(run) {
+  if (run.runId) {
+    try {
+      recordEvent(run.runId, { event: 'risk-gate', category: 'run-state-unreadable', status: 'denied' });
+    } catch {
+      // telemetry is best-effort; the deny below is what matters
+    }
+  }
+  emitClaudePreToolDecision('deny', indeterminateRunDenyReason(run));
 }
 
 async function main() {
@@ -147,6 +165,7 @@ async function main() {
     host: normalized.identity.host,
     hostSessionId: normalized.identity.hostSessionId,
   });
+  if (run.indeterminate) denyIndeterminateRun(run);
   if (!run.active) allowClaudeSilently();
 
   const state = run.state;

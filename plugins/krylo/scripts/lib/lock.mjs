@@ -9,13 +9,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// 600 * 10ms = 6s worst-case wait. Observed a real failure at the prior
-// 200*10ms (2s) budget under heavier contention on a shared CI Windows
-// runner (12 processes racing for one run's lock) that never reproduced on
-// a local dev machine -- 2s was adequate for a lightly-loaded box but not
-// for a slower/noisier shared runner. 6s stays comfortably under the 30s
-// PreToolUse hook timeout (skills/run/SKILL.md) that scripts/security/
-// risk-gate.mjs's own use of this lock must fit inside.
+// 600 attempts x 10ms nominal. Observed a real failure at the prior
+// 200*10ms budget under heavier contention on a shared CI Windows runner
+// (12 processes racing for one run's lock) that never reproduced on a local
+// dev machine -- adequate for a lightly-loaded box but not for a
+// slower/noisier shared runner.
+//
+// The nominal 6s is not the wall-clock budget on Windows: the timer behind
+// sleepSync() stretches each 10ms pause to ~16ms there, and an independent
+// review measured a waiter on a held lock giving up after 10.7-10.8s
+// (docs/adr/0045-transient-state-io-retry.md). The tightest callers are the
+// 15s PostToolUse, PostToolUseFailure, and SubagentStart/SubagentStop hooks
+// (posttool-telemetry, fingerprint, agent-events): Node startup, their
+// lock-free run lookup, this wait, and their own hold of up to ~1.5s
+// (ADR-0045) come to roughly 13s in the worst case. The question gate (30s)
+// and the Stop gates (60s) have more room; the risk gate takes no lock.
 const LOCK_RETRY_ATTEMPTS = 600;
 const LOCK_RETRY_DELAY_MS = 10;
 
@@ -40,7 +48,7 @@ function sleepSync(ms) {
 // fail-open `catch {}` (posttool-telemetry.mjs, orbit/fingerprint.mjs,
 // status/agent-events.mjs) silently discarded its mutation with exit 0,
 // observed as an intermittent lost-increment failure under real 15-way
-// concurrent load. atomic.mjs's renameWithRetry() already treats this same
+// concurrent load. atomic.mjs's writeJsonAtomic() already treats this same
 // EPERM/EBUSY pair as transient for the analogous rename case; this applies
 // the identical, already-established reasoning to lock acquisition.
 const TRANSIENT_LOCK_ERROR_CODES = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY']);

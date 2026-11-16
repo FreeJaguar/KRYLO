@@ -99,6 +99,8 @@ docs/adr/0038-codex-0154-supported.md                 # accepted: 0.154.0 added 
 docs/adr/0039-monthly-ecosystem-radar.md              # accepted: read-only monthly ecosystem discovery
                                                        # and triage with a deliberately PARTIAL score
                                                        # (design Section 16 / Phase 7)
+docs/adr/0045-transient-state-io-retry.md             # accepted: deadline-based EPERM/EBUSY retry on state I/O; unreadable is never corrupt or "no run" (risk gates deny)
+                                                       # rename/read; corruption only for bytes actually read
 ```
 
 ## Plugin root
@@ -254,6 +256,11 @@ plugins/krylo/adapters/{mattpocock-skills,omniroute,code-review-graph}.md   # + 
 ```text
 plugins/krylo/tests/unit/*.test.mjs          # state, redact, atomic, telemetry, cli, cleanup, resume,
                                               # risk-policy (host-neutral classification policy cases)
+plugins/krylo/tests/unit/state-io-transient.test.mjs   # + transient EPERM/EBUSY retry, unreadable-not-corrupt, evidence-only pruning, indeterminate run resolution (docs/adr/0045)
+plugins/krylo/tests/stress/state-io-contention.mjs     # + opt-in concurrent-hook stress reproduction, not in npm test (docs/adr/0045)
+plugins/krylo/tests/hooks/posttool-reload-failure.test.mjs   # + reload failure under the lock reports counter-not-persisted, both hosts (docs/adr/0045)
+plugins/krylo/tests/hooks/unreadable-run-state.test.mjs   # + unreadable pointer/state: risk gates deny, Codex re-invocation keeps the live run, both hosts (docs/adr/0045)
+plugins/krylo/tests/fixtures/state-io/                 # + test-only --import fault preloads: state.json re-reads, and every read of one exact path (docs/adr/0045)
 plugins/krylo/tests/platform/paths.test.mjs
 plugins/krylo/tests/hooks/*.test.mjs         # question-gate, risk-gate, stop-gate, fingerprint, posttool (+helpers.mjs)
 plugins/krylo/tests/security/injection.test.mjs

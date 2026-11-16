@@ -41,7 +41,7 @@ function main() {
     const hostSessionId = resolveSessionId({ explicitSessionId: args.session }) || undefined;
     const pointer = locateActiveRunPointer({ projectRoot: path.resolve(args.projectDir || process.cwd()), host: detectHost(), hostSessionId, requireActive: true, ambiguity: 'fail' });
     if (!pointer.ok || !pointer.value || !pointer.value.runId) {
-      console.log(JSON.stringify({ ok: false, error: pointer.error === 'ambiguous-session-run' ? 'ambiguous-session-run' : 'no-current-run' }));
+      console.log(JSON.stringify({ ok: false, error: pointer.error === 'ambiguous-session-run' || pointer.error === 'run-state-unreadable' ? pointer.error : 'no-current-run' }));
       process.exit(1);
       return;
     }

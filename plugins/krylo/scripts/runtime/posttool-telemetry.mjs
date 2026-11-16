@@ -38,7 +38,13 @@ async function main() {
   try {
     withFileLock(runLockPath(runId), () => {
       const reloaded = loadState(runId);
-      if (!reloaded.ok) return;
+      if (!reloaded.ok) {
+        // The run resolved a moment ago but could not be re-read under the
+        // lock: the increment is not persisted, so say so (ADR-0045) rather
+        // than return as if it had been.
+        counterSaveFailed = true;
+        return;
+      }
       const state = reloaded.value;
       state.toolCounters[toolName] = (state.toolCounters[toolName] ?? 0) + 1;
       const saved = saveState(state);

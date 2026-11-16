@@ -60,6 +60,10 @@ Migration to the current schema happens purely in memory, inside `loadState()`; 
 
 Refused or corrupted state is never overwritten with a fabricated replacement. `loadState()` copies the original file (or, if the file itself was already missing, the raw bytes it tried to parse) to `state.corrupt-<epoch>.json` beside it, then returns `{ ok: false, error: 'corrupted', recovered: true, corruptPath }` so the caller can report the problem; it never initializes a fresh recovery state on the caller's behalf. This corrupt-state preservation write is the one real exception to "`loadState()` never writes a migrated document": it writes a *copy of the untrusted original*, never a migrated or fabricated replacement.
 
+Corruption is a property of bytes that were actually read (`docs/adr/0045-transient-state-io-retry.md`). Only unparseable JSON and a schema-invalid document are `corrupted`. A file that could not be read at all -- a transient Windows sharing error (`EPERM`/`EBUSY`) that outlasted the bounded read retry, or any other fs failure -- is reported as `{ ok: false, error: 'unreadable', transient, code }` and is never copied aside, so a live run momentarily held open by another process is never reported or preserved as corrupt. For the same reason `saveState()` treats only an absent file (`ENOENT`, or `ENOTDIR` for a path below a regular file) as "no prior file"; a present-but-unreadable one refuses the save with `state-unreadable`. The `cleanup.mjs` pointer sweep deletes an active-run pointer only on positive evidence that its run is over (a corrupt or empty pointer, or a missing, corrupt, or terminal run), and only if a fresh read just before the delete still names the same run; an unreadable pointer or state is never evidence.
+
+"Could not read" is also not "no run". When a session's own pointer, or the state it leads to (with no session id, the state behind the newest pointer the ADR-0020 fallback picks), exists but cannot be read, run resolution reports the run as indeterminate (`run-state-unreadable`) rather than absent. Both risk gates deny on it with a retry message, a Codex `$krylo-run` re-invocation keeps the live run instead of replacing it, and the runtime CLIs report `run-state-unreadable` instead of `no-current-run`. Every other Hook keeps its inactive-run behavior. A session with no KRYLO pointer of its own is unaffected.
+
 ## Persistence
 
 State is stored under a KRYLO-owned data root resolved by the active host adapter (`${CLAUDE_PLUGIN_DATA}` on the Claude Host) using atomic writes:
@@ -68,6 +72,8 @@ State is stored under a KRYLO-owned data root resolved by the active host adapte
 2. Flush when supported.
 3. Rename over the prior state.
 4. Validate against the schema.
+
+On Windows the rename in step 3 fails with `EPERM` while any other process holds the target open, and every Hook reads `state.json` lock-free at startup, so under parallel hook load this is routine rather than exceptional. The rename, and every state read, retries only `EPERM`/`EBUSY` against a wall-clock deadline with jittered exponential backoff (1000ms for the rename, 250ms for a read); any other error fails immediately (`docs/adr/0045-transient-state-io-retry.md`).
 
 Corrupted or schema-invalid state must not be trusted. KRYLO preserves the original file as `state.corrupt-<epoch>.json` for diagnosis and reports the problem; it does not initialize a fresh state on its own.
 
