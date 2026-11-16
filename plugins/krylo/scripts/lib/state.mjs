@@ -17,7 +17,7 @@ import {
   bootstrapFailurePath,
   perProjectIndexDir,
 } from './paths.mjs';
-import { writeJsonAtomic, readJson, readFileWithRetry } from './atomic.mjs';
+import { writeJsonAtomic, readJson, readFileWithRetry, isAbsentFsError } from './atomic.mjs';
 import { redactText } from './redact.mjs';
 import { HOST_NAMES } from './host-context.mjs';
 import { CURRENT_STATE_SCHEMA_VERSION, migrateStateDocument } from './state-migrations.mjs';
@@ -754,7 +754,8 @@ export function loadState(runId) {
  * Migration backup safety: "no prior file exists" (a brand-new run -- there
  * is nothing to back up, and none is attempted) and "the backup write
  * itself failed" (a real I/O error -- permissions, disk full, ...) are
- * deliberately NOT the same code path. Only an ABSENT existing file (ENOENT)
+ * deliberately NOT the same code path. Only an ABSENT existing file (ENOENT,
+ * or ENOTDIR for a path below a file)
  * means "nothing to back up"; a present-but-unreadable one refuses the save
  * with 'state-unreadable' (ADR-0045) after a bounded retry of transient
  * sharing errors. If a prior file exists and
@@ -781,7 +782,7 @@ export function saveState(state) {
     // failure) is NOT the same condition: proceeding would decide the
     // pre-migration backup question on a false premise, so refuse the save
     // instead (ADR-0045).
-    if (err?.code !== 'ENOENT') {
+    if (!isAbsentFsError(err)) {
       return { ok: false, error: 'state-unreadable', details: err?.code || 'unknown' };
     }
     currentRaw = null;

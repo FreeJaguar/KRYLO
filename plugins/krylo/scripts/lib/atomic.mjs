@@ -97,9 +97,20 @@ export function isTransientFsError(err) {
 }
 
 /**
+ * True when the error proves the file does not exist: ENOENT, or ENOTDIR (a
+ * path component is a file, so nothing can exist below it -- what POSIX
+ * reports where Windows reports ENOENT). Never a read failure of a file that
+ * is there (ADR-0045).
+ */
+export function isAbsentFsError(err) {
+  return Boolean(err && (err.code === 'ENOENT' || err.code === 'ENOTDIR'));
+}
+
+/**
  * Read a file as UTF-8, riding out a transient sharing error within the
  * read budget. Throws the underlying fs error otherwise (ENOENT included),
- * so a caller can tell "absent" from "present but unreadable".
+ * so a caller can tell "absent" (isAbsentFsError) from "present but
+ * unreadable".
  */
 export function readFileWithRetry(filePath) {
   return withTransientRetry(() => fs.readFileSync(filePath, 'utf8'), READ_RETRY_BUDGET_MS);
@@ -176,7 +187,7 @@ export function readJson(filePath) {
   try {
     raw = readFileWithRetry(filePath);
   } catch (err) {
-    if (err && err.code === 'ENOENT') {
+    if (isAbsentFsError(err)) {
       return { ok: false, error: 'not-found' };
     }
     return { ok: false, error: isTransientFsError(err) ? 'busy' : 'read-error', code: err?.code ?? null };

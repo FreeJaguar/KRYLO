@@ -159,6 +159,25 @@ test('readJson does not retry ENOENT', () => {
   }
 });
 
+test('readJson reports a path below a regular file (ENOTDIR on POSIX) as not-found, never as unreadable', () => {
+  const dir = mkTempDir();
+  try {
+    const blocker = path.join(dir, 'blocked');
+    fs.writeFileSync(blocker, 'not a directory');
+    assert.deepEqual(readJson(path.join(blocker, 'state.json')), { ok: false, error: 'not-found' });
+
+    // The same contract on every platform, with the POSIX code injected.
+    const target = path.join(dir, 'state.json');
+    fs.writeFileSync(target, '{}');
+    const calls = failReadsOf(target, 'ENOTDIR', Infinity);
+    assert.deepEqual(readJson(target), { ok: false, error: 'not-found' });
+    assert.equal(calls(), 1, 'ENOTDIR is not retried');
+  } finally {
+    mock.restoreAll();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('loadState rides out a transient sharing error on state.json and returns the live run', () => {
   withTempDataRoot((dir) => {
     const { state, statePath } = newSavedRun(dir);
