@@ -136,8 +136,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 58492,
-      "sha256": "a95f4e05a12632e31d597ccb5aa325181c5630ea6b3788ae4578a2f811d8d90a"
+      "bytes": 58544,
+      "sha256": "75050c52145da8a28f76b8e184a7f642dd86288ed68bbc6da052f865a144138d"
     },
     {
       "path": "CLAUDE.md",
@@ -1756,13 +1756,13 @@
     },
     {
       "path": "plugins/krylo/tests/hooks/unreadable-run-state.test.mjs",
-      "bytes": 14514,
-      "sha256": "57f97c90213c91e05ce5aa9e135c943f9a44b2f41d42a759bed8bf987c58d326"
+      "bytes": 14735,
+      "sha256": "58a2de3afb8980fce3c42210b65c4cc9615fba7c12b695447f50b8242c3feb89"
     },
     {
       "path": "plugins/krylo/tests/hooks/user-prompt-submit-codex.test.mjs",
-      "bytes": 47197,
-      "sha256": "2ec288da3eb39153d59b1d8a902f65c1dd21f6aa469d0cdad3ade3103a8d1bf4"
+      "bytes": 47442,
+      "sha256": "ab654574cc79343952364d7cfd6b045dcd8f535e343c94ef80052f44d189118e"
     },
     {
       "path": "plugins/krylo/tests/maintenance/actions-pins.test.mjs",
