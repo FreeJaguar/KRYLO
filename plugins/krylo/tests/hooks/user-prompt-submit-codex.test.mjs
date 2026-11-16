@@ -5,11 +5,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-import { SCRIPTS_ROOT, mkTempDataDir, cleanup, runHookCodexOnly, runCliCodexOnly } from './helpers.mjs';
+import { SCRIPTS_ROOT, mkTempDataDir, cleanup, runHookCodexOnly, runCliCodexOnly, fakeCliWithoutPathLookup } from './helpers.mjs';
 import { computeProjectRootHash } from '../../scripts/lib/state.mjs';
 
 const FIXTURES = path.resolve(SCRIPTS_ROOT, '..', 'tests', 'fixtures', 'codex-runtime-compat');
-const FAKE_CLI = path.join(FIXTURES, os.platform() === 'win32' ? 'fake-codex-cli.cmd' : 'fake-codex-cli.sh');
+// Generated shim, not the committed fake-codex-cli.cmd: its bare `node` costs a
+// Windows PATH lookup that a contended runner can push past its budget, a
+// spurious probe-timeout in a test that is not about PATH lookup.
+// See fakeCliWithoutPathLookup().
+const FAKE_CLI = fakeCliWithoutPathLookup(FIXTURES, 'fake-codex-cli');
 
 const HOOK = 'security/user-prompt-submit-codex.mjs';
 

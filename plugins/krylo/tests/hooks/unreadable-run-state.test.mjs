@@ -12,7 +12,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -25,11 +24,16 @@ import {
   runHook,
   runHookCodexOnly,
   cleanup,
+  fakeCliWithoutPathLookup,
 } from './helpers.mjs';
 
 const PRELOAD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'state-io', 'fail-reads-of-path.mjs');
 const FIXTURES = path.resolve(SCRIPTS_ROOT, '..', 'tests', 'fixtures', 'codex-runtime-compat');
-const FAKE_CLI = path.join(FIXTURES, os.platform() === 'win32' ? 'fake-codex-cli.cmd' : 'fake-codex-cli.sh');
+// Generated shim, not the committed fake-codex-cli.cmd: its bare `node` costs a
+// Windows PATH lookup that a contended runner can push past its budget, a
+// spurious probe-timeout in a test that is not about PATH lookup.
+// See fakeCliWithoutPathLookup().
+const FAKE_CLI = fakeCliWithoutPathLookup(FIXTURES, 'fake-codex-cli');
 
 const UNREADABLE_REASON = /could not read this session's KRYLO run (state|pointer)/;
 
