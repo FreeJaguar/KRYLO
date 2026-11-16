@@ -1,10 +1,46 @@
-# KRYLO Release-Readiness Report (0.3.0; the 0.2.0 record follows)
+# KRYLO Release-Readiness Report (0.3.1; the 0.3.0 and 0.2.0 records follow)
 
 Persistent implementation progress record. Every status below cites evidence that was actually produced; nothing here is written ahead of execution.
 
 Status legend: `locally passed` (executed and verified in this environment), `statically inspected` (read/analyzed, not executed), `configured but not run` (a check/tool exists and is wired correctly but did not actually execute here), `environment-blocked` (requires something this environment cannot provide, e.g. an authenticated live host session), `GitHub-hosted CI pending` (the workflow has not run remotely), `GitHub-hosted CI stuck` (the workflow run was dispatched by GitHub but never completed), `external publication not performed` (deliberately, per this checkpoint's own hard-stop boundary).
 
-## Release 0.3.0 (2026-11-15): this section supersedes every status section below
+## Release 0.3.1 (2026-11-16): this section supersedes every status section below
+
+**Scope.** 0.3.0 plus PR #27, the transient run-state I/O retry and the fail-closed handling of an unreadable run (`docs/adr/0045-transient-state-io-retry.md`), merged to `main` as `f89c038`. No other change. The Claude Code floor (`2.1.318`) and the reviewed Codex versions (`0.120.0`, `0.154.0`, `0.167.2`) are unchanged.
+
+### Gates
+
+| Gate | Evidence | Status |
+|---|---|---|
+| Plugin validation | `claude plugin validate --strict plugins/krylo` and `.` on the release branch, locally on Claude Code 2.1.318; the same steps in `validate-plugin.yml` | locally passed |
+| Test suite | `npm test` on `main` at `f89c038`: 1001 tests, 1000 pass, 0 fail, 1 skipped (Windows 11, Node 24). On the release branch after the version bump, the only failure was the committed-manifest check, which the manifest regeneration commit resolves; the suite is re-run after it. A first run on the release branch had 8 timeouts while another session ran a 12-way parallel stress repro at 100% CPU; they did not recur once the machine was idle | locally passed |
+| Version agreement | package, lockfile, both plugin manifests, marketplace manifest, the four embedded setup stamps and the latest released CHANGELOG heading all read `0.3.1` (`product-version-agreement` drift check) | locally passed |
+| PR #27 review | independent security review of the first version (no blocker; four should-fix items, all closed in the merged head). On the merged head: 17 new tests fail on the reviewed revision `13adf3d` and pass after the fix; 12 of 12 CI checks green | done |
+| Contention A/B | `tests/stress/state-io-contention.mjs`, 40 rounds x 6 runs x 15 hooks, `npm test` looping alongside, same machine: `main` (0.3.0) lost an increment in 25 of 240 runs, the merged head in 0 of 240. An earlier head (`13adf3d`) lost 1 of 240 in the same setup; that loss is unattributed and recorded in ADR-0045 | locally passed |
+| Clean install lifecycle | isolated `CLAUDE_CONFIG_DIR`, release-branch tree: `marketplace add` → `install` (0.3.1) → `list` → `marketplace update` → `update` → `uninstall` → `marketplace remove` | locally passed, all exit 0; a second `uninstall` exits 1 with "not found" and changes nothing |
+| Upgrade | real `krylo--v0.3.0` tree installed, then the marketplace path switched to the release-branch tree, `marketplace update` + `plugin update` | locally passed: "updated from 0.3.0 to 0.3.1" |
+| Uninstall and rollback | uninstall 0.3.1, unrelated config data preserved, `krylo--v0.3.0` re-installed at the same path | locally passed |
+| Release checksum and attestation | `release.yml`: SHA-256 and build-provenance attestation of the archive | runs at release |
+
+### Behavior change users should know about
+
+While a governed session's own active-run pointer, or its run state, exists but cannot be read, both risk gates now deny gated tool calls instead of allowing them silently. A transient hold clears by itself. A persistent one (a read-only or ACL-denied file, a backup product holding it) needs a human to restore read access or remove that session's active-run pointer; the deny message says so. Sessions with no KRYLO run are unaffected.
+
+### Known limitations carried into 0.3.1
+
+Everything listed for 0.3.0 below, plus the ADR-0045 residuals:
+- **A run-state write can still be lost under extreme contention.** The rename budget (1000ms) leaves under 2x headroom over the slowest contended rename observed (597ms).
+- **A contended writer holds the run lock longer:** up to about 1.5s, or 1.75s for a terminal transition. The worst case for a 15s hook is about 13s.
+- **`lock.mjs` has no wall-clock deadline.**
+- **A pointer that stays unreadable is never pruned.**
+
+### Release procedure
+
+1. Merge this release PR.
+2. Run `release.yml` with `tag = krylo--v0.3.1`. It re-validates, runs the tests, checks that the tag matches `plugin.json`, builds the archive with checksum and attestation, and creates a **draft** release pinned to the dispatched commit.
+3. Publishing the draft is a separate, human decision.
+
+## Release 0.3.0 (2026-11-15)
 
 **Scope.** Everything merged to `main` through PR #28:
 - #18: the Codex live hook verification, round two;
