@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-import { SCRIPTS_ROOT } from './helpers.mjs';
+import { SCRIPTS_ROOT, fakeCliWithoutPathLookup } from './helpers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LAUNCHER = path.resolve(__dirname, '..', '..', 'codex', 'project-hooks', 'codex-project-hook-launcher.mjs');
@@ -16,8 +16,11 @@ const LAUNCHER = path.resolve(__dirname, '..', '..', 'codex', 'project-hooks', '
 // test cares about the launcher's own delegation/activation plumbing, not
 // the gate's verdict, so it must run against the fixture's one reviewed/
 // supported version deterministically, regardless of whatever real Codex
-// CLI happens to be installed on the machine running this suite.
-const FAKE_CLI = path.resolve(__dirname, '..', 'fixtures', 'codex-runtime-compat', os.platform() === 'win32' ? 'fake-codex-cli.cmd' : 'fake-codex-cli.sh');
+// CLI happens to be installed on the machine running this suite. For the
+// same reason it must not depend on a Windows PATH lookup for the fixture's
+// bare `node`, which can exceed its budget on a contended runner and turn
+// into a spurious probe-timeout (see fakeCliWithoutPathLookup()).
+const FAKE_CLI = fakeCliWithoutPathLookup(path.resolve(__dirname, '..', 'fixtures', 'codex-runtime-compat'), 'fake-codex-cli');
 const COMPAT_SUPPORTED_ENV = { KRYLO_CODEX_COMPAT_TEST_MODE: '1', KRYLO_CODEX_CLI_PATH: FAKE_CLI, FAKE_CODEX_VERSION_OUTPUT: 'codex-cli 0.120.0' };
 
 function mkStandaloneRoot() {

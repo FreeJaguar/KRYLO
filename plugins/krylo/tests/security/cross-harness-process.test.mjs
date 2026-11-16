@@ -14,12 +14,16 @@ import { fileURLToPath } from 'node:url';
 
 import { buildCodexWorkerArgv, buildCodexWorkerEnv } from '../../scripts/host/cross-harness/codex-worker.mjs';
 import { buildClaudeWorkerArgv, buildClaudeWorkerEnv } from '../../scripts/host/cross-harness/claude-worker.mjs';
+import { fakeCliWithoutPathLookup } from '../hooks/helpers.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPTS_ROOT = path.resolve(__dirname, '..', '..', 'scripts');
 const CLI = path.join(SCRIPTS_ROOT, 'runtime', 'cross-harness-run.mjs');
 const INIT_RUN = path.join(SCRIPTS_ROOT, 'runtime', 'init-run.mjs');
-const FAKE_WORKER = path.resolve(__dirname, '..', 'fixtures', 'cross-harness', os.platform() === 'win32' ? 'fake-worker.cmd' : 'fake-worker.sh');
+// See fakeCliWithoutPathLookup(): the subject here is argv/stdin injection
+// through the real spawn chain, not the bare-`node` PATH lookup, which can
+// exceed its budget on a contended Windows runner.
+const FAKE_WORKER = fakeCliWithoutPathLookup(path.resolve(__dirname, '..', 'fixtures', 'cross-harness'), 'fake-worker');
 
 test('buildCodexWorkerArgv returns a plain argv array with no task/context text embedded', () => {
   const argv = buildCodexWorkerArgv({ cwd: 'C:\\some\\dir with spaces\\', outputSchemaPath: 'C:\\schema.json' });
