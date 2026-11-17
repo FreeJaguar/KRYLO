@@ -89,10 +89,10 @@ The rename budget was set at about five times the slowest contended rename that 
   - A pointer whose file stays unreadable is never pruned. That leaves a file behind; it does not leak governance.
   - The re-read before a pruning delete narrows the window in which a pointer rewritten for a new run could be deleted. It does not close it, because pointer writes take no lock.
   - A `corrupted` or schema-refused state still resolves as "no run" (a silent allow outside a run). That is pre-existing and unchanged here: its bytes were read, and the corrupt copy is preserved for diagnosis.
-- **Not changed here (follow-ups).**
-  - `question-gate.mjs` treats a failed reload or a `state-unreadable` save as a denial that asks for a human-reviewed grant, rather than taking its lock-failure path.
-  - `orbit/fingerprint.mjs` and `status/agent-events.mjs` still drop a failed reload silently.
-  - `lock.mjs` has no wall-clock deadline; its effective budget depends on the platform's timer granularity.
+- **Not changed here (follow-ups).** All three are resolved by `docs/adr/0046-unreadable-state-followups-and-lock-deadline.md`.
+  - `question-gate.mjs` treats a failed reload or a `state-unreadable` save as a denial that asks for a human-reviewed grant, rather than taking its lock-failure path. (ADR-0046, decision 1.)
+  - `orbit/fingerprint.mjs` and `status/agent-events.mjs` still drop a failed reload silently. (ADR-0046, decision 2.)
+  - `lock.mjs` has no wall-clock deadline; its effective budget depends on the platform's timer granularity. (ADR-0046, decision 3.)
 
 ## Verification
 

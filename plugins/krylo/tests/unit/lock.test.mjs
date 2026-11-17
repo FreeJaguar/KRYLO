@@ -103,3 +103,62 @@ test('withFileLock still throws immediately on a genuinely unexpected error code
     }
   });
 });
+
+// docs/adr/0046-unreadable-state-followups-and-lock-deadline.md, decision 3:
+// the lock wait is bounded by a monotonic wall-clock deadline, not by an
+// attempt count whose real duration depends on the platform's timer
+// granularity (600 x 10ms measured 10.7-10.8s on Windows, ADR-0045). Both
+// tests drive a fake monotonic clock: performance.now() reads it, and each
+// Atomics.wait() pause advances it, so the result is deterministic and no
+// real time is spent waiting.
+// The budget chosen in ADR-0046 (scripts/lib/lock.mjs, LOCK_WAIT_BUDGET_MS).
+const LOCK_WAIT_BUDGET_MS = 8000;
+
+function withFakeClockAndHeldLock(lockPath, msPerPause, fn) {
+  let now = 0;
+  let attempts = 0;
+  const realOpenSync = fs.openSync;
+  mock.method(performance, 'now', () => now);
+  mock.method(Atomics, 'wait', () => {
+    now += msPerPause;
+    return 'timed-out';
+  });
+  mock.method(fs, 'openSync', (target, ...rest) => {
+    if (target === lockPath) {
+      attempts += 1;
+      const err = new Error('simulated EEXIST: another holder keeps the lock');
+      err.code = 'EEXIST';
+      throw err;
+    }
+    return realOpenSync.call(fs, target, ...rest);
+  });
+  try {
+    return fn(() => ({ now, attempts }));
+  } finally {
+    mock.restoreAll();
+  }
+}
+
+test('withFileLock gives up at the wall-clock budget when each pause runs long (coarse timer)', () => {
+  withTempLockPath((lockPath) => {
+    withFakeClockAndHeldLock(lockPath, 50, (observed) => {
+      assert.throws(() => withFileLock(lockPath, () => 'ok'), /lock-timeout/);
+      const { now, attempts } = observed();
+      assert.ok(now >= LOCK_WAIT_BUDGET_MS, `gave up after ${now}ms of clock, before the ${LOCK_WAIT_BUDGET_MS}ms budget`);
+      assert.ok(now <= LOCK_WAIT_BUDGET_MS + 50, `waited ${now}ms of clock, past the ${LOCK_WAIT_BUDGET_MS}ms budget`);
+      // 8000ms / 50ms per pause: 160 pauses plus the attempt before the first.
+      assert.ok(attempts >= 160 && attempts <= 162, `expected about 161 attempts, got ${attempts}`);
+    });
+  });
+});
+
+test('withFileLock keeps waiting until the wall-clock budget when each pause is short (fine timer)', () => {
+  withTempLockPath((lockPath) => {
+    withFakeClockAndHeldLock(lockPath, 1, (observed) => {
+      assert.throws(() => withFileLock(lockPath, () => 'ok'), /lock-timeout/);
+      const { now, attempts } = observed();
+      assert.ok(now >= LOCK_WAIT_BUDGET_MS, `gave up after ${now}ms of clock, before the ${LOCK_WAIT_BUDGET_MS}ms budget`);
+      assert.ok(attempts > 600, `an attempt count must not cut the wait short (${attempts} attempts)`);
+    });
+  });
+});

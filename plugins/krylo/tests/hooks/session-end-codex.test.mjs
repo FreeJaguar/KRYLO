@@ -106,7 +106,7 @@ test('session-end-codex: malformed/unreadable stdin fails safe -- no-op, never c
 // the run's exclusive state lock even though it never mutates state.json
 // (only a read, plus an already-atomic-append recordEvent() call). Given
 // the confirmed ~1-3 second SessionEnd platform teardown budget and the
-// lock's own up-to-6-second retry window, SessionEnd could be killed by
+// lock's own 8-second wait budget (ADR-0046), SessionEnd could be killed by
 // the platform WHILE holding (or waiting on) that lock -- and since
 // lock.mjs has no staleness recovery, the orphaned lock file then makes
 // every later locked operation on that SAME run (Stop, update-state.mjs)

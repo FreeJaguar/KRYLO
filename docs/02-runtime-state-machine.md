@@ -64,6 +64,8 @@ Corruption is a property of bytes that were actually read (`docs/adr/0045-transi
 
 "Could not read" is also not "no run". When a session's own pointer, or the state it leads to (with no session id, the state behind the newest pointer the ADR-0020 fallback picks), exists but cannot be read, run resolution reports the run as indeterminate (`run-state-unreadable`) rather than absent. Both risk gates deny on it with a retry message, a Codex `$krylo-run` re-invocation keeps the live run instead of replacing it, and the runtime CLIs report `run-state-unreadable` instead of `no-current-run`. Every other Hook keeps its inactive-run behavior. A session with no KRYLO pointer of its own is unaffected.
 
+The same holds after a Hook has resolved its run and then cannot read the state under the run lock (`docs/adr/0046-unreadable-state-followups-and-lock-deadline.md`). The question gate fails open, as it does for a lock failure: it allows the question, leaves any available grant unspent, records `allowed-state-unreadable`, and never tells the model to grant a new token. The telemetry Hooks never drop such a mutation silently. `posttool-telemetry` records `counter-not-persisted`. The failure-fingerprint Hook records `failure-not-persisted`, and the agent-event Hook records `agent-start-not-persisted` or `agent-stop-not-persisted`, each with a `status` naming the cause (`state-unreadable`, `reload-failed`, `save-failed`, or `lock-failed`). None of them blocks or denies anything.
+
 ## Persistence
 
 State is stored under a KRYLO-owned data root resolved by the active host adapter (`${CLAUDE_PLUGIN_DATA}` on the Claude Host) using atomic writes:
@@ -74,6 +76,8 @@ State is stored under a KRYLO-owned data root resolved by the active host adapte
 4. Validate against the schema.
 
 On Windows the rename in step 3 fails with `EPERM` while any other process holds the target open, and every Hook reads `state.json` lock-free at startup, so under parallel hook load this is routine rather than exceptional. The rename, and every state read, retries only `EPERM`/`EBUSY` against a wall-clock deadline with jittered exponential backoff (1000ms for the rename, 250ms for a read); any other error fails immediately (`docs/adr/0045-transient-state-io-retry.md`).
+
+Every state mutation runs inside the run's exclusive lock (`scripts/lib/lock.mjs`, an exclusive-create lock file). A waiter retries until a monotonic wall-clock deadline of 8000ms and then fails with `lock-timeout`, on every platform (`docs/adr/0046-unreadable-state-followups-and-lock-deadline.md`). The budget leaves the 15s telemetry Hooks over 4s of margin after a full wait and their own hold. The lock has no stale-lock recovery: a lock file left behind by a killed holder makes every later mutator for that run wait the full budget and fail.
 
 Corrupted or schema-invalid state must not be trusted. KRYLO preserves the original file as `state.corrupt-<epoch>.json` for diagnosis and reports the problem; it does not initialize a fresh state on its own.
 

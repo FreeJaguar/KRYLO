@@ -9,22 +9,30 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-// 600 attempts x 10ms nominal. Observed a real failure at the prior
-// 200*10ms budget under heavier contention on a shared CI Windows runner
-// (12 processes racing for one run's lock) that never reproduced on a local
-// dev machine -- adequate for a lightly-loaded box but not for a
-// slower/noisier shared runner.
+// The lock wait is bounded by a monotonic wall-clock deadline
+// (docs/adr/0046-unreadable-state-followups-and-lock-deadline.md), the same
+// way atomic.mjs's withTransientRetry() bounds its retries. It used to be a
+// fixed 600 attempts of a nominal 10ms pause: about 6s on POSIX, but
+// 10.7-10.8s measured on Windows, where the timer stretches each pause to
+// ~16ms (docs/adr/0045-transient-state-io-retry.md). A count has no
+// wall-clock meaning; a deadline does.
 //
-// The nominal 6s is not the wall-clock budget on Windows: the timer behind
-// sleepSync() stretches each 10ms pause to ~16ms there, and an independent
-// review measured a waiter on a held lock giving up after 10.7-10.8s
-// (docs/adr/0045-transient-state-io-retry.md). The tightest callers are the
-// 15s PostToolUse, PostToolUseFailure, and SubagentStart/SubagentStop hooks
-// (posttool-telemetry, fingerprint, agent-events): Node startup, their
-// lock-free run lookup, this wait, and their own hold of up to ~1.5s
-// (ADR-0045) come to roughly 13s in the worst case. The question gate (30s)
-// and the Stop gates (60s) have more room; the risk gate takes no lock.
-const LOCK_RETRY_ATTEMPTS = 600;
+// Why 8000ms. Upper bound: the tightest lock users are the 15s PostToolUse,
+// PostToolUseFailure, and SubagentStart/SubagentStop hooks
+// (posttool-telemetry, fingerprint, agent-events). Their worst case is Node
+// startup (measured on Windows: median 143ms, max 431ms with a full npm test
+// alongside), their lock-free run lookup (up to ~500ms of blocked reads),
+// this wait, and their own hold of up to ~1.5s (ADR-0045): about 10.5s. A
+// hook that waits the full budget still finishes its hold with over 4s to
+// spare, so it is not killed while holding the lock (which would orphan it,
+// see below). Lower bound: the slowest lock acquisition measured under the
+// heaviest load was 2.4s (ADR-0045), and an earlier budget of 200 x 10ms
+// (nominally 2s, more on Windows) failed on a shared Windows CI runner with
+// 12 processes racing for one run's lock. 8000ms is over 3x the slowest
+// measured wait. This shortens the effective wait on Windows (~10.8s -> 8s)
+// and lengthens it on POSIX (~6s -> 8s). The question gate (30s) and the
+// Stop gates (60s) have more room; the risk gate takes no lock.
+const LOCK_WAIT_BUDGET_MS = 8000;
 const LOCK_RETRY_DELAY_MS = 10;
 
 function sleepSync(ms) {
@@ -55,20 +63,26 @@ const TRANSIENT_LOCK_ERROR_CODES = new Set(['EEXIST', 'EPERM', 'EACCES', 'EBUSY'
 
 /**
  * Run `fn` while holding an exclusive lock at `lockPath`. Blocks (busy-wait)
- * until the lock is acquired or the retry budget is exhausted, then throws.
- * The lock file is always removed afterward, success or failure.
+ * until the lock is acquired or LOCK_WAIT_BUDGET_MS of monotonic wall-clock
+ * time has passed, then throws lock-timeout. The last attempt is made at the
+ * deadline. The lock file is always removed afterward, success or failure.
  */
 export function withFileLock(lockPath, fn) {
   fs.mkdirSync(path.dirname(lockPath), { recursive: true });
 
+  // performance.now() is monotonic: a wall-clock adjustment mid-wait can
+  // neither extend nor cut short the budget.
+  const deadline = performance.now() + LOCK_WAIT_BUDGET_MS;
   let fd;
-  for (let attempt = 0; attempt < LOCK_RETRY_ATTEMPTS; attempt++) {
+  for (;;) {
     try {
       fd = fs.openSync(lockPath, 'wx');
       break;
     } catch (err) {
       if (!err || !TRANSIENT_LOCK_ERROR_CODES.has(err.code)) throw err;
-      sleepSync(LOCK_RETRY_DELAY_MS);
+      const remaining = deadline - performance.now();
+      if (remaining <= 0) break;
+      sleepSync(Math.min(LOCK_RETRY_DELAY_MS, remaining));
     }
   }
   if (fd === undefined) {
@@ -90,12 +104,12 @@ export function withFileLock(lockPath, fn) {
       // removal itself fails (or this process is killed before reaching
       // here at all), the lock file is left behind, and every LATER
       // fs.openSync(lockPath, 'wx') above will keep hitting EEXIST until
-      // the full LOCK_RETRY_ATTEMPTS budget is exhausted and throws
+      // the full LOCK_WAIT_BUDGET_MS budget is exhausted and throws
       // lock-timeout -- not a harmless "recreate on next acquire" (an
       // earlier version of this comment claimed that; it was wrong, and a
       // fresh independent Security Reviewer live-reproduced the real
-      // consequence: a subsequent caller blocked for the full ~6s retry
-      // window and then failed). This is an accepted, disclosed residual
+      // consequence: a subsequent caller blocked for the full retry window,
+      // then about 6s, and then failed). This is an accepted, disclosed residual
       // for this specific narrow best-effort cleanup path, not a claim
       // that an orphaned lock is safe.
     }

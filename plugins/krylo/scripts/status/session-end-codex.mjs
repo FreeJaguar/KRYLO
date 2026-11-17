@@ -19,7 +19,7 @@
 // Reviewer both found and reproduced that an earlier version's
 // withFileLock() wrapper here was actively harmful: SessionEnd can be
 // killed by the platform's own teardown deadline WHILE HOLDING that lock
-// (the lock's up-to-6-second retry budget already exceeds the confirmed
+// (the lock's 8-second wait budget, ADR-0046, already exceeds the confirmed
 // ~1-3 second SessionEnd timeout on its own), and scripts/lib/lock.mjs has
 // no staleness recovery -- so an orphaned lock file would then make every
 // LATER locked operation on that same run (Stop, update-state.mjs) wait

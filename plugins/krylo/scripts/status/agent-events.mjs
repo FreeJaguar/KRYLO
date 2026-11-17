@@ -35,6 +35,15 @@ function pickString(payload, keys) {
  * (saveState() returned ok) -- otherwise this would claim an agent
  * started/stopped when a lock timeout, a failed reload, or a failed
  * pre-migration backup write actually discarded the mutation.
+ *
+ * A mutation that was not persisted is not dropped silently either: it is
+ * recorded as a distinct 'agent-start-not-persisted' or
+ * 'agent-stop-not-persisted' event whose status names the cause
+ * (state-unreadable, reload-failed, save-failed, lock-failed), the way
+ * posttool-telemetry records counter-not-persisted
+ * (docs/adr/0046-unreadable-state-followups-and-lock-deadline.md). A
+ * SubagentStop that finds no running agent mutates nothing and records
+ * nothing. The hook stays fail-open either way.
  */
 export function recordAgentEvent(runId, event, payload) {
   const agentType = pickString(payload, ['agent_type', 'subagent_type', 'agent_name', 'agentType']) ?? 'unknown';
@@ -48,10 +57,15 @@ export function recordAgentEvent(runId, event, payload) {
   // SubagentStop lookup must see a consistent, current agents array, and
   // this can never race a concurrent migration-persist or another mutation.
   let recorded = null;
+  let notPersisted = null;
+  const savedFailure = (saved) => (saved.error === 'state-unreadable' ? 'state-unreadable' : 'save-failed');
   try {
     withFileLock(runLockPath(runId), () => {
       const reloaded = loadState(runId);
-      if (!reloaded.ok) return;
+      if (!reloaded.ok) {
+        notPersisted = reloaded.error === 'unreadable' ? 'state-unreadable' : 'reload-failed';
+        return;
+      }
       const state = reloaded.value;
 
       if (event === 'SubagentStart') {
@@ -70,6 +84,7 @@ export function recordAgentEvent(runId, event, payload) {
         state.agents.push(agent);
         const saved = saveState(state);
         if (saved.ok) recorded = { event: 'agent-start', agentId: id, agentType, configuredModel, ...(resolvedModel ? { resolvedModel } : {}) };
+        else notPersisted = savedFailure(saved);
       } else if (event === 'SubagentStop') {
         const running = [...state.agents].reverse().find((a) => a.status === 'running' && (a.type === agentType || agentType === 'unknown'));
         if (running) {
@@ -79,14 +94,21 @@ export function recordAgentEvent(runId, event, payload) {
           if (resolvedModel && !running.resolvedModel) running.resolvedModel = resolvedModel;
           const saved = saveState(state);
           if (saved.ok) recorded = { event: 'agent-stop', agentId: running.id, agentType: running.type, status: running.status };
+          else notPersisted = savedFailure(saved);
         }
       }
     });
   } catch {
     // Fail open: agent-event bookkeeping must never block or crash the hook.
+    notPersisted = 'lock-failed';
   }
 
-  if (recorded) recordEvent(runId, recorded);
+  if (recorded) {
+    recordEvent(runId, recorded);
+  } else if (notPersisted && (event === 'SubagentStart' || event === 'SubagentStop')) {
+    const name = event === 'SubagentStart' ? 'agent-start-not-persisted' : 'agent-stop-not-persisted';
+    recordEvent(runId, { event: name, agentType, status: notPersisted });
+  }
 }
 
 async function main() {
