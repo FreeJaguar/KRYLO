@@ -58,9 +58,11 @@ export function recordAgentEvent(runId, event, payload) {
   // this can never race a concurrent migration-persist or another mutation.
   let recorded = null;
   let notPersisted = null;
+  let lockHeld = false;
   const savedFailure = (saved) => (saved.error === 'state-unreadable' ? 'state-unreadable' : 'save-failed');
   try {
     withFileLock(runLockPath(runId), () => {
+      lockHeld = true;
       const reloaded = loadState(runId);
       if (!reloaded.ok) {
         notPersisted = reloaded.error === 'unreadable' ? 'state-unreadable' : 'reload-failed';
@@ -100,7 +102,9 @@ export function recordAgentEvent(runId, event, payload) {
     });
   } catch {
     // Fail open: agent-event bookkeeping must never block or crash the hook.
-    notPersisted = 'lock-failed';
+    // A throw from inside the held lock is the save itself failing (a
+    // rename that outlasted its retry budget, ADR-0045), not the lock.
+    notPersisted = lockHeld ? 'save-failed' : 'lock-failed';
   }
 
   if (recorded) {

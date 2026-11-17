@@ -10,14 +10,14 @@ Accepted
 
 1. **The question gate denied when it could not read.** `scripts/security/question-gate.mjs` reloads the run state under the run lock to consume a one-use question token. When the reload failed, or `saveState()` refused with `state-unreadable`, the gate fell through to its policy denial. That denial tells the model to grant a new token with `update-state.mjs --grant-question <category>`. The gate already rejects this outcome for a lock failure: its own comment says denying there would burn a scarce, human-reviewed grant "for a reason that has nothing to do with policy", and it allows instead (`allowed-lock-contention`). Its documented fail mode is fail-open, because asking a human is always safe. An unreadable state is the same kind of failure as a lock failure, and it got the opposite treatment.
 2. **Two telemetry hooks dropped a failed reload silently.** `scripts/orbit/fingerprint.mjs` (PostToolUseFailure) and `scripts/status/agent-events.mjs` (SubagentStart/SubagentStop) correctly record nothing positive for a mutation they did not persist. But they also recorded nothing at all when the reload or the save failed, or the lock could not be taken. The fingerprint or agent record was lost without trace. ADR-0045 had already fixed the same gap in `posttool-telemetry.mjs`, which records `counter-not-persisted`.
-3. **The lock had no wall-clock budget.** `scripts/lib/lock.mjs` retried acquisition 600 times with a nominal 10ms pause. A count has no wall-clock meaning: the pause is a timer wait, and Windows timer granularity stretches it. The independent review for ADR-0045 measured a waiter on a held lock giving up after 10.7-10.8s on Windows. On the machine used for this ADR the same code gave up after 9538ms and 9543ms. The tightest lock users are 15s hooks, so the effective budget, and with it the margin to the hook timeout, varied by machine.
+3. **The lock had no wall-clock budget.** `scripts/lib/lock.mjs` retried acquisition 600 times with a nominal 10ms pause. A count has no wall-clock meaning: the pause is a timer wait, and Windows timer granularity stretches it. The independent review for ADR-0045 measured a waiter on a held lock giving up after 10.7-10.8s on Windows. For this ADR the same code gave up after 9538ms and 9543ms. The two measurements differ, and neither is the nominal 6s. The tightest lock users are 15s hooks, so the margin to the hook timeout was not a fixed number.
 
 ### Measurements for the lock budget
 
 All on the development machine (Windows 11, Node 24.17.0).
 
 - **Hook startup.** A `posttool-telemetry.mjs` process with no active run (Node startup, imports, and the run lookup) took 63ms at the median and 74ms at most, over 30 runs on an idle machine. With a full `npm test` running alongside, it took 143ms at the median, 245ms at p90, and 431ms at most, over 60 runs.
-- **Lock give-up, before.** `lock.mjs` from `main` (859552a), with the lock file held by a file that never goes away: 9538ms and 9543ms. The independent review for ADR-0045 measured 10.7-10.8s on another machine.
+- **Lock give-up, before.** `lock.mjs` from `main` (859552a), with the lock file held by a file that never goes away: 9538ms and 9543ms. The independent review for ADR-0045 measured 10.7-10.8s.
 - **Lock give-up, after.** The same harness with this change: 8000ms, 8005ms, and 8001ms.
 - **Lock waits under load (from ADR-0045).** The slowest lock acquisition measured under the heaviest stress load was 2.4s, and none timed out. An earlier budget of 200 x 10ms (nominally 2s, more on Windows) failed on a shared Windows CI runner with 12 processes racing for one run's lock (comment history in `lock.mjs`).
 
@@ -37,9 +37,10 @@ All on the development machine (Windows 11, Node 24.17.0).
    - `state-unreadable`: the reload returned `unreadable`, or the save was refused with `state-unreadable`.
    - `reload-failed`: any other reload failure.
    - `save-failed`: any other save refusal.
+   - `save-failed`: also a throw from inside the held lock, such as a rename that outlasted its retry budget (ADR-0045).
    - `lock-failed`: the lock could not be taken.
 
-   Both hooks stay fail-open: exit 0, no output, never a decision. No positive event (`failure`, `agent-start`, `agent-stop`) is recorded for an unpersisted mutation, as before. A SubagentStop that finds no running agent mutates nothing and records nothing. All fields used are already in the telemetry whitelist (`docs/22-privacy-and-telemetry.md`).
+   Both hooks stay fail-open: exit 0, no output, never a decision. No positive event (`failure`, `agent-start`, `agent-stop`) is recorded for an unpersisted mutation, as before. A SubagentStop that reads the state and finds no running agent mutates nothing and records nothing. One that cannot read the state records `agent-stop-not-persisted`, because it cannot tell. All fields used are already in the telemetry whitelist (`docs/22-privacy-and-telemetry.md`).
 3. **The lock wait has a monotonic wall-clock deadline of 8000ms.** `withFileLock()` computes a deadline with `performance.now()` and retries until it passes, the same way `withTransientRetry()` in `lib/atomic.mjs` does. Each pause is the smaller of 10ms and the time left, and the last attempt comes at the deadline. The set of retried error codes, the `lock-timeout` error, and the release path are unchanged. `lock.mjs` still has no stale-lock recovery.
 
 The 8000ms budget comes from both ends:
@@ -75,11 +76,11 @@ The effective wait moves from about 10.8s (9.5s on this machine) to 8s on Window
 ## Verification
 
 - `plugins/krylo/tests/hooks/question-gate-unreadable-state.test.mjs` covers decision 1. Three fault tests fail against `main` (859552a), where the gate denied with the grant hint. A failed reload without a grant, a failed reload with a grant available, and a `state-unreadable` save refusal with a grant available now allow, with status `allowed-state-unreadable`, and leave the grant `available` on disk. A control test passes on both: with the preload loaded but no fault reached, the gate still consumes a grant and then denies.
-- `plugins/krylo/tests/hooks/telemetry-mutation-not-persisted.test.mjs` covers decision 2. Four fault tests fail against `main`, where nothing was recorded:
+- `plugins/krylo/tests/hooks/telemetry-mutation-not-persisted.test.mjs` covers decision 2. Seven fault tests fail against `main`, where nothing was recorded. Four run the hooks as processes under the fault preload:
   - The fingerprint hook with a failed reload, and with a refused save.
   - The agent-event hook with a failed reload on SubagentStart, and a refused save on SubagentStop.
 
-  Each now records its `*-not-persisted` event with `status: 'state-unreadable'`, persists nothing, records no positive event, and exits 0 with no output. A control test passes on both, including a SubagentStop with no running agent that records nothing.
+  Each now records its `*-not-persisted` event with `status: 'state-unreadable'`, persists nothing, records no positive event, and exits 0 with no output. Three more drive the exported functions in-process. A `state.json` that is not JSON makes the reload fail as `corrupted`, recorded as `reload-failed`. A rename of `state.json` that throws inside the held lock is recorded as `save-failed`. A lock held by another process, with a fake monotonic clock so no real time passes, is recorded as `lock-failed`. The `save-failed` test also fails against the first version of this change, which labelled that case `lock-failed`. A control test passes on both, including a SubagentStop with no running agent that records nothing.
 - Both files use the existing fault preload `plugins/krylo/tests/fixtures/state-io/fail-state-rereads.mjs`. It now takes the number of state reads that succeed before the fault starts (`KRYLO_TEST_STATE_READS_BEFORE_FAULT`, default 1, so its existing users are unchanged) and logs each injected failure (`KRYLO_TEST_FAIL_READ_LOG`). Every fault test asserts that the fault fired, and the save-refusal tests assert that it fired on the third read, which is `saveState()`'s pre-write read.
 - `plugins/krylo/tests/unit/lock.test.mjs` covers decision 3 with two deterministic tests driving a fake monotonic clock (mocked `performance.now()` and `Atomics.wait()`). Both fail against `main`:
   - With 50ms pauses, `main` waited 30000ms of clock (600 attempts). The new code gives up at the 8000ms budget after about 161 attempts.

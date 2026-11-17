@@ -12,13 +12,16 @@
 // state.json succeed (N = KRYLO_TEST_STATE_READS_BEFORE_FAULT) and every later
 // one fails with EISDIR. Each test asserts that the fault actually fired.
 
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { mkTempDataDir, createActiveRun, runHook, readState, cleanup } from './helpers.mjs';
+import { recordFailureFingerprint } from '../../scripts/orbit/fingerprint.mjs';
+import { recordAgentEvent } from '../../scripts/status/agent-events.mjs';
+import { runLockPath } from '../../scripts/lib/paths.mjs';
 
 const PRELOAD = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'fixtures', 'state-io', 'fail-state-rereads.mjs');
 const FINGERPRINT = 'orbit/fingerprint.mjs';
@@ -145,4 +148,100 @@ test('control: with the preload loaded but no fault reached, both hooks persist 
   } finally {
     cleanup(dataDir);
   }
+});
+
+// The two causes that do not come from a read: a throw from inside the held
+// lock (the save itself, e.g. a rename that outlasted its retry budget,
+// ADR-0045) is `save-failed`; a lock that could not be taken is
+// `lock-failed`. Both drive the exported functions in-process against a real
+// run created by init-run, so fs can be mocked directly.
+function inProcessRun(fn) {
+  const dataDir = mkTempDataDir('krylo-telemetry-inproc-');
+  const prev = process.env.KRYLO_DATA_ROOT;
+  try {
+    const { runId, statePath } = createActiveRun(dataDir);
+    process.env.KRYLO_DATA_ROOT = dataDir;
+    fn({ dataDir, runId, statePath });
+  } finally {
+    mock.restoreAll();
+    if (prev === undefined) delete process.env.KRYLO_DATA_ROOT;
+    else process.env.KRYLO_DATA_ROOT = prev;
+    cleanup(dataDir);
+  }
+}
+
+function failRenamesOfState() {
+  const realRenameSync = fs.renameSync;
+  let fired = 0;
+  mock.method(fs, 'renameSync', (from, to, ...rest) => {
+    if (typeof to === 'string' && path.basename(to) === 'state.json') {
+      fired += 1;
+      const err = new Error('ENOSPC: simulated non-transient rename failure');
+      err.code = 'ENOSPC';
+      throw err;
+    }
+    return realRenameSync.call(fs, from, to, ...rest);
+  });
+  return () => fired;
+}
+
+function holdLockWithFakeClock(runId) {
+  fs.writeFileSync(runLockPath(runId), 'held by another process');
+  let now = 0;
+  mock.method(performance, 'now', () => now);
+  mock.method(Atomics, 'wait', () => {
+    now += 100;
+    return 'timed-out';
+  });
+}
+
+test('fingerprint and agent-events: a save that throws inside the held lock is save-failed, not lock-failed', () => {
+  inProcessRun(({ dataDir, runId, statePath }) => {
+    const renames = failRenamesOfState();
+    recordFailureFingerprint(runId, 'Bash', 'eslint found 3 problems in src/a.js');
+    recordAgentEvent(runId, 'SubagentStart', { agent_type: 'krylo:builder' });
+    mock.restoreAll();
+    assert.equal(renames(), 2, 'both saves must have reached the failing rename');
+
+    const recorded = events(dataDir, runId);
+    assert.deepEqual(recorded.map((e) => [e.event, e.status]), [
+      ['failure-not-persisted', 'save-failed'],
+      ['agent-start-not-persisted', 'save-failed'],
+    ]);
+    const state = readState(statePath);
+    assert.equal(state.orbit.fingerprints.length, 0);
+    assert.equal(state.agents.length, 0);
+  });
+});
+
+test('fingerprint and agent-events: a lock that cannot be taken is lock-failed', () => {
+  inProcessRun(({ dataDir, runId, statePath }) => {
+    holdLockWithFakeClock(runId);
+    recordFailureFingerprint(runId, 'Bash', 'eslint found 3 problems in src/a.js');
+    recordAgentEvent(runId, 'SubagentStop', { agent_type: 'krylo:builder' });
+    mock.restoreAll();
+    assert.ok(fs.existsSync(runLockPath(runId)), 'the other holder\'s lock file must be left alone');
+
+    const recorded = events(dataDir, runId);
+    assert.deepEqual(recorded.map((e) => [e.event, e.status]), [
+      ['failure-not-persisted', 'lock-failed'],
+      ['agent-stop-not-persisted', 'lock-failed'],
+    ]);
+    assert.equal(readState(statePath).orbit.fingerprints.length, 0);
+  });
+});
+
+test('fingerprint and agent-events: a reload that fails for a reason other than a read error is reload-failed', () => {
+  inProcessRun(({ dataDir, runId, statePath }) => {
+    // Bytes that can be read but are not JSON: loadState() reports
+    // 'corrupted' (and preserves a copy), not 'unreadable'.
+    fs.writeFileSync(statePath, '{not json', 'utf8');
+    recordFailureFingerprint(runId, 'Bash', 'eslint found 3 problems in src/a.js');
+    recordAgentEvent(runId, 'SubagentStart', { agent_type: 'krylo:builder' });
+
+    assert.deepEqual(events(dataDir, runId).map((e) => [e.event, e.status]), [
+      ['failure-not-persisted', 'reload-failed'],
+      ['agent-start-not-persisted', 'reload-failed'],
+    ]);
+  });
 });

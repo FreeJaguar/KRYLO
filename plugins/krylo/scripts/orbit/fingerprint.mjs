@@ -87,8 +87,10 @@ export function recordFailureFingerprint(runId, toolName, failureText) {
 
   let cycleForEvent = null;
   let notPersisted = null;
+  let lockHeld = false;
   try {
     withFileLock(runLockPath(runId), () => {
+      lockHeld = true;
       const reloaded = loadState(runId);
       if (!reloaded.ok) {
         notPersisted = reloaded.error === 'unreadable' ? 'state-unreadable' : 'reload-failed';
@@ -115,7 +117,9 @@ export function recordFailureFingerprint(runId, toolName, failureText) {
     });
   } catch {
     // Fail open: fingerprinting must never block or crash the tool call.
-    notPersisted = 'lock-failed';
+    // A throw from inside the held lock is the save itself failing (a
+    // rename that outlasted its retry budget, ADR-0045), not the lock.
+    notPersisted = lockHeld ? 'save-failed' : 'lock-failed';
   }
 
   if (cycleForEvent !== null) recordEvent(runId, { event: 'failure', category, hash, cycle: cycleForEvent });
