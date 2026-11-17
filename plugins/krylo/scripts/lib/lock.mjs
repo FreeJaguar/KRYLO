@@ -20,15 +20,15 @@ import path from 'node:path';
 // Why 8000ms. Upper bound: the tightest lock users are the 15s PostToolUse,
 // PostToolUseFailure, and SubagentStart/SubagentStop hooks
 // (posttool-telemetry, fingerprint, agent-events). Their worst case is Node
-// startup (measured on Windows: median 143ms, max 431ms with a full npm test
-// alongside), their lock-free run lookup (up to ~500ms of blocked reads),
-// this wait, and their own hold of up to ~1.5s (ADR-0045): about 10.5s. A
-// hook that waits the full budget still finishes its hold with over 4s to
+// startup and run lookup (measured on Windows under the heaviest stress
+// load: p99 834ms, max 1029ms), blocked reads in that lookup (up to ~500ms
+// more), this wait, and their own hold of up to ~1.5s (ADR-0045): about 11s.
+// A hook that waits the full budget still finishes its hold with about 4s to
 // spare, so it is not killed while holding the lock (which would orphan it,
 // see below). Lower bound: the slowest lock acquisition measured under the
-// heaviest load was 2.4s (ADR-0045), and an earlier budget of 200 x 10ms
+// heaviest load was 3.25s of 14,400 (ADR-0046), and an earlier budget of 200 x 10ms
 // (nominally 2s, more on Windows) failed on a shared Windows CI runner with
-// 12 processes racing for one run's lock. 8000ms is over 3x the slowest
+// 12 processes racing for one run's lock. 8000ms is about 2.5x the slowest
 // measured wait. This shortens the effective wait on Windows (~10.8s -> 8s)
 // and lengthens it on POSIX (~6s -> 8s). The question gate (30s) and the
 // Stop gates (60s) have more room; the risk gate takes no lock.

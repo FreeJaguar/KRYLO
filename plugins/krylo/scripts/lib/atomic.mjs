@@ -37,7 +37,7 @@ const TRANSIENT_FS_CODES = new Set(['EPERM', 'EBUSY']);
 // only from update-state.mjs and the 60s Stop gates. lock.mjs's wait is
 // bounded by an 8000ms wall-clock deadline (ADR-0046), so a 15s
 // PostToolUse/SubagentStart hook's worst case (startup, lock-free lookup,
-// lock wait, hold) is roughly 10.5s.
+// lock wait, hold) is roughly 11s.
 //
 // On POSIX, rename(2) replaces an open target, so this retry is normally
 // never exercised there; an EPERM/EBUSY that does occur there (a permission

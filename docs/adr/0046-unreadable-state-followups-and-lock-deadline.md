@@ -16,10 +16,17 @@ Accepted
 
 All on the development machine (Windows 11, Node 24.17.0).
 
-- **Hook startup.** A `posttool-telemetry.mjs` process with no active run (Node startup, imports, and the run lookup) took 63ms at the median and 74ms at most, over 30 runs on an idle machine. With a full `npm test` running alongside, it took 143ms at the median, 245ms at p90, and 431ms at most, over 60 runs.
+- **Hook startup.** A `posttool-telemetry.mjs` process with no active run (Node startup, imports, and the run lookup) took 63ms at the median and 74ms at most, over 30 runs on an idle machine. With a full `npm test` running alongside, it took 143ms at the median, 245ms at p90, and 431ms at most, over 60 runs. Under the heaviest load used here (the stress harness below plus a looping `npm test`), it took 237ms at the median, 834ms at p99, and 1029ms at most, over 300 runs. Each run is timed by its own `spawnSync`, so this includes process creation and exit.
 - **Lock give-up, before.** `lock.mjs` from `main` (859552a), with the lock file held by a file that never goes away: 9538ms and 9543ms. The independent review for ADR-0045 measured 10.7-10.8s.
 - **Lock give-up, after.** The same harness with this change: 8000ms, 8005ms, and 8001ms.
-- **Lock waits under load (from ADR-0045).** The slowest lock acquisition measured under the heaviest stress load was 2.4s, and none timed out. An earlier budget of 200 x 10ms (nominally 2s, more on Windows) failed on a shared Windows CI runner with 12 processes racing for one run's lock (comment history in `lock.mjs`).
+- **Lock waits under load.** `tests/stress/state-io-contention.mjs` (40 rounds x 6 parallel runs x 15 concurrent `posttool-telemetry` hooks) was run alongside a looping `npm test`, against scratch copies of `main` and of this change, with `lock.mjs` instrumented (scratch only, never committed) to log every wait. The order was `main`, this change, `main`, this change, 240 runs each:
+
+  | Code | Lock acquisitions | Wait p50 | p99 | p99.9 | Max | Over 4s | Lock timeouts | Lost increments |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | `main` | 7200 | 210ms | 1613ms | 2956ms | 3218ms | 0 | 0 | 0 of 480 runs |
+  | This change | 7200 | 208ms | 1750ms | 2948ms | 3249ms | 0 | 0 | 0 of 480 runs |
+
+  An earlier uninstrumented pair (240 runs each) also lost nothing on either side. The harness also times each hook from its parent process, from 5.8s to 11.3s at most across runs, but those times include stalls of the harness itself (it blocks on synchronous spawns while hooks run), so they are an upper bound that is not attributed and is not compared between the two sides. ADR-0045 measured a slowest acquisition of 2.4s under similar load. An earlier budget of 200 x 10ms (nominally 2s, more on Windows) failed on a shared Windows CI runner with 12 processes racing for one run's lock (comment history in `lock.mjs`).
 
 ### Alternatives considered
 
@@ -28,7 +35,7 @@ All on the development machine (Windows 11, Node 24.17.0).
 - **Telemetry hooks: reuse the positive event names with a failure status.** Existing tests pin that no `failure`, `agent-start`, or `agent-stop` event is recorded for an unpersisted mutation, and any later reader that counts those events would count a mutation that never happened. Rejected in favor of distinct event names.
 - **Telemetry hooks: add the fs error `code` and `transient` to the telemetry whitelist.** Not needed to make the failure visible, and widening the whitelist is a privacy-document change of its own. The `status` value carries the cause instead. Not chosen.
 - **Lock: keep the attempt count and only correct the comment.** It leaves the budget machine-dependent. Rejected, for the same reason ADR-0045 rejected a count for the rename retry.
-- **Lock: 6000ms**, the original nominal intent. It would shorten the Windows wait from about 10.8s to 6s, under 2.5x the slowest measured wait and not far above the budget that failed on CI. Not chosen. **10000ms** or more would keep Windows near today's behavior but leave about 3s of margin to a 15s hook timeout. Not chosen.
+- **Lock: 6000ms**, the original nominal intent. It would keep POSIX unchanged and add about 2s of margin to the hook timeout, but leave under 2x headroom over the slowest measured wait (3.25s) on this machine, with slower shared CI runners already known to need more. Not chosen. **10000ms** or more would keep Windows near today's behavior but leave about 2s of margin to a 15s hook timeout. Not chosen.
 
 ## Decision
 
@@ -36,8 +43,7 @@ All on the development machine (Windows 11, Node 24.17.0).
 2. **The fingerprint and agent-event hooks record a mutation they did not persist.** `recordFailureFingerprint()` records `failure-not-persisted` with the redacted `category` and `hash`. `recordAgentEvent()` records `agent-start-not-persisted` or `agent-stop-not-persisted` with the `agentType`. The `status` field names the cause:
    - `state-unreadable`: the reload returned `unreadable`, or the save was refused with `state-unreadable`.
    - `reload-failed`: any other reload failure.
-   - `save-failed`: any other save refusal.
-   - `save-failed`: also a throw from inside the held lock, such as a rename that outlasted its retry budget (ADR-0045).
+   - `save-failed`: any other save refusal, or a throw from inside the held lock, such as a rename that outlasted its retry budget (ADR-0045).
    - `lock-failed`: the lock could not be taken.
 
    Both hooks stay fail-open: exit 0, no output, never a decision. No positive event (`failure`, `agent-start`, `agent-stop`) is recorded for an unpersisted mutation, as before. A SubagentStop that reads the state and finds no running agent mutates nothing and records nothing. One that cannot read the state records `agent-stop-not-persisted`, because it cannot tell. All fields used are already in the telemetry whitelist (`docs/22-privacy-and-telemetry.md`).
@@ -46,13 +52,13 @@ All on the development machine (Windows 11, Node 24.17.0).
 The 8000ms budget comes from both ends:
 
 - **Upper bound.** The worst case for a 15s hook (`PostToolUse`, `PostToolUseFailure`, `SubagentStart`/`SubagentStop`) is the sum of:
-  - Node startup, under 0.5s at the measured maximum under load.
-  - The lock-free run lookup, up to about 0.5s of blocked reads (ADR-0045).
+  - Node startup and the normal run lookup, about 1s at the measured maximum under the heaviest load.
+  - Blocked reads in the lock-free run lookup, up to about 0.5s more (ADR-0045).
   - The full 8s lock wait.
   - The hook's own hold, up to about 1.5s (ADR-0045).
 
-  That comes to about 10.5s, leaving over 4s to the timeout. That margin matters most for the hold: a hook killed while holding the lock orphans it.
-- **Lower bound.** 8000ms is over 3x the slowest measured lock wait (2.4s), and it is well above the old budget that failed on a shared CI runner.
+  That comes to about 11s, leaving about 4s to the timeout. That margin matters most for the hold: a hook killed while holding the lock orphans it.
+- **Lower bound.** 8000ms is about 2.5x the slowest of 14,400 measured lock waits (3.25s), and well above the old budget that failed on a shared CI runner. That budget, nominally 2s and about 3.2s on Windows by the measured give-up ratio, sat right at the measured tail.
 
 The effective wait moves from about 10.8s (9.5s on this machine) to 8s on Windows, and from about 6s to 8s on POSIX.
 
@@ -60,10 +66,10 @@ The effective wait moves from about 10.8s (9.5s on this machine) to 8s on Window
 
 - **The question gate no longer burns a human-reviewed grant on a read failure.** The fail-open outcome is consistent with the rest of the gate: an indeterminate run at resolution already allowed silently (ADR-0045), and a lock failure already allowed. The cost: a question asked while the state cannot be read is effectively free, because the available grant is not consumed and the routine-question policy is not applied. The question gate is not a security boundary, and asking a human is always safe. A failed reload of a `corrupted` state is included, and is labelled `allowed-state-unreadable` like the others. Such a run resolves as no run on the next hook anyway (ADR-0045).
 - **Lost fingerprints and agent records are now diagnosable.** Each one leaves a local telemetry line with its cause. Recording a fingerprint that was not persisted also means a repeated failure is not counted toward `requiredStrategyChange`, the Orbit stagnation signal. That was already true before this change; it is now visible.
-- **Hook timing.** The worst case for the tightest lock users drops from about 13s (ADR-0045) to about 10.5s on Windows. On POSIX it rises from about 8.5s to about 10.5s, still under the 15s timeout. The question gate (30s) and the Stop gates (60s) have more room. The risk gate and Codex `SessionEnd` take no lock.
+- **Hook timing.** The worst case for the tightest lock users drops from about 13s (ADR-0045) to about 11s on Windows. On POSIX it rises from about 9s to about 11s, still under the 15s timeout. The question gate (30s) and the Stop gates (60s) have more room. The risk gate and Codex `SessionEnd` take no lock.
 - **Convoy under a persistent holder (ADR-0045).** When every mutator holds the lock for its full 1.5s budget and fails, about five such holders now exhaust a waiter's budget, against about seven before. Waiters give up after 8s instead of about 10.8s. The data outcome is unchanged: those mutations fail either way.
 - **Orphaned lock (pre-existing, unchanged).** An orphaned lock still makes every later mutator for that run wait the full budget and fail, now for 8s on every platform.
-- **Fewer lock waits succeed on a slow Windows machine.** A wait that would have succeeded between 8s and about 10.8s now times out. No measured wait came near 8s. The telemetry hooks record the outcome (`counter-not-persisted`, `*-not-persisted` with `lock-failed`), and the question gate allows.
+- **Fewer lock waits succeed on a slow Windows machine.** A wait that would have succeeded between 8s and about 10.8s now times out. The slowest of 14,400 measured waits under the heaviest load was 3.25s, and none exceeded 4s. The telemetry hooks record the outcome (`counter-not-persisted`, `*-not-persisted` with `lock-failed`), and the question gate allows.
 - **Security.** No gate becomes more permissive in a way that affects tool execution. The question gate allows a question it would have denied for a non-policy reason; that decision is about asking a human, never about running a tool. The telemetry events carry only whitelisted scalar fields: a redacted 16-hex hash, a fixed category, an agent type, and a fixed status string. No raw error text, path, or fs error code is recorded.
 - **Residual.**
   - Only the question gate's `state-unreadable` save refusal fails open. `backup-failed` and `invalid` still deny with the grant hint (open question, below).
