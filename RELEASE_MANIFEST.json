@@ -136,8 +136,8 @@
     },
     {
       "path": "CHANGELOG.md",
-      "bytes": 60383,
-      "sha256": "e4140f2b19dd393e408635df8cac5a2120ccd7deacb6cfaf52c44427386f7b34"
+      "bytes": 60538,
+      "sha256": "2ee110a5d4e282589c0ec223c71fd239ffde796bc7c9d5595882d68db0fd4328"
     },
     {
       "path": "CLAUDE.md",
@@ -396,8 +396,8 @@
     },
     {
       "path": "docs/02-runtime-state-machine.md",
-      "bytes": 8793,
-      "sha256": "b58fb545b2dc9dde7043007df468ef4ebe786424ec4f7f0ff08bf190defcfd65"
+      "bytes": 8862,
+      "sha256": "da7f8cc39dbee5c9746ae68395fdc50781e42715a5a509610cd06ac87ba5a2cb"
     },
     {
       "path": "docs/03-orbit-loop.md",
@@ -746,8 +746,8 @@
     },
     {
       "path": "docs/adr/0046-unreadable-state-followups-and-lock-deadline.md",
-      "bytes": 15987,
-      "sha256": "7eaf0ba1e52a5ba0fc9ffe96f974dd85dc4fa73ec75f9487edae2cb67724077e"
+      "bytes": 16656,
+      "sha256": "b9404baff63bf35703667488815b28a1e1297ce4205613a46f96762e910b5d40"
     },
     {
       "path": "docs/adr/README.md",
@@ -1466,8 +1466,8 @@
     },
     {
       "path": "plugins/krylo/scripts/security/question-gate.mjs",
-      "bytes": 5832,
-      "sha256": "e76e3fa2e0e76fdbcbb0a223202f8fc230b9facd001c247ecbcb0514aa72bfd3"
+      "bytes": 6516,
+      "sha256": "8938bc62987f3c705bb139cd6c290fb65935be6a0cde3ec4d90cee2ae758b6a2"
     },
     {
       "path": "plugins/krylo/scripts/security/redact.mjs",
@@ -1606,8 +1606,8 @@
     },
     {
       "path": "plugins/krylo/tests/fixtures/state-io/fail-state-rereads.mjs",
-      "bytes": 1788,
-      "sha256": "1908e78168a3dc7ff5e22cf4e19bc93c8edcebaa2077adbf26c30743f35eeb9a"
+      "bytes": 2671,
+      "sha256": "1b019485cdbbc13762779abda71540dfb15637566013d2251257b0600e8f1446"
     },
     {
       "path": "plugins/krylo/tests/governance/agents.test.mjs",
@@ -1711,8 +1711,8 @@
     },
     {
       "path": "plugins/krylo/tests/hooks/question-gate-unreadable-state.test.mjs",
-      "bytes": 6362,
-      "sha256": "3d8b86cfae64b27cc45e5f08e2882b4d41c501d38530a6b249711ec12fc6e953"
+      "bytes": 8083,
+      "sha256": "8ec0fab8c2690ec3cbdcd2f5aa9429dca086189defcff62ef81f4cb5d711f48a"
     },
     {
       "path": "plugins/krylo/tests/hooks/question-gate.test.mjs",
