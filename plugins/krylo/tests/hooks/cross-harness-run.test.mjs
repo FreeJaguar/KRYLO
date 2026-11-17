@@ -6,12 +6,19 @@ import os from 'node:os';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
+import { fakeCliWithoutPathLookup } from './helpers.mjs';
+import { platformSpawnTargetDetailed } from '../../scripts/lib/spawn-platform.mjs';
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SCRIPTS_ROOT = path.resolve(__dirname, '..', '..', 'scripts');
 const CLI = path.join(SCRIPTS_ROOT, 'runtime', 'cross-harness-run.mjs');
 const INIT_RUN = path.join(SCRIPTS_ROOT, 'runtime', 'init-run.mjs');
 const FIXTURES = path.resolve(__dirname, '..', 'fixtures', 'cross-harness');
-const FAKE_WORKER = os.platform() === 'win32' ? path.join(FIXTURES, 'fake-worker.cmd') : path.join(FIXTURES, 'fake-worker.sh');
+// Not the committed fake-worker.cmd directly: its bare `"node"` costs a
+// `where node` subprocess with a 4s budget, which a contended Windows runner
+// can exceed, failing the capability probe as WORKER_UNAVAILABLE in tests
+// that are not about PATH lookup at all. See fakeCliWithoutPathLookup().
+const FAKE_WORKER = fakeCliWithoutPathLookup(FIXTURES, 'fake-worker');
 
 function mkTempDataDir() {
   return fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-ch-'));
@@ -72,6 +79,25 @@ function runCli(dataDir, args, envExtra = {}) {
 function readState(dataDir, runId) {
   return JSON.parse(fs.readFileSync(path.join(dataDir, 'runs', runId, 'state.json'), 'utf8'));
 }
+
+// Regression (CI, windows-latest): the valid-result test below failed
+// intermittently with WORKER_UNAVAILABLE after ~4.9s. The committed fixture
+// shim names a bare `node`, and resolving it spawned `where node` under a 4s
+// budget that a contended runner exceeded. The fake worker these tests use
+// must resolve with no PATH lookup at all, so even a 1ms lookup budget, which
+// no subprocess can meet, cannot make it unavailable.
+test('cross-harness-run fixture: the fake worker resolves without any PATH lookup, so runner load cannot make it unavailable', { skip: os.platform() !== 'win32' }, () => {
+  const resolved = platformSpawnTargetDetailed(FAKE_WORKER, ['--version'], { timeoutMs: 1 });
+  assert.equal(resolved.failure, null, JSON.stringify(resolved));
+  assert.equal(resolved.target.command.toLowerCase(), process.execPath.toLowerCase());
+  assert.equal(resolved.target.args[0], path.join(FIXTURES, 'fake-worker.mjs'));
+
+  // The same 1ms budget DOES abandon the committed shim's bare-`node`
+  // lookup, which proves the assertion above is not vacuous.
+  const committed = platformSpawnTargetDetailed(path.join(FIXTURES, 'fake-worker.cmd'), ['--version'], { timeoutMs: 1 });
+  assert.equal(committed.target, null);
+  assert.equal(committed.failure, 'lookup-timeout');
+});
 
 // A. explicit invocation, valid worker output
 test('cross-harness-run: a valid worker result is returned, ok:true, and recorded as evidence on the run', () => {

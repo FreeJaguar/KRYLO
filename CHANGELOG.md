@@ -6,6 +6,9 @@ The project follows Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+- **Intermittent Windows CI failures in the Cross-Harness and Codex launcher tests (test-only).** The committed Windows fixture shims (`fake-worker.cmd`, `fake-codex-cli.cmd`) name a bare `node`, so resolving them spawns `where node` under `spawn-platform.mjs`'s 4s lookup budget. On a busy runner that lookup can run past 4s. It is then reported as `lookup-timeout`, and the test fails with `WORKER_UNAVAILABLE` or `probe-timeout` even though it is about something else. This was seen on `windows-latest` (Node 22) at about 4.9s, and reproduced locally under CPU load. `cross-harness-run`, `cross-harness-process`, the project hook launcher, `user-prompt-submit-codex` and `unreadable-run-state` tests now use a generated shim that calls `node` by absolute path, so their resolution spawns nothing. Everything after resolution is unchanged. Product code is unchanged. The lookup itself, its budget, and its fail-closed result are as before, and the tests that exercise the bare-`node` lookup still use the committed fixtures.
+
 ## [0.3.1] - 2026-11-16
 
 0.3.1 is a reliability and governance fix for 0.3.0. Upgrade is recommended for every 0.3.0 user, and for Windows users in particular.

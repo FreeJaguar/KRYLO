@@ -261,3 +261,43 @@ export function persistedBytes(dataDir) {
 export function cleanup(dataDir) {
   fs.rmSync(dataDir, { recursive: true, force: true });
 }
+
+/**
+ * Path to a fake-CLI fixture that a test can hand to KRYLO as a worker or
+ * Codex CLI, without making the test depend on a Windows PATH lookup.
+ *
+ * The committed Windows fixtures (`fake-worker.cmd`, `fake-codex-cli.cmd`)
+ * copy npm cmd-shim's real shape, including its bare `"node"` invocation.
+ * scripts/lib/spawn-platform.mjs resolves that bare name by spawning
+ * `where node` under a 4s anti-hang budget (PATH_LOOKUP_TIMEOUT_MS), and on a
+ * contended runner that subprocess alone can exceed the budget. The lookup
+ * is then reported as 'lookup-timeout', the CLI as unavailable, and a test
+ * whose subject is something else entirely fails. Observed on
+ * windows-latest CI: `WORKER_UNAVAILABLE` after ~4.9s in cross-harness-run,
+ * and `probe-timeout` in the project hook launcher, in the same run.
+ * Reproduced locally: `where node` exceeded 4s under CPU load, and
+ * resolving the committed `fake-worker.cmd` returned 'lookup-timeout'.
+ *
+ * On Windows this writes an equivalent shim whose invocation line names
+ * node by its absolute path (process.execPath), so resolution takes the
+ * absolute-path branch and spawns nothing. Everything after resolution is
+ * unchanged: the same shim parser, the same shell:false spawn of node.exe
+ * with the fixture script, the same argv and stdin. Tests whose SUBJECT is
+ * the bare-`node` PATH lookup (tests/unit/spawn-platform.test.mjs,
+ * tests/unit/runtime-compat.test.mjs) must keep using the committed
+ * fixtures directly. On POSIX there is no shim layer, so the committed
+ * `.sh` fixture is returned unchanged.
+ *
+ * `fixtureDir` holds `<stem>.mjs` and `<stem>.sh`. The generated shim lives
+ * in a per-process temp directory removed on exit.
+ */
+export function fakeCliWithoutPathLookup(fixtureDir, stem) {
+  if (os.platform() !== 'win32') return path.join(fixtureDir, `${stem}.sh`);
+  const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'krylo-fake-cli-'));
+  process.on('exit', () => {
+    try { fs.rmSync(shimDir, { recursive: true, force: true }); } catch { /* best-effort temp cleanup */ }
+  });
+  const shimPath = path.join(shimDir, `${stem}.cmd`);
+  fs.writeFileSync(shimPath, `@ECHO off\r\n"${process.execPath}" "${path.join(fixtureDir, `${stem}.mjs`)}" %*\r\n`);
+  return shimPath;
+}
