@@ -110,6 +110,34 @@ test('question-gate: a saveState() refusal with state-unreadable fails open and 
   }
 });
 
+// A save that THROWS inside the held lock (here a non-transient rename
+// failure; in practice a rename that outlasted its ADR-0045 retry budget) is
+// not lock contention. The gate still fails open, as it must, but it labels
+// the outcome as a failed save, the way the telemetry hooks record
+// save-failed, rather than reporting "transient contention".
+test('question-gate: a save that throws inside the held lock fails open as allowed-save-failed, not lock contention', () => {
+  const dataDir = mkTempDataDir('krylo-qgate-save-throw-');
+  try {
+    const { runId, statePath } = createActiveRun(dataDir);
+    assert.equal(runCli('runtime/update-state.mjs', ['--grant-question', 'missing-credential'], dataDir).status, 0);
+    const { log, env } = faultEnv(dataDir, 1000);
+    env.KRYLO_TEST_FAIL_STATE_RENAME = '1';
+    const res = runHook(GATE, askPayload(dataDir), dataDir, { env });
+    assert.match(fs.readFileSync(log, 'utf8'), /EACCES rename/, 'the injected rename fault must have fired');
+    assert.equal(res.status, 0);
+    assert.equal(res.json?.hookSpecificOutput?.permissionDecision, 'allow', `expected the fail-open allow, got: ${res.stdout}`);
+    const reason = res.json.hookSpecificOutput.permissionDecisionReason;
+    assert.match(reason, /could not save/i);
+    assert.doesNotMatch(reason, /contention/i);
+    assert.match(reason, /do not grant a new token/i);
+    assert.doesNotMatch(reason, /--grant-question/);
+    assert.deepEqual(questionGateEvents(dataDir, runId).map((e) => e.status), ['allowed-save-failed']);
+    assert.equal(readState(statePath).questionGate.grants[0].status, 'available', 'the failed save must not have consumed the grant');
+  } finally {
+    cleanup(dataDir);
+  }
+});
+
 test('control: with the preload loaded but no fault reached, the gate still consumes a grant and then denies', () => {
   const dataDir = mkTempDataDir('krylo-qgate-control-');
   try {
