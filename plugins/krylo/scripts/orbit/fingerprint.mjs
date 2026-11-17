@@ -72,6 +72,13 @@ function categorize(toolName, text) {
  * recorded (a "failure" telemetry event, cycle number and all) for a
  * mutation that a lock timeout, a failed reload, or (security-hardening
  * checkpoint) a failed pre-migration backup write actually discarded.
+ *
+ * A mutation that was not persisted is not dropped silently either: it is
+ * recorded as a distinct 'failure-not-persisted' event whose status names the
+ * cause (state-unreadable, reload-failed, save-failed, lock-failed), the way
+ * posttool-telemetry records counter-not-persisted
+ * (docs/adr/0046-unreadable-state-followups-and-lock-deadline.md). The hook
+ * stays fail-open either way.
  */
 export function recordFailureFingerprint(runId, toolName, failureText) {
   const signature = normalizeSignature(toolName, failureText);
@@ -79,10 +86,16 @@ export function recordFailureFingerprint(runId, toolName, failureText) {
   const category = categorize(toolName, failureText);
 
   let cycleForEvent = null;
+  let notPersisted = null;
+  let lockHeld = false;
   try {
     withFileLock(runLockPath(runId), () => {
+      lockHeld = true;
       const reloaded = loadState(runId);
-      if (!reloaded.ok) return;
+      if (!reloaded.ok) {
+        notPersisted = reloaded.error === 'unreadable' ? 'state-unreadable' : 'reload-failed';
+        return;
+      }
       const state = reloaded.value;
       const existing = state.orbit.fingerprints.find((f) => f.hash === hash);
       if (existing) {
@@ -100,12 +113,17 @@ export function recordFailureFingerprint(runId, toolName, failureText) {
       }
       const saved = saveState(state);
       if (saved.ok) cycleForEvent = state.orbit.cycle;
+      else notPersisted = saved.error === 'state-unreadable' ? 'state-unreadable' : 'save-failed';
     });
   } catch {
     // Fail open: fingerprinting must never block or crash the tool call.
+    // A throw from inside the held lock is the save itself failing (a
+    // rename that outlasted its retry budget, ADR-0045), not the lock.
+    notPersisted = lockHeld ? 'save-failed' : 'lock-failed';
   }
 
   if (cycleForEvent !== null) recordEvent(runId, { event: 'failure', category, hash, cycle: cycleForEvent });
+  else if (notPersisted) recordEvent(runId, { event: 'failure-not-persisted', category, hash, status: notPersisted });
 }
 
 async function main() {

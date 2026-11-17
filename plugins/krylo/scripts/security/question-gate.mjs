@@ -47,10 +47,26 @@ async function main() {
   // mutation and silently lose it.
   let consumedCategory = null;
   let lockFailed = false;
+  // The run resolved a moment ago, but its state could not be read under
+  // the lock -- either the reload failed or saveState() refused because the
+  // file on disk could not be read (ADR-0045). The policy was then never
+  // evaluated, so this is not a denial: it takes the same fail-open path as
+  // a lock failure below (docs/adr/0046-unreadable-state-followups-and-lock-deadline.md).
+  let stateUnreadable = false;
+  // A throw from inside the held lock is the save itself failing (a rename
+  // that outlasted its ADR-0045 retry budget), not lock contention. It takes
+  // the same fail-open path, labelled as what it is, the way the telemetry
+  // hooks record save-failed (ADR-0046).
+  let lockHeld = false;
+  let saveThrew = false;
   try {
     withFileLock(runLockPath(runId), () => {
+      lockHeld = true;
       const reloaded = loadState(runId);
-      if (!reloaded.ok) return;
+      if (!reloaded.ok) {
+        stateUnreadable = true;
+        return;
+      }
       const state = reloaded.value;
       const grants = Array.isArray(state.questionGate.grants) ? state.questionGate.grants : [];
       const available = grants.find((g) => g.status === 'available');
@@ -63,6 +79,7 @@ async function main() {
       // otherwise the token remains available on disk and must not be
       // treated (or logged) as spent.
       if (saved.ok) consumedCategory = available.category;
+      else if (saved.error === 'state-unreadable') stateUnreadable = true;
     });
   } catch {
     // Lock contention: this hook's own documented fail mode is "fail OPEN
@@ -72,7 +89,8 @@ async function main() {
     // contention, silently exhausting a scarce, human-reviewed budget for a
     // reason that has nothing to do with policy. Fail open explicitly here
     // instead, with its own distinct reason.
-    lockFailed = true;
+    if (lockHeld) saveThrew = true;
+    else lockFailed = true;
   }
 
   if (consumedCategory) {
@@ -83,6 +101,19 @@ async function main() {
   if (lockFailed) {
     recordEvent(runId, { event: 'question-gate', status: 'allowed-lock-contention' });
     emitClaudePreToolDecision('allow', 'KRYLO question gate could not evaluate this request due to transient contention; allowed per its fail-open policy. Do not grant a new token for this.');
+  }
+
+  if (stateUnreadable) {
+    // Same reasoning as the lock-failure case: denying here would tell the
+    // model to spend a new human-reviewed grant for a reason that has
+    // nothing to do with policy. Any available grant stays unspent on disk.
+    recordEvent(runId, { event: 'question-gate', status: 'allowed-state-unreadable' });
+    emitClaudePreToolDecision('allow', 'KRYLO question gate could not read the run state to evaluate this request; allowed per its fail-open policy. Do not grant a new token for this.');
+  }
+
+  if (saveThrew) {
+    recordEvent(runId, { event: 'question-gate', status: 'allowed-save-failed' });
+    emitClaudePreToolDecision('allow', 'KRYLO question gate could not save the run state while evaluating this request; allowed per its fail-open policy. Do not grant a new token for this.');
   }
 
   recordEvent(runId, { event: 'question-gate', status: 'denied' });

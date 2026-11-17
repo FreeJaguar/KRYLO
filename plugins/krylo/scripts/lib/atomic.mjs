@@ -34,9 +34,10 @@ const TRANSIENT_FS_CODES = new Set(['EPERM', 'EBUSY']);
 // A state mutation holds the lock for up to three bounded operations
 // (loadState's read, saveState's pre-read, this rename: ~1.5s); a terminal
 // transition adds clearActiveRunPointer()'s pointer read (~1.75s), but runs
-// only from update-state.mjs and the 60s Stop gates. lock.mjs's budget is
-// ~10.8s of wall clock on Windows, so a 15s PostToolUse/SubagentStart hook's
-// worst case (startup, lock-free lookup, lock wait, hold) is roughly 13s.
+// only from update-state.mjs and the 60s Stop gates. lock.mjs's wait is
+// bounded by an 8000ms wall-clock deadline (ADR-0046), so a 15s
+// PostToolUse/SubagentStart hook's worst case (startup, lock-free lookup,
+// lock wait, hold) is roughly 11s.
 //
 // On POSIX, rename(2) replaces an open target, so this retry is normally
 // never exercised there; an EPERM/EBUSY that does occur there (a permission

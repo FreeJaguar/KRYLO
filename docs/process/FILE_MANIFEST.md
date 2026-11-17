@@ -101,6 +101,7 @@ docs/adr/0039-monthly-ecosystem-radar.md              # accepted: read-only mont
                                                        # (design Section 16 / Phase 7)
 docs/adr/0045-transient-state-io-retry.md             # accepted: deadline-based EPERM/EBUSY retry on state I/O; unreadable is never corrupt or "no run" (risk gates deny)
                                                        # rename/read; corruption only for bytes actually read
+docs/adr/0046-unreadable-state-followups-and-lock-deadline.md   # accepted: question gate fails open on unreadable state; telemetry hooks record unpersisted mutations; 8000ms wall-clock lock deadline
 ```
 
 ## Plugin root
@@ -260,7 +261,9 @@ plugins/krylo/tests/unit/state-io-transient.test.mjs   # + transient EPERM/EBUSY
 plugins/krylo/tests/stress/state-io-contention.mjs     # + opt-in concurrent-hook stress reproduction, not in npm test (docs/adr/0045)
 plugins/krylo/tests/hooks/posttool-reload-failure.test.mjs   # + reload failure under the lock reports counter-not-persisted, both hosts (docs/adr/0045)
 plugins/krylo/tests/hooks/unreadable-run-state.test.mjs   # + unreadable pointer/state: risk gates deny, Codex re-invocation keeps the live run, both hosts (docs/adr/0045)
-plugins/krylo/tests/fixtures/state-io/                 # + test-only --import fault preloads: state.json re-reads, and every read of one exact path (docs/adr/0045)
+plugins/krylo/tests/hooks/question-gate-unreadable-state.test.mjs   # + failed reload or state-unreadable save: question gate fails open, grant unspent (docs/adr/0046)
+plugins/krylo/tests/hooks/telemetry-mutation-not-persisted.test.mjs   # + fingerprint and agent-event hooks record *-not-persisted instead of dropping (docs/adr/0046)
+plugins/krylo/tests/fixtures/state-io/                 # + test-only --import fault preloads: state.json reads after the first N, and every read of one exact path (docs/adr/0045, docs/adr/0046)
 plugins/krylo/tests/platform/paths.test.mjs
 plugins/krylo/tests/hooks/*.test.mjs         # question-gate, risk-gate, stop-gate, fingerprint, posttool (+helpers.mjs)
 plugins/krylo/tests/security/injection.test.mjs
